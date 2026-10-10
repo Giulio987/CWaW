@@ -174,8 +174,10 @@ class GlbWriter:
 def place_entities(w, gdir):
     """Move prop models under 'ent_<name>' nodes using the level's entities.json (see entities.py)."""
     parts = gdir.split("/")
-    path = os.path.join(ROOT, "game", "assets", "levels", parts[1], "entities.json") if len(parts) == 3 else ""
-    if parts[0] != "levels" or parts[2] != "environment" or not os.path.exists(path):
+    if len(parts) != 3 or parts[0] != "levels" or parts[2] != "environment":
+        return
+    path = os.path.join(ROOT, "game", "assets", "levels", parts[1], "entities.json")
+    if not os.path.exists(path):
         return
     by_name = {n["name"]: i for i, n in enumerate(w.j["nodes"])}
     scene = w.j["scenes"][0]["nodes"]
