@@ -4,7 +4,7 @@
 class_name Zombie
 extends CharacterBody3D
 
-signal killed(zombie: Zombie, headshot: bool)
+signal killed(zombie: Zombie, headshot: bool, knife: bool)
 
 const MODEL := "res://assets/characters/ingame/zombiesmodelsger/fee5ccda.glb"
 const HIDDEN_PARTS := ["headb", "980daf40"]
@@ -173,21 +173,21 @@ func _start_climb() -> void:
 		_play(move_anim))
 
 
-func take_damage(amount: float, headshot: bool, by: Player) -> void:
+func take_damage(amount: float, headshot: bool, by: Player, knife := false) -> void:
 	if state == State.DEAD:
 		return
 	health -= amount
 	by.add_points(10)
 	if health <= 0.0:
-		_die(headshot)
+		_die(headshot, knife)
 
 
-func _die(headshot: bool) -> void:
+func _die(headshot: bool, knife := false) -> void:
 	state = State.DEAD
 	if window.occupied_by == self:
 		window.occupied_by = null
 	collision_layer = 0
 	collision_mask = 1
 	_anim.play(DEATHS.pick_random(), 0.1)
-	killed.emit(self, headshot)
+	killed.emit(self, headshot, knife)
 	get_tree().create_timer(6.0).timeout.connect(queue_free)

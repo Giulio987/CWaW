@@ -97,11 +97,37 @@ func _unhandled_input(event: InputEvent) -> void:
 		switch_weapon()
 	elif event.is_action_pressed("reload"):
 		reload()
+	elif event.is_action_pressed("melee"):
+		melee()
 
 
 func look(delta: Vector2) -> void:
 	rotate_y(-delta.x)
 	_camera.rotation.x = clamp(_camera.rotation.x - delta.y, -1.45, 1.45)
+
+
+const KNIFE_DAMAGE := 150.0
+const KNIFE_RANGE := 1.8
+var _melee_cooldown := 0.0
+
+
+# Knife: short-range hit available with any weapon, as in the original.
+func melee() -> void:
+	if dead or _melee_cooldown > 0.0:
+		return
+	_melee_cooldown = 0.9
+	_viewmodel.melee()
+	var from := _camera.global_position
+	var dir := -_camera.global_basis.z
+	var space := get_world_3d().direct_space_state
+	# a short fan of rays so a near miss still connects
+	for off in [Vector3.ZERO, Vector3(0.25, 0, 0), Vector3(-0.25, 0, 0), Vector3(0, -0.3, 0)]:
+		var q := PhysicsRayQueryParameters3D.create(from, from + (dir + _camera.global_basis * off).normalized() * KNIFE_RANGE)
+		q.exclude = [get_rid()]
+		var hit := space.intersect_ray(q)
+		if not hit.is_empty() and hit["collider"] is Zombie:
+			hit["collider"].take_damage(KNIFE_DAMAGE, false, self, true)
+			return
 
 
 func switch_weapon() -> void:
@@ -125,6 +151,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_cooldown -= delta
 	_repair_cooldown -= delta
+	_melee_cooldown -= delta
 	_since_hit += delta
 	if _since_hit > REGEN_DELAY and health < MAX_HEALTH:
 		health = min(MAX_HEALTH, health + 40.0 * delta)

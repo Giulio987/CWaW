@@ -107,6 +107,9 @@ func _build_touch() -> void:
 	_button("⇄", Vector2(-230, -420), Vector2(90, 90), func(down):
 		if down:
 			game.player.switch_weapon())
+	_button("🔪", Vector2(-340, -420), Vector2(90, 90), func(down):
+		if down:
+			game.player.melee())
 
 
 func _button(text: String, offset: Vector2, size: Vector2, cb: Callable) -> void:

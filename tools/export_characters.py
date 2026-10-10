@@ -2,6 +2,7 @@
 """Export skinned models (every CIwAnimSkin) with their skeleton and all
 animations of that skeleton to game/assets/characters/<group>/<model>.glb."""
 import os
+import struct
 import sys
 
 import numpy as np
@@ -62,6 +63,12 @@ def add_animation(w, name, anim, joints):
         for _, q in keys[1:]:
             qs.append(-q if np.dot(q, qs[-1]) < 0 else q)  # keep shortest path
         channel(node, "rotation", [k[0] for k in keys], qs, "VEC4")
+    for b, node in enumerate(joints):
+        if b == 0:
+            continue
+        keys = [(t, p[b]) for t, p in zip(anim.times, anim.pos) if b in p]
+        if keys:
+            channel(node, "translation", [k[0] for k in keys], [k[1] * SCALE for k in keys], "VEC3")
     channel(joints[0], "translation", anim.times, [p * SCALE for p in anim.root_pos], "VEC3")
     w.j.setdefault("animations", []).append({"name": name, "samplers": samplers, "channels": channels})
 
@@ -74,13 +81,17 @@ def main(out_dir, paths):
         for r in g.resources:
             if r.cls == C["CIwAnimSkel"]:
                 skels[r.name_hash] = Skeleton(r.body)
-            elif r.cls == C["CIwAnim"]:
+    for g in groups:
+        for r in g.resources:
+            if r.cls == C["CIwAnim"]:
                 try:
-                    a = Anim(r.body, C["CIwAnimKeyFrame"])
-                except NotImplementedError:
+                    skel_hash = struct.unpack_from("<I", r.body, 0)[0]
+                    a = Anim(r.body, C["CIwAnimKeyFrame"], skels[skel_hash].scale if skel_hash in skels else 0.25)
+                except (ValueError, AssertionError) as e:
+                    print(f"skip anim {r.name_hash:08x}: {e}")
                     continue
                 anims.setdefault(a.skel, []).append((r.name_hash, a))
-            elif r.cls == C["CIwModel"]:
+            if r.cls == C["CIwModel"]:
                 models[(group_dir(g.path), r.name_hash)] = r.body
     for g in groups:
         gdir = group_dir(g.path)

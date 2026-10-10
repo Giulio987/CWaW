@@ -74,7 +74,8 @@ func _begin() -> void:
 
 func _setup_input() -> void:
 	var keys := {"move_forward": KEY_W, "move_back": KEY_S, "move_left": KEY_A, "move_right": KEY_D,
-		"jump": KEY_SPACE, "sprint": KEY_SHIFT, "interact": KEY_E, "reload": KEY_R, "switch_weapon": KEY_Q}
+		"jump": KEY_SPACE, "sprint": KEY_SHIFT, "interact": KEY_E, "reload": KEY_R, "switch_weapon": KEY_Q,
+		"melee": KEY_V}
 	for a in keys:
 		if not InputMap.has_action(a):
 			InputMap.add_action(a)
@@ -160,9 +161,10 @@ func _spawn_zombie() -> void:
 	_alive += 1
 
 
-func _on_zombie_killed(_z: Zombie, headshot: bool) -> void:
+func _on_zombie_killed(_z: Zombie, headshot: bool, knife: bool) -> void:
 	_alive -= 1
-	player.add_points(100 if headshot else 60)
+	# World at War: 130 knife kill, 100 headshot, 60 other (plus 10 per hit)
+	player.add_points(120 if knife else (90 if headshot else 50))
 
 
 func _on_debris_opened(d: Debris) -> void:

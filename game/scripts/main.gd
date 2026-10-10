@@ -11,6 +11,9 @@ func _ready() -> void:
 	var game := Game.new()
 	add_child(game)
 	game.start(level)
+	var look := args.find("--look")
+	if look >= 0:
+		_look_shots(game, args[look + 1].split(","))
 	var shots := args.find("--shots")
 	if shots >= 0:
 		_weapon_shots(game, args[shots + 1].split(","))
@@ -32,4 +35,26 @@ func _weapon_shots(game: Game, names: PackedStringArray) -> void:
 			await get_tree().process_frame
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/wpn_%s.png" % n))
+	get_tree().quit()
+
+
+# Screenshot entities from 3 m away on the player's side: -- nacht --look startroomZombieWindow1,DoorTrigger
+func _look_shots(game: Game, names: PackedStringArray) -> void:
+	for i in 6:
+		await get_tree().physics_frame
+	for n in names:
+		var target := game.level.entity_transform(n).origin + Vector3.UP * 1.0
+		var from := game.level.player_spawn.origin
+		for w in game.level.windows:
+			if w.name == n:
+				from = w.inside + (w.inside - w.global_position).normalized() * 2.0
+		var dir := (target - from)
+		dir.y = 0
+		from = target - dir.normalized() * 3.0
+		game.player.global_position = Vector3(from.x, target.y - 1.0, from.z)
+		game.player.rotation.y = atan2(-dir.x, -dir.z)
+		for i in 8:
+			await get_tree().process_frame
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/look_%s.png" % n))
 	get_tree().quit()

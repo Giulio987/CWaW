@@ -51,13 +51,15 @@ def transforms(b):
         if i >= 22 and struct.unpack_from("<i", b, i - 5)[0] == ONE:
             pos = struct.unpack_from("<iii", b, i - 17)
             rot = (1.0, 0.0, 0.0, 0.0)
+            flags = b[i - 1]
         elif i >= 28:
             pos = struct.unpack_from("<iii", b, i - 28)
             rot = tuple(v / ONE for v in struct.unpack_from("<iiii", b, i - 16))
+            flags = None
         else:
             pos = None
         if pos is not None and abs(sum(c * c for c in rot) - 1) < 0.01:
-            out.append({"pos": list(pos), "rot_wxyz": [round(c, 6) for c in rot], "offset": i})
+            out.append({"pos": list(pos), "rot_wxyz": [round(c, 6) for c in rot], "offset": i, "flags": flags})
         i = b.find(SCALE1, i + 1)
     return out
 

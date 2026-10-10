@@ -1,45 +1,47 @@
 # A barricaded window zombies tear down and climb through.
-# The wall normal is not stored in the entity, so it is found with ray casts
-# once collision exists (finalize()).
+# Entities carry no rotation for barricades, so the wall direction comes from
+# the level geometry (tools/wall_yaw.py -> "wall_yaw"). Board states are the
+# original one-keyframe barricade animations.
 class_name Barricade
 extends Node3D
 
-const MAX_BOARDS := 6
+const MAX_BOARDS := 5
+# boards left -> pose animation of the barricade rig (5 = all boards up)
+const STATES := ["36f9cc2c", "36f84bfa", "82c86d87", "65105051", "db3afd0f", "025059eb"]
 
 var area := ""             # e.g. "startroom" from "startroomZombieWindow3"
 var boards := MAX_BOARDS
 var inside := Vector3.ZERO  # standing point inside the room
 var outside := Vector3.ZERO # standing point outside
+var normal := Vector3.FORWARD
 var occupied_by: Node = null
-var _skeleton: Skeleton3D
+var _anim: AnimationPlayer
 var _blocker: StaticBody3D
 
 
 func setup(level: Level, entity: String) -> void:
-	var i := entity.find("Zombie")
+	var i := entity.to_lower().find("zombie")
 	area = entity.substr(0, i).to_lower() if i > 0 else ""
-	global_transform = Transform3D(Basis(), level.entity_transform(entity).origin)
+	var e: Dictionary = level.entities[entity]
+	var yaw: float = e.get("wall_yaw", 0.0)
+	var root := level.entity_transform(entity)
+	global_transform = Transform3D(Basis(Vector3.UP, yaw), root.origin)
+	normal = global_basis.z
 	var path := "res://assets/characters/levels/%s/dynamics/fee7f210.glb" % level.level_name
 	if ResourceLoader.exists(path):
 		var model: Node3D = (load(path) as PackedScene).instantiate()
 		add_child(model)
-		model.global_transform = level.entity_transform(entity, true)
-		_skeleton = model.find_children("*", "Skeleton3D")[0] if model.find_children("*", "Skeleton3D").size() > 0 else null
+		if not e["children"].is_empty():
+			var p: Array = e["children"][-1]["pos"]
+			model.position = Vector3(p[0], p[1], p[2]) * Level.UNITS
+		var aps := model.find_children("*", "AnimationPlayer")
+		_anim = aps[0] if aps.size() > 0 else null
 
 
 # Called after level collision exists and before navigation is baked.
-func finalize(space: PhysicsDirectSpaceState3D, room_hint: Vector3) -> void:
-	var c := global_position + Vector3.UP * 1.2
-	var best_dir := Vector3.FORWARD
-	var best_free := -1.0
-	for step in 24:
-		var dir := Vector3.FORWARD.rotated(Vector3.UP, PI * step / 24.0)
-		var free := _free(space, c, dir) + _free(space, c, -dir)
-		if free > best_free:
-			best_free = free
-			best_dir = dir
-	var a := global_position + best_dir * 1.1
-	var b := global_position - best_dir * 1.1
+func finalize(_space: PhysicsDirectSpaceState3D, room_hint: Vector3) -> void:
+	var a := global_position + normal * 1.1
+	var b := global_position - normal * 1.1
 	if a.distance_to(room_hint) < b.distance_to(room_hint):
 		inside = a
 		outside = b
@@ -54,14 +56,8 @@ func finalize(space: PhysicsDirectSpaceState3D, room_hint: Vector3) -> void:
 	shape.shape = box
 	_blocker.add_child(shape)
 	add_child(_blocker)
-	_blocker.global_transform = Transform3D(Basis.looking_at(best_dir), global_position + Vector3.UP * 1.3)
+	_blocker.position = Vector3(0, 1.3, 0)
 	_update_boards()
-
-
-func _free(space: PhysicsDirectSpaceState3D, from: Vector3, dir: Vector3) -> float:
-	var q := PhysicsRayQueryParameters3D.create(from, from + dir * 4.0)
-	var hit := space.intersect_ray(q)
-	return 4.0 if hit.is_empty() else from.distance_to(hit["position"])
 
 
 func tear_board() -> bool:
@@ -81,9 +77,10 @@ func repair_board() -> bool:
 
 
 func _update_boards() -> void:
-	if _skeleton == null:
+	if _anim == null:
 		return
-	# one bone per board (bone 0 is the root)
-	for bi in range(1, _skeleton.get_bone_count()):
-		var visible := bi <= boards
-		_skeleton.set_bone_pose_scale(bi, Vector3.ONE if visible else Vector3.ZERO)
+	var a: String = STATES[clamp(boards, 0, MAX_BOARDS)]
+	if _anim.has_animation(a):
+		_anim.play(a)
+		_anim.seek(0.0, true)
+		_anim.pause()

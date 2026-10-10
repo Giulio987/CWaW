@@ -38,6 +38,8 @@ func _process(delta: float) -> void:
 		var cam: Camera3D = p.get_viewport().get_camera_3d()
 		cam.rotation.x = atan2(to.y, Vector2(to.x, to.z).length())
 		p.fire_held = true
+		if best_d < 1.6:
+			p.melee()
 		if p.weapon()["mag"] == 0 and p.weapon()["reserve"] == 0:
 			p.weapon()["reserve"] = 32
 	_log_t -= delta
@@ -58,3 +60,4 @@ func _process(delta: float) -> void:
 		img.save_png(ProjectSettings.globalize_path("res://../analysis/autotest/t%03d.png" % int(_t)))
 	if _t >= duration:
 		get_tree().quit()
+

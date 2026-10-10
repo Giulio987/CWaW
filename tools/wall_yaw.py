@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Add "wall_yaw" (radians, direction of the wall normal) to barricade and debris
+entities in entities.json. The original entities carry no rotation for these, so
+the wall is measured from the level geometry: vertical triangles near the entity
+whose plane passes close to it vote (area-weighted) for a normal direction."""
+import json
+import math
+import os
+import sys
+
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from group import Group
+from iwhash import iw_hash
+from model import Model
+
+
+def main(entities_path, group_path):
+    ents = json.load(open(entities_path))
+    g = Group(group_path)
+    offset = {}
+    for e in ents:
+        for h in [e["hash"]] + e["models"]:
+            offset.setdefault(h, np.array(e["transform"]["pos"], float))
+    tris = []
+    for r in g.resources:
+        if r.cls != iw_hash("CIwModel"):
+            continue
+        m = Model(r.body)
+        if m.verts is None:
+            continue
+        off = offset.get(f"{r.name_hash:08x}", 0)
+        for _, _, idx in m.trilists:
+            idx = idx[: len(idx) // 3 * 3].reshape(-1, 3)
+            tris.append(m.verts[idx].astype(float) + off)
+    t = np.concatenate(tris)
+    n = np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0])
+    area = np.linalg.norm(n, axis=1)
+    n = n / np.maximum(area, 1e-9)[:, None]
+    c = t.mean(1)
+    vertical = np.abs(n[:, 1]) < 0.2
+    count = 0
+    for e in ents:
+        comps = e["components"]
+        if "CBarricadeSpec" not in comps and "CActionBuySpec" not in comps:
+            continue
+        p = np.array(e["transform"]["pos"], float) + [0, 500, 0]
+        near = vertical & (np.linalg.norm((c - p)[:, [0, 2]], axis=1) < 600) & (np.abs(c[:, 1] - p[1]) < 600)
+        plane = np.abs(((p - t[:, 0]) * n).sum(1)) < 120
+        sel = near & plane
+        if sel.sum() == 0:
+            continue
+        ang = np.arctan2(n[sel, 0], n[sel, 2]) % math.pi
+        hist, edges = np.histogram(ang, bins=72, range=(0, math.pi), weights=area[sel])
+        hist = hist + np.roll(hist, 1) + np.roll(hist, -1)  # smooth, wraps at 180 deg
+        e["wall_yaw"] = float(edges[hist.argmax()] + math.pi / 144)
+        count += 1
+    json.dump(ents, open(entities_path, "w"), indent=1)
+    print(entities_path, count, "wall directions")
+
+
+if __name__ == "__main__" and len(sys.argv) == 3:
+    main(sys.argv[1], sys.argv[2])
+
+
+def uphill(points):
+    """Horizontal direction in which a point cloud rises (least squares plane y = ax + bz + c)."""
+    a = np.c_[points[:, 0], points[:, 2], np.ones(len(points))]
+    (gx, gz, _), *_ = np.linalg.lstsq(a, points[:, 1], rcond=None)
+    v = np.array([gx, gz])
+    return v / (np.linalg.norm(v) + 1e-9), np.linalg.norm([gx, gz])
+
+
+def debris_yaw(entities_path, group_path, dynamics_path):
+    """Yaw for debris lying on stairs: align the closed pose's slope with the stairs' slope."""
+    import struct
+    from anim import Anim, Skeleton, Skin
+    from pair_arms import skinned
+
+    ents = json.load(open(entities_path))
+    dyn = Group(dynamics_path)
+    res = {(r.cls, r.name_hash): r.body for r in dyn.resources}
+    skels = {r.name_hash: Skeleton(r.body) for r in dyn.resources if r.cls == iw_hash("CIwAnimSkel")}
+    g = Group(group_path)
+    floor = []
+    for r in g.resources:
+        if r.cls != iw_hash("CIwModel"):
+            continue
+        m = Model(r.body)
+        if m.verts is None:
+            continue
+        for _, _, idx in m.trilists:
+            t = m.verts[idx[: len(idx) // 3 * 3].reshape(-1, 3)].astype(float)
+            n = np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0])
+            up = np.abs(n[:, 1]) / (np.linalg.norm(n, axis=1) + 1e-9) > 0.9
+            floor.append(t[up].mean(1))
+    floor = np.concatenate(floor)
+    for e in ents:
+        if "CActionBuySpec" not in e["components"] or not e["models"]:
+            continue
+        h = int(e["models"][0], 16)
+        skin_body = res.get((iw_hash("CIwAnimSkin"), h))
+        if skin_body is None:
+            continue
+        skel = skels[Skin(skin_body).skel]
+        closed = [Anim(b, iw_hash("CIwAnimKeyFrame"), skel.scale) for (c, n), b in res.items()
+                  if c == iw_hash("CIwAnim") and struct.unpack_from("<I", b, 0)[0] == Skin(skin_body).skel]
+        closed = [a for a in closed if len(a.times) == 1]
+        if not closed:
+            continue
+        verts = skinned(skin_body, skel, closed[0], 0)
+        span = verts.max(0) - verts.min(0)
+        if span[1] > 0.6 * max(span[0], span[2]):
+            continue  # upright (a door): the wall direction is enough
+        model_up, model_slope = uphill(verts)
+        p = np.array(e["transform"]["pos"], float)
+        near = floor[np.linalg.norm((floor - p)[:, [0, 2]], axis=1) < 500]
+        if model_slope < 0.15 or len(near) < 6:
+            continue  # not lying on a slope (e.g. a door): keep the wall direction
+        stairs_up, _ = uphill(near)
+        # yaw rotating model_up onto stairs_up (Godot: Basis(UP, yaw) maps +Z towards +X for yaw > 0)
+        est = math.atan2(stairs_up[0], stairs_up[1]) - math.atan2(model_up[0], model_up[1])
+        # the slope estimate is noisy: pick whichever wall-aligned candidate is closest
+        base = e.get("wall_yaw", math.pi / 2) - math.pi / 2
+        diff = lambda a: abs((a - est + math.pi) % (2 * math.pi) - math.pi)
+        e["debris_yaw"] = float(min((base, base + math.pi), key=diff))
+        print(e["name"], "debris_yaw", round(math.degrees(e["debris_yaw"])))
+    json.dump(ents, open(entities_path, "w"), indent=1)
+
+
+if __name__ == "__main__" and len(sys.argv) > 3:
+    debris_yaw(sys.argv[1], sys.argv[2], sys.argv[3])

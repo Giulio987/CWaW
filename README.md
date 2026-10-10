@@ -57,3 +57,6 @@ Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `
 - Risorsa nel gruppo: `u32 size, u32 nameHash, body`. Le classi polimorfiche (es. `CIwSoundData`) hanno invece `u32 subclassHash` al posto del nome, e il nome è il primo u32 del body.
 - Formati dettagliati nei docstring di `tools/model.py`, `tools/anim.py`, `tools/textures.py`, `tools/sounds.py`.
 - Scala: 400 unità = 1 m; UV s16 con 4096 = 1.0; tempi animazione in 1/4096 s; quaternioni "smallest three" 3×10 bit.
+
+
+/Applications/Godot.app/Contents/MacOS/Godot --path ~/Desktop/Giulio/CoDZombiesRemake/game
