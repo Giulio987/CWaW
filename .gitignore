@@ -1,0 +1,11 @@
+.venv/
+extracted/
+original/
+game/.godot/
+game/assets/
+analysis/*.bin
+analysis/preview/
+analysis/godot_import.log
+analysis/characters.log
+__pycache__/
+.DS_Store
