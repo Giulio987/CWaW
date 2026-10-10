@@ -25,6 +25,7 @@ var move_input := Vector2.ZERO   # set by touch controls (mobile)
 var fire_held := false           # set by touch controls (mobile)
 
 var _camera: Camera3D
+var _viewmodel: Viewmodel
 var _cooldown := 0.0
 var _reloading := 0.0
 var _since_hit := 99.0
@@ -48,6 +49,9 @@ func _ready() -> void:
 	_camera.far = 400
 	add_child(_camera)
 	_camera.make_current()
+	_viewmodel = Viewmodel.new()
+	_camera.add_child(_viewmodel)
+	changed.connect(_sync_viewmodel)
 	give_weapon("colt45")
 
 
@@ -72,6 +76,16 @@ func give_weapon(name: String) -> void:
 
 func weapon() -> Dictionary:
 	return weapons[current]
+
+
+var _shown_weapon := ""
+
+
+func _sync_viewmodel() -> void:
+	var n: String = weapon()["name"]
+	if n != _shown_weapon:
+		_shown_weapon = n
+		_viewmodel.set_weapon(n)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -103,6 +117,7 @@ func reload() -> void:
 	if _reloading > 0.0 or w["mag"] >= s["mag"] or w["reserve"] <= 0:
 		return
 	_reloading = s["reload"]
+	_viewmodel.reload(s["reload"])
 
 
 func _physics_process(delta: float) -> void:
@@ -156,6 +171,7 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 		return
 	w["mag"] -= 1
 	_cooldown = s["rate"]
+	_viewmodel.kick()
 	_camera.rotation.x = min(_camera.rotation.x + 0.012, 1.45)
 	var space := get_world_3d().direct_space_state
 	for p in s["pellets"]:
