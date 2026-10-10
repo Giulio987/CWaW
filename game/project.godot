@@ -4,7 +4,25 @@ config_version=5
 [application]
 config/name="CoD Zombies Remake"
 config/features=PackedStringArray("4.7", "Mobile")
+run/main_scene="res://scenes/main.tscn"
 
 [rendering]
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=4
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=false
+
+[layer_names]
+
+3d_physics/layer_1="world"
+3d_physics/layer_2="zombies"

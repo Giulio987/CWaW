@@ -171,6 +171,40 @@ class GlbWriter:
         return True
 
 
+def place_entities(w, gdir):
+    """Move prop models under 'ent_<name>' nodes using the level's entities.json (see entities.py)."""
+    parts = gdir.split("/")
+    path = os.path.join(ROOT, "game", "assets", "levels", parts[1], "entities.json") if len(parts) == 3 else ""
+    if parts[0] != "levels" or parts[2] != "environment" or not os.path.exists(path):
+        return
+    by_name = {n["name"]: i for i, n in enumerate(w.j["nodes"])}
+    scene = w.j["scenes"][0]["nodes"]
+    for e in json.load(open(path)):
+        refs = [h for h in [e["hash"]] + e["models"] if h in by_name]
+        if not refs:
+            continue
+        xf = e["children"][-1] if e["children"] else e["transform"]  # model hangs off the innermost entity
+        root = e["transform"]
+        node = {"name": "ent_" + e["name"], "children": [],
+                "translation": [c * SCALE for c in root["pos"]],
+                "rotation": root["rot_wxyz"][1:] + root["rot_wxyz"][:1]}
+        if xf is not root:
+            node["children"].append(len(w.j["nodes"]) + 1)
+            w.j["nodes"].append(node)
+            w.j["nodes"].append({"name": "local", "children": [], "translation": [c * SCALE for c in xf["pos"]],
+                                 "rotation": xf["rot_wxyz"][1:] + xf["rot_wxyz"][:1]})
+            holder = w.j["nodes"][-1]
+        else:
+            w.j["nodes"].append(node)
+            holder = node
+        scene.append(len(w.j["nodes"]) - (2 if xf is not root else 1))
+        for h in refs:
+            i = by_name[h]
+            if i in scene:
+                scene.remove(i)
+                holder["children"].append(i)
+
+
 def main(out_dir, paths):
     groups = [Group(p) for p in paths]
     index = Index(groups)
@@ -180,6 +214,7 @@ def main(out_dir, paths):
         for r in g.resources:
             if r.cls == C_MODEL:
                 w.add_model(f"{r.name_hash:08x}", Model(r.body, r.name_hash), index, gdir)
+        place_entities(w, gdir)
         if w.write():
             print(w.out_path, len(w.j["meshes"]), "models")
 

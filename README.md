@@ -23,6 +23,17 @@ tools/build_assets.sh          # original/kiwi.app -> extracted/ -> game/assets/
 ```
 Anteprima di un modello: `Godot --path game -s res://tools/preview.gd -- res://assets/models/levels/nacht/environment.glb out.png 30 -45 0.7`
 
+## Giocare (prototipo, Mac)
+```sh
+/Applications/Godot.app/Contents/MacOS/Godot --path game            # Nacht der Untoten
+/Applications/Godot.app/Contents/MacOS/Godot --path game -- nacht --autotest 120   # bot + log + screenshot in analysis/autotest
+```
+Comandi: WASD, mouse, clic sinistro spara, R ricarica, Q cambia arma, E compra/ripara, Shift corre, Spazio salta.
+Su touch (iPhone): stick virtuale a sinistra, trascina a destra per guardare, pulsanti FUOCO/E/R/⇄.
+
+Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `barricade.gd`, `debris.gd`,
+`player.gd`, `zombie.gd`, `game.gd` (round da `waves.json` estratto dagli script Lua originali), `hud.gd`, `weapons.gd`.
+
 ## Stato
 | Componente | Stato | Note |
 |---|---|---|
@@ -36,9 +47,11 @@ Anteprima di un modello: `Godot --path game -s res://tools/preview.gd -- res://a
 | Scheletri / skin / animazioni tipo 3 | ✅ | zombie (72 anim), cani (29), alcuni oggetti; `tools/anim.py`, `tools/export_characters.py` |
 | Animazioni tipo 2 (giocatore/armi, oggetti) | ⏳ | posizioni per osso SoA non ancora decodificate |
 | Parti dei personaggi | 🔶 | mesh divise per parte; nomi noti: body, legs, neck, leftarm, rightarm, leftelbow, rightelbow, headb, sleevel, sleever |
-| Entità livello (`CIwEntSpec`, trigger, barricate, box…) | ⏳ | |
-| Navmesh, collisioni, GUI, font | ⏳ | |
-| Gameplay in Godot | ⏳ | |
+| Entità livello | 🔶 | nomi, trasformazioni, componenti, costi e armi (`tools/entities.py`); dettagli dei componenti non ancora |
+| Tabelle ondate | ✅ | `tools/lua/dump_waves.lua` → `waves.json` (eseguite dagli script Lua originali) |
+| Collisioni / navmesh | ✅ | generate in Godot dalla geometria (non usano ancora `CIwNavMesh` originale) |
+| Gameplay Nacht | 🔶 | round, spawn, finestre, scavalcamento, inseguimento, attacco, armi a muro, macerie, punti, lightmap |
+| Mancano | ⏳ | modelli/animazioni armi in prima persona, suoni in gioco, mystery box, cani, perk, altre mappe, build iOS |
 
 ## Formati – appunti
 - Risorsa nel gruppo: `u32 size, u32 nameHash, body`. Le classi polimorfiche (es. `CIwSoundData`) hanno invece `u32 subclassHash` al posto del nome, e il nome è il primo u32 del body.
