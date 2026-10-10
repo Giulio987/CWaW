@@ -80,6 +80,16 @@ func message(t: String) -> void:
 
 func game_over(rounds: int) -> void:
 	_msg.text = "GAME OVER\nHai resistito %d round" % rounds
+	var b := Button.new()
+	b.text = "Menu principale"
+	b.add_theme_font_size_override("font_size", 28)
+	b.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	b.offset_top = 60
+	b.offset_bottom = 120
+	b.offset_left = -140
+	b.offset_right = 140
+	b.pressed.connect(func(): get_tree().reload_current_scene())
+	add_child(b)
 
 
 # ------------------------------------------------------------------ touch
@@ -122,6 +132,15 @@ func _button(text: String, offset: Vector2, size: Vector2, cb: Callable) -> void
 	b.button_down.connect(func(): cb.call(true))
 	b.button_up.connect(func(): cb.call(false))
 	add_child(b)
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel") and not _touch:
+		var free := Input.mouse_mode == Input.MOUSE_MODE_CAPTURED
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if free else Input.MOUSE_MODE_CAPTURED
+		_msg.text = "PAUSA - Esc per riprendere" if free else ""
+		get_tree().paused = free
+		process_mode = Node.PROCESS_MODE_ALWAYS
 
 
 func _input(event: InputEvent) -> void:

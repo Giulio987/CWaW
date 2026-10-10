@@ -4,10 +4,31 @@ extends Node3D
 
 func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
-	var level := "nacht"
+	var level := ""
 	for a in args:
 		if not a.begins_with("--") and not a.is_valid_float() and not "," in a and not a in Weapons.STATS:
 			level = a
+	if level == "":
+		_show_menu(args.has("--menu-shot"))
+		return
+	_start(level, args)
+
+
+func _show_menu(screenshot: bool) -> void:
+	var menu := Menu.new()
+	add_child(menu)
+	menu.play.connect(func(l: String):
+		menu.queue_free()
+		_start(l, PackedStringArray()))
+	if screenshot:
+		for i in 5:
+			await get_tree().process_frame
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/menu.png"))
+		get_tree().quit()
+
+
+func _start(level: String, args: PackedStringArray) -> void:
 	var game := Game.new()
 	add_child(game)
 	game.start(level)

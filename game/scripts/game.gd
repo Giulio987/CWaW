@@ -4,7 +4,8 @@ class_name Game
 extends Node3D
 
 const DIFFICULTY := 3   # index into the Lua tables (1..5)
-const MAX_ALIVE := 24   # Script.Level.MaxZombiesAmount
+
+var max_alive := 24     # Script.Level.MaxZombiesAmount
 
 var level: Level
 var player: Player
@@ -12,7 +13,8 @@ var hud: Hud
 var wall_buys := []
 var round_number := 0
 var waves := []
-var open_areas := ["startroom"]
+var open_areas := []
+var level_name := ""
 
 var _to_spawn := 0
 var _spawned := 0
@@ -26,19 +28,32 @@ var _between_rounds := true
 var _links := {}   # debris entity -> area it opens
 
 
-func start(level_name: String) -> void:
+func start(level_name_: String) -> void:
 	_setup_input()
-	_setup_environment(level_name)
+	_setup_environment(level_name_)
 	level = Level.new()
 	add_child(level)
-	level.load_level(level_name)
-	waves = JSON.parse_string(FileAccess.get_file_as_string("res://assets/levels/%s/waves.json" % level_name))
+	level.load_level(level_name_)
+	waves = JSON.parse_string(FileAccess.get_file_as_string("res://assets/levels/%s/waves.json" % level_name_))
 	for b in level.wall_buys:
 		var params: Dictionary = level.entities[b["name"]]["params"]
 		if params.has("weapon"):
 			b.merge(params)
 			wall_buys.append(b)
-	_links = {"DoorTrigger": "mysteryboxroom", "FrontSofaTrigger": "upstairsroom", "BackSofaTrigger": "mysteryboxroom"}
+	# areas and links come from the level's Lua script (tools/lua/dump_level.lua)
+	level_name = level_name_
+	var cfg: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://assets/levels/%s/level.json" % level_name_))
+	max_alive = int(cfg.get("max_zombies", 24))
+	for a in cfg["start_areas"]:
+		open_areas.append(String(a).to_lower())
+	if open_areas.is_empty():
+		for a in cfg["areas"]:
+			if "start" in String(a["Name"]).to_lower():
+				open_areas.append(String(a["Name"]).to_lower())
+				break
+	for l in cfg["links"]:
+		if l.has("TriggerName"):
+			_links[String(l["TriggerName"]).to_lower()] = [String(l["Area1"]).to_lower(), String(l["Area2"]).to_lower()]
 	for d in level.debris:
 		d.opened.connect(_on_debris_opened)
 
@@ -89,7 +104,7 @@ func _setup_input() -> void:
 		InputMap.action_add_event("fire", mb)
 
 
-func _setup_environment(level_name: String) -> void:
+func _setup_environment(_level: String) -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.05, 0.06, 0.08)
@@ -127,7 +142,7 @@ func _process(delta: float) -> void:
 	if _between_rounds or player == null or player.dead:
 		return
 	_spawn_timer -= delta
-	if _spawn_timer <= 0.0 and _spawned < _to_spawn and _alive < MAX_ALIVE:
+	if _spawn_timer <= 0.0 and _spawned < _to_spawn and _alive < max_alive:
 		_spawn_zombie()
 		if _initial_left > 0:
 			_initial_left -= 1
@@ -168,9 +183,10 @@ func _on_zombie_killed(_z: Zombie, headshot: bool, knife: bool) -> void:
 
 
 func _on_debris_opened(d: Debris) -> void:
-	var area: String = _links.get(d.entity, "")
-	if area != "" and not area in open_areas:
-		open_areas.append(area)
+	# a link joins two areas; once bought both sides are open
+	for area in _links.get(d.entity.to_lower(), []):
+		if not area in open_areas:
+			open_areas.append(area)
 	level.debris.erase(d)
 	await get_tree().process_frame
 	level.bake_navigation()

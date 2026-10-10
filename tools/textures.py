@@ -45,7 +45,10 @@ def decode(body):
         # palette (256 x RGB888) follows the indices
         idx = np.frombuffer(body, np.uint8, h * pitch, 0x17).reshape(h, pitch)[:, :w]
         pal = np.frombuffer(body, np.uint8, 768, 0x17 + h * pitch).reshape(256, 3)
-        return Image.fromarray(pal[idx], "RGB")
+        rgb = pal[idx]
+        # magenta is the colour key for unused texture space
+        alpha = np.where((rgb == [255, 0, 255]).all(-1), 0, 255).astype(np.uint8)
+        return Image.fromarray(np.dstack([rgb, alpha]), "RGBA")
     raise ValueError(f"unsupported format {fmt}")
 
 

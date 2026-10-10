@@ -28,8 +28,10 @@ Anteprima di un modello: `Godot --path game -s res://tools/preview.gd -- res://a
 /Applications/Godot.app/Contents/MacOS/Godot --path game            # Nacht der Untoten
 /Applications/Godot.app/Contents/MacOS/Godot --path game -- nacht --autotest 120   # bot + log + screenshot in analysis/autotest
 ```
-Comandi: WASD, mouse, clic sinistro spara, R ricarica, Q cambia arma, E compra/ripara, Shift corre, Spazio salta.
-Su touch (iPhone): stick virtuale a sinistra, trascina a destra per guardare, pulsanti FUOCO/E/R/⇄.
+Senza argomenti parte il menu principale (texture originali) per scegliere la mappa.
+Comandi: WASD, mouse, clic sinistro spara, V coltello, R ricarica, Q cambia arma, E compra/ripara, Shift corre, Spazio salta, Esc pausa.
+Su touch (iPhone): stick virtuale a sinistra, trascina a destra per guardare, pulsanti FUOCO/E/R/⇄/🔪.
+Debug: `-- nacht --look <entità,...>` e `-- nacht --shots <armi,...>` salvano screenshot in `analysis/preview`.
 
 Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `barricade.gd`, `debris.gd`,
 `player.gd`, `zombie.gd`, `game.gd` (round da `waves.json` estratto dagli script Lua originali), `hud.gd`, `weapons.gd`.
@@ -45,13 +47,17 @@ Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `
 | Modelli `CIwModel` | ✅ 1324/1324 | `tools/model.py`, export glTF `tools/export_gltf.py`; 4 mappe complete |
 | Materiali | ✅ | texture base + lightmap (UV2, in `extras.lightmap`, non ancora applicata in Godot) |
 | Scheletri / skin / animazioni tipo 3 | ✅ | zombie (72 anim), cani (29), alcuni oggetti; `tools/anim.py`, `tools/export_characters.py` |
-| Animazioni tipo 2 (giocatore/armi, oggetti) | ⏳ | posizioni per osso SoA non ancora decodificate |
+| Animazioni tipo 2 (giocatore/armi, oggetti) | ✅ | posizioni per osso SoA con bias; scala posizioni per scheletro |
+| Braccia + armi in prima persona | ✅ | arma agganciata all'osso 22 delle braccia, animazioni accoppiate (`tools/pair_arms.py`) |
+| Menu principale | ✅ | texture originali, scelta mappa |
 | Parti dei personaggi | 🔶 | mesh divise per parte; nomi noti: body, legs, neck, leftarm, rightarm, leftelbow, rightelbow, headb, sleevel, sleever |
 | Entità livello | 🔶 | nomi, trasformazioni, componenti, costi e armi (`tools/entities.py`); dettagli dei componenti non ancora |
 | Tabelle ondate | ✅ | `tools/lua/dump_waves.lua` → `waves.json` (eseguite dagli script Lua originali) |
 | Collisioni / navmesh | ✅ | generate in Godot dalla geometria (non usano ancora `CIwNavMesh` originale) |
-| Gameplay Nacht | 🔶 | round, spawn, finestre, scavalcamento, inseguimento, attacco, armi a muro, macerie, punti, lightmap |
-| Mancano | ⏳ | modelli/animazioni armi in prima persona, suoni in gioco, mystery box, cani, perk, altre mappe, build iOS |
+| Gameplay Nacht | 🔶 | round, spawn, finestre, scavalcamento, inseguimento, attacco, armi a muro, macerie, coltello, punti, lightmap |
+| Altre mappe | 🔶 | versione base: aree/collegamenti dagli script Lua (`level.json`), niente cani/perk/trappole |
+| Orientamento barricate/macerie | 🔶 | le entità non hanno rotazione: direzione dal muro (`tools/wall_yaw.py`) |
+| Mancano | ⏳ | suoni in gioco, mystery box, cani, perk, smembramento, build iOS |
 
 ## Formati – appunti
 - Risorsa nel gruppo: `u32 size, u32 nameHash, body`. Le classi polimorfiche (es. `CIwSoundData`) hanno invece `u32 subclassHash` al posto del nome, e il nome è il primo u32 del body.
