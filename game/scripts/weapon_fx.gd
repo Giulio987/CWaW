@@ -15,7 +15,7 @@ class_name WeaponFx
 const TEX := "res://assets/textures/ingame/effects/%s.png"
 
 const FLAME_CONE := 18.0       # degrees, half angle
-const FLAME_DPS_MUL := 5.0     # burn damage per second = weapon damage x this
+const FLAME_DPS_MUL := 10.0    # burn damage per second = weapon damage x this
 const FLAME_AFTERBURN := 3.0   # seconds a zombie keeps burning out of the jet
 
 static var _mats := {}

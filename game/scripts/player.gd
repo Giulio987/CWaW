@@ -258,7 +258,7 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 		if target is Zombie:
 			var head: bool = (hit["position"] as Vector3).y > target.global_position.y + 1.45
 			var dmg: float = s["damage"] * (float(s.get("head", 2.0)) if head else 1.0)
-			target.take_damage(dmg, head, self)
+			target.take_damage(dmg, head, self, false, hit["position"])
 		else:
 			game.spawn_impact(hit["position"], hit["normal"])
 	game.muzzle_flash(_camera)

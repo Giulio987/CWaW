@@ -22,10 +22,6 @@ static func run(at: Node) -> void:
 			await _buy(at, game)
 		"fx":
 			await _fx(at, game)
-		"fx1":
-			await _fx1(at, game)
-		"model":
-			await _model(at, game)
 	at.get_tree().quit()
 
 
@@ -212,29 +208,34 @@ static func _flame(at: Node, game: Game) -> void:
 	var d := minf(_room_ahead(game, 6.0), 4.0)
 	var fwd := -p.global_basis.z
 	var side := p.global_basis.x
-	var a := _zombie(game, _floor(game, p.global_position + fwd * d), 600.0)
+	var a := _zombie(game, _floor(game, p.global_position + fwd * d), 2e5)
 	var b := _zombie(game, _floor(game, p.global_position + fwd * (d * 0.6) + side * 0.3), 600.0)
 	var off := _zombie(game, _floor(game, p.global_position + fwd * 2.0 + side * 3.0), 600.0)
 	await _wait(at, 0.3)
 	var h0 := off.health
+	var ha := a.health
 	_aim(p, a.global_position + Vector3.UP * 1.0)
 	p.fire_held = true
 	await _wait(at, 0.6)
+	# (screenshots can take seconds: read the state first)
+	var burning_a := a.has_node("Burning")
+	var burning_b := b.has_node("Burning")
+	var burning_off := off.has_node("Burning")
+	print("[wfx] flame 0.6 s: a burning=%s hp=%.0f, b burning=%s %s, off-axis burning=%s hp=%.0f" % [burning_a, a.health,
+		burning_b, Zombie.State.keys()[b.state], burning_off, off.health])
+	var ok1 := burning_a and burning_b and not burning_off and off.health == h0 and a.health < ha
 	await _snap(at, "flame_0_jet")
 	var cam := _side_cam(at, game, p.global_position + fwd * d * 0.5 + Vector3.UP * 1.2, side * 3.5 + Vector3.UP * 0.8)
-	await _wait(at, 0.4)
+	await _wait(at, 0.3)
 	await _snap(at, "flame_1_side")
 	p.fire_held = false
-	print("[wfx] flame: a burning=%s hp=%.0f, b burning=%s hp=%.0f, off-axis burning=%s hp=%.0f" % [a.has_node("Burning"), a.health,
-		b.has_node("Burning"), b.health, off.has_node("Burning"), off.health])
-	var ok1 := a.has_node("Burning") and b.has_node("Burning") and not off.has_node("Burning") and off.health == h0
-	await _wait(at, 1.0)
+	var h_stop := a.health
+	await _wait(at, 1.5)
 	await _snap(at, "flame_2_afterburn")
+	print("[wfx] flame afterburn: a hp %.0f -> %.0f (still burning=%s) %s" % [h_stop, a.health, a.has_node("Burning"),
+		"OK" if ok1 and a.health < h_stop else "FAIL"])
 	cam.queue_free()
 	p.get_children().filter(func(n): return n is Camera3D)[0].make_current()
-	await _wait(at, 2.5)
-	print("[wfx] flame afterburn: a %s(%.0f) b %s(%.0f) %s" % [Zombie.State.keys()[a.state], a.health, Zombie.State.keys()[b.state], b.health,
-		"OK" if ok1 and a.health < h0 and b.health < h0 else "FAIL"])
 	print("[wfx] points %d" % p.points)
 
 
@@ -294,45 +295,3 @@ static func _fx(at: Node, game: Game) -> void:
 	await _wait(at, 0.15)
 	await _snap(at, "fx_ray_1")
 
-
-static func _fx1(at: Node, game: Game) -> void:
-	var p := game.player
-	p.health = 1e9
-	var c := _floor(game, p.global_position - p.global_basis.z * 3.0) + Vector3.UP * 1.0
-	var e := WeaponFx.particles("1d980a04", {"amount": 6, "lifetime": 5.0, "size": 0.12, "speed": 0.0, "one_shot": false, "sphere": 0.5})
-	game.add_child(e)
-	e.global_position = c - p.global_basis.x * 0.8
-	e.emitting = true
-	var f := WeaponFx.particles("a03e6a9a", {"amount": 6, "lifetime": 5.0, "size": 0.12, "speed": 0.0, "one_shot": false, "sphere": 0.5, "additive": false})
-	game.add_child(f)
-	f.global_position = c + p.global_basis.x * 0.8
-	f.emitting = true
-	var mi := MeshInstance3D.new()
-	var b := BoxMesh.new()
-	b.size = Vector3.ONE * 0.12
-	mi.mesh = b
-	game.add_child(mi)
-	mi.global_position = c
-	await _wait(at, 1.0)
-	await _snap(at, "fx1")
-
-
-static func _model(at: Node, game: Game) -> void:
-	var p := game.player
-	var cam := p.get_viewport().get_camera_3d()
-	var root := (load("res://assets/models/ingame/player.glb") as PackedScene).instantiate()
-	var i := 0
-	for n in ["c53574cc", "f54310eb"]:
-		var m := root.find_child(n, true, false) as MeshInstance3D
-		if m == null:
-			print("[wfx] model %s missing" % n)
-			continue
-		print("[wfx] model %s aabb %s xf %s" % [n, m.get_aabb(), m.transform])
-		var d := m.duplicate() as Node3D
-		d.transform = Transform3D.IDENTITY
-		cam.add_child(d)
-		d.position = Vector3(-0.15 + i * 0.3, 0.0, -0.8)
-		i += 1
-	root.free()
-	await _wait(at, 0.3)
-	await _snap(at, "model")

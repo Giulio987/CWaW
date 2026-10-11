@@ -141,7 +141,7 @@ func _d_face(p: Vector3) -> void:
 		rotation.y = lerp_angle(rotation.y, atan2(d.x, d.z), 0.25)
 
 
-func take_damage(amount: float, headshot: bool, by: Player, knife := false) -> void:
+func take_damage(amount: float, headshot: bool, by: Player, knife := false, _hit_pos := Vector3.INF) -> void:
 	if state == State.DEAD:
 		return
 	var g := get_parent() as Game

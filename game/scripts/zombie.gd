@@ -13,6 +13,26 @@ const WALKS := {"fbe7b3da": 0.96, "fbe7b3db": 0.95, "fbe7b3dc": 1.0, "fbe7b3dd":
 	"fbe7b3de": 0.57, "fbe7b3df": 0.58, "fbe7b3e0": 0.65, "9a1f4265": 0.69}
 const RUNS := {"c9903fc0": 3.03, "842441ac": 3.61, "842441ab": 3.49, "c349cc28": 1.65,
 	"4e83b4a9": 2.02, "4e83b4aa": 1.97}
+# The original "zombie speed" 1..14 (second number of each pair in the wave tables,
+# ZombieMovementMaxSpeed = 14) selects movement state 7..20 of the zombie anim state
+# machine (zombiesanimsger CIsAnimStateMachine "zombie"): [body anim, playback rate].
+# 1-8 walk, 9-11 run, 12-14 sprint. Ground speed = root-motion speed x rate.
+const SPEED_STATES := [
+	["fbe7b3dc", 0.8], ["fbe7b3da", 0.7], ["fbe7b3db", 0.8], ["fbe7b3dd", 0.8],
+	["fbe7b3de", 1.0], ["fbe7b3df", 1.0], ["fbe7b3e0", 1.0], ["9a1f4265", 1.0],
+	["c349cc28", 1.0], ["4e83b4a9", 1.0], ["4e83b4aa", 1.0],
+	["c9903fc0", 1.0], ["842441ab", 0.8], ["842441ac", 0.9]]
+# console.bin: ZombieSpeedUpThresholds {5,8,12}, ZombieSpeedUpTime 180000 ms. The
+# speed-up is enabled by waves.lua once a wave (> 4) has spawned all its zombies.
+# Interpretation: a zombie still alive ZombieSpeedUpTime after that steps up to the
+# next threshold speed (then up to 14), so stragglers end up running.
+const SPEED_UP_THRESHOLDS := [5, 8, 12]
+const SPEED_UP_TIME := 180.0
+const MAX_SPEED_INDEX := 14
+# Rising out of the ground ("zombie_ground" spawns: Verrückt courtyard, Der Riese
+# DRSpecialGroundSpawns; "_water" swamp spawns): state machine f402afc2 plays
+# 013110cb (10.1 s at rate 1, hips from -0.82 m to standing) with a "spawnEffect".
+const RISE := "013110cb"
 const IDLE := "c98b07c8"
 const ATTACKS := ["fab4136a", "fb0fe592"]
 const DEATHS := ["20b0e521", "371f7199", "f037474d"]
@@ -23,6 +43,7 @@ const CRAWL_SPEED := 0.52
 const CRAWL_ATTACK := "dddede7a"  # zombie_crawl_attack
 const CRAWL_DEATH := "bd4b9b0a"
 const CRAWL_CHANCE := 0.08
+const CRAWL_CHANCE_LOW_HIT := 0.15   # heavy hit on the legs (hit position known)
 var crawler := false
 var max_health := 100.0
 var _shape: CollisionShape3D
@@ -33,7 +54,7 @@ const CLIMB := "9c58e56e"
 const ATTACK_RANGE := 1.3
 const ATTACK_DAMAGE := 45.0
 
-enum State { TO_WINDOW, TEARING, CLIMBING, CHASE, ATTACK, DEAD }
+enum State { TO_WINDOW, TEARING, CLIMBING, CHASE, ATTACK, DEAD, RISING }
 
 var state := State.TO_WINDOW
 var health := 100.0
@@ -41,6 +62,13 @@ var window: Barricade
 var target: Player
 var move_anim := ""
 var speed := 1.0
+var move_rate := 1.0     # playback rate of move_anim (SPEED_STATES)
+var speed_index := 0     # original speed 1..14, 0 = picked from WALKS/RUNS
+var rise := false        # set before add_child: climb out of the ground first
+var _after_rise: State = State.TO_WINDOW
+var _speed_up_t := 0.0
+var life := 0.0             # seconds since spawn
+var reached_window := -1.0  # life when it got to its window (tests / stuck checks)
 
 var _agent: NavigationAgent3D
 var _anim: AnimationPlayer
@@ -52,15 +80,28 @@ var _best_dist := INF
 var _stall := 0.0
 
 
-func setup(spawn: Vector3, win: Barricade, player: Player, hp: float, runner: bool) -> void:
+func setup(spawn: Vector3, win: Barricade, player: Player, hp: float, runner: bool, speed_idx := 0) -> void:
 	window = win
 	target = player
 	health = hp
 	max_health = hp
-	var pool := RUNS if runner else WALKS
-	move_anim = pool.keys().pick_random()
-	speed = pool[move_anim]
+	if speed_idx > 0:
+		set_speed_index(speed_idx)
+	else:
+		var pool := RUNS if runner else WALKS
+		move_anim = pool.keys().pick_random()
+		speed = pool[move_anim]
 	position = spawn
+
+
+func set_speed_index(i: int) -> void:
+	speed_index = clampi(i, 1, MAX_SPEED_INDEX)
+	var st: Array = SPEED_STATES[speed_index - 1]
+	move_anim = st[0]
+	move_rate = st[1]
+	speed = float(WALKS.get(move_anim, RUNS.get(move_anim, 1.0))) * move_rate
+	if _anim and not crawler and state in [State.TO_WINDOW, State.CHASE]:
+		_play(move_anim)
 
 
 # World at War zombie health: 150 at round 1, +100 per round up to 950 at round 9,
@@ -104,17 +145,90 @@ func _ready() -> void:
 	_agent.radius = 0.35
 	_agent.height = 1.8
 	add_child(_agent)
-	_play(move_anim)
 	_agent.target_position = window.outside
+	if rise:
+		_start_rise()
+	else:
+		_play(move_anim)
 
 
 func _play(a: String, blend := 0.2) -> void:
 	if _anim.current_animation != a:
-		_anim.play(a, blend)
+		_anim.play(a, blend, move_rate if a == move_anim else 1.0)
+
+
+func _start_rise() -> void:
+	_after_rise = state
+	state = State.RISING
+	var a := _anim.get_animation(RISE)
+	a.loop_mode = Animation.LOOP_NONE
+	_anim.play(RISE, 0.0)
+	_timer = a.length
+	# the hit capsule comes up with the body
+	_shape.position.y = -0.5
+	var tw := create_tween()
+	tw.tween_property(_shape, "position:y", 0.9, a.length * 0.9).set_trans(Tween.TRANS_SINE)
+	_spawn_dirt()
+
+
+# "spawnEffect": clods of earth (or water) thrown up where the zombie breaks out.
+func _spawn_dirt() -> void:
+	var p := CPUParticles3D.new()
+	p.amount = 40
+	p.lifetime = 1.4
+	p.explosiveness = 0.0
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE
+	p.emission_sphere_radius = 0.35
+	p.direction = Vector3.UP
+	p.spread = 35.0
+	p.initial_velocity_min = 1.0
+	p.initial_velocity_max = 2.6
+	p.gravity = Vector3(0, -7.0, 0)
+	p.scale_amount_min = 0.04
+	p.scale_amount_max = 0.11
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3.ONE
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.17, 0.13, 0.09)
+	mat.roughness = 1.0
+	mesh.material = mat
+	p.mesh = mesh
+	p.position = Vector3(0, 0.05, 0.2)
+	add_child(p)
+	p.emitting = true
+	get_tree().create_timer(_timer * 0.8, false).timeout.connect(func():
+		if is_instance_valid(p):
+			p.emitting = false)
+	get_tree().create_timer(_timer + 2.0, false).timeout.connect(p.queue_free)
+
+
+func _update_speed_up(delta: float) -> void:
+	var g := get_parent() as Game
+	if g == null or speed_index <= 0 or speed_index >= MAX_SPEED_INDEX or crawler:
+		return
+	if not (g.round_number > 4 and g._spawned >= g._to_spawn and not g._between_rounds):
+		return
+	_speed_up_t += delta
+	if _speed_up_t >= SPEED_UP_TIME:
+		_speed_up_t = 0.0
+		var next := MAX_SPEED_INDEX
+		for t in SPEED_UP_THRESHOLDS:
+			if t > speed_index:
+				next = t
+				break
+		set_speed_index(next)
 
 
 func _physics_process(delta: float) -> void:
+	life += delta
+	_update_speed_up(delta)
 	match state:
+		State.RISING:
+			_timer -= delta
+			if _timer <= 0.0:
+				state = _after_rise
+				_shape.position.y = 0.35 if crawler else 0.9
+				_play(move_anim, 0.3)
 		State.TO_WINDOW:
 			var d := global_position.distance_to(window.outside)
 			# progress watchdog: a zombie that stops getting closer is put at the window
@@ -197,6 +311,8 @@ func _face(p: Vector3) -> void:
 
 
 func _start_tearing() -> void:
+	if reached_window < 0.0:
+		reached_window = life
 	if window.occupied_by != null and window.occupied_by != self and is_instance_valid(window.occupied_by):
 		_play(IDLE)
 		return  # wait for the zombie ahead
@@ -219,22 +335,76 @@ func _start_climb() -> void:
 		_play(move_anim))
 
 
-func take_damage(amount: float, headshot: bool, by: Player, knife := false) -> void:
+# hit_pos (world space, optional): where the shot landed; it picks which limb can
+# come off (legs only from low hits, the arm on the side and height that was hit).
+# Without it the old random choice is used (explosions, fire, traps).
+func take_damage(amount: float, headshot: bool, by: Player, knife := false, hit_pos := Vector3.INF) -> void:
 	if state == State.DEAD:
 		return
 	var g := get_parent() as Game
 	if g and g.insta_kill:
 		amount = health
 	health -= amount
-	by.add_points(10 * (g.points_multiplier if g else 1))
-	# arms come off from heavy body hits (hit position is not passed yet: random side)
-	if not crawler and health > 0.0 and not headshot and not knife and amount >= 50.0 \
-			and state in [State.CHASE, State.ATTACK] and randf() < CRAWL_CHANCE:
+	if by:
+		by.add_points(10 * (g.points_multiplier if g else 1))
+	var located := hit_pos != Vector3.INF
+	var arm := ""
+	var legs_hit := true
+	if located:
+		arm = arm_at(hit_pos)
+		legs_hit = to_local(hit_pos).y < LEG_HIT_HEIGHT
+	elif randf() < ARM_GIB_CHANCE:
+		arm = ["left", "right"].pick_random()
+	if not crawler and health > 0.0 and not headshot and not knife and amount >= 50.0 and legs_hit \
+			and state in [State.CHASE, State.ATTACK] and randf() < (CRAWL_CHANCE_LOW_HIT if located else CRAWL_CHANCE):
 		become_crawler()
-	elif not headshot and not knife and amount >= 40.0 and randf() < ARM_GIB_CHANCE:
-		lose_arm(["left", "right"].pick_random())
+	elif not headshot and not knife and amount >= 40.0 and arm != "" \
+			and (not located or randf() < ARM_GIB_CHANCE_ON_ARM):
+		lose_arm(arm)
 	if health <= 0.0:
 		_die(headshot, knife)
+
+
+# Which arm (if any) a hit at world position p lands on: the arm whose posed bones
+# (shoulder -> elbow -> wrist) pass closest to it. Shots hit the 0.3 m capsule, not
+# the mesh, so the test is done in the zombie's horizontal frame: the side of the
+# hit (local x, model faces +Z, its left arm is +X) and the height band of that arm.
+const LEG_HIT_HEIGHT := 0.95
+const ARM_BONES := {"left": [13, 14, 15], "right": [23, 24, 25]}
+func arm_at(p: Vector3) -> String:
+	var lp := to_local(p)
+	var side := "left" if lp.x > 0.0 else "right"
+	if absf(lp.x) < 0.12 and lp.z < 0.0:
+		return ""   # middle of the back: torso
+	var lo := 1.0
+	var hi := 1.5
+	var skel: Skeleton3D = _skeleton()
+	if skel:
+		lo = INF
+		hi = -INF
+		for b in ARM_BONES[side]:
+			if b < skel.get_bone_count():
+				var y: float = to_local(skel.global_transform * skel.get_bone_global_pose(b).origin).y
+				lo = minf(lo, y)
+				hi = maxf(hi, y)
+		lo -= 0.12
+		hi += 0.06
+	if lp.y < lo or lp.y > hi:
+		return ""
+	# front shots: the arms reach forward, anything off the centre line is an arm;
+	# side shots: the arm covers the flank
+	if absf(lp.x) < 0.1:
+		return ""
+	return side
+
+
+var _skel_cache: Skeleton3D
+func _skeleton() -> Skeleton3D:
+	if _skel_cache == null and _model:
+		var s := _model.find_children("*", "Skeleton3D")
+		if s.size() > 0:
+			_skel_cache = s[0]
+	return _skel_cache
 
 
 # ------------------------------------------------------------------ gibs
@@ -242,7 +412,8 @@ func take_damage(amount: float, headshot: bool, by: Player, knife := false) -> v
 # attached head, "headb" the loose head, "sleevel/sleever" + "leftelbow/rightelbow"
 # the forearms, "e1f1c9f3"/"75a47286" the left/right arm stumps; "*_m1" are the
 # bloody stump caps (hidden while the part is attached).
-const ARM_GIB_CHANCE := 0.15
+const ARM_GIB_CHANCE := 0.15          # random arm (no hit position)
+const ARM_GIB_CHANCE_ON_ARM := 0.35   # a heavy hit that lands on an arm
 const ARMS := {
 	"left": {"remove": ["sleevel", "leftelbow"], "show": ["e1f1c9f3_m1"]},
 	"right": {"remove": ["sleever", "rightelbow"], "show": ["75a47286_m1"]},

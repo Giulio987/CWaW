@@ -264,6 +264,28 @@ func _spawn_candidates(areas: Array) -> Array:
 	return out
 
 
+# waves.lua RecalculateWaveInfo: the wave's Zombies[difficulty] pairs {count, speed}
+# expand to a shuffled list of zombie speeds (1..14, see Zombie.SPEED_STATES); the
+# n-th zombie spawned in the wave takes the n-th speed.
+var _wave_speeds: Array[int] = []
+const GROUND_SPAWNS := {"derriese": ["outerLabCourtyardZombieSpawn2", "powerCourtyardZombieSpawn1",
+	"powerCourtyardZombieSpawn2", "powerCourtyardZombieSpawn3", "labTopZombieSpawn2",
+	"garageZombieSpawn2", "labZombieSpawn3"]}   # Script.Level.DRSpecialGroundSpawns
+
+
+func _wave_speed() -> int:
+	if _spawned == 0 or _wave_speeds.size() != _to_spawn:
+		_wave_speeds.clear()
+		var w: Dictionary = waves[clampi(round_number - dog_wave_counter, 1, waves.size()) - 1]
+		for pair in w["Zombies"][DIFFICULTY - 1]:
+			for i in int(pair[0]):
+				_wave_speeds.append(int(pair[1]))
+		_wave_speeds.shuffle()
+	if _wave_speeds.is_empty():
+		return 1
+	return _wave_speeds[clampi(_spawned, 0, _wave_speeds.size() - 1)]
+
+
 func _spawn_zombie() -> void:
 	var cands := _spawn_candidates(open_areas)
 	if cands.is_empty():
@@ -295,10 +317,12 @@ func _spawn_zombie() -> void:
 		wins.sort_custom(func(a, b): return a.outside.distance_to(origin) < b.outside.distance_to(origin))
 		win = wins[0]
 	var z := Zombie.new()
-	var runner: bool = round_number >= 4 and randf() < clamp((round_number - 3) * 0.15, 0.0, 0.8)
-	z.setup(origin, win, player, randf_range(_hp.x, _hp.y), runner)
+	z.setup(origin, win, player, randf_range(_hp.x, _hp.y), false, _wave_speed())
 	if direct and c["window"] == "":
 		z.state = Zombie.State.CHASE
+	# "_ground" / "_water" templates climb out of the ground first (waves.lua)
+	z.rise = c["spawn"] == "COURTYARD" or c["window"] == "" \
+		or String(c["spawn"]).to_lower() in GROUND_SPAWNS.get(level_name, []).map(func(x): return x.to_lower())
 	z.killed.connect(_on_zombie_killed)
 	add_child(z)
 	_spawned += 1

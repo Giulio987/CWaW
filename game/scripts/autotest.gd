@@ -28,6 +28,10 @@ func _ready() -> void:
 		(func(): WeaponTests.run(self)).call_deferred()
 	elif args.has("--drink-test") or args.has("--teddy-test") or args.has("--music-test"):   # extra_tests.gd
 		(func(): ExtraTests.run(self)).call_deferred()
+	elif args.has("--zombie-test"):   # rise | arm | speed (zombie_tests.gd)
+		(func(): ZombieTests.run(self)).call_deferred()
+	if args.has("--zombie-watch"):   # alongside the bot: zombies slow to reach windows
+		(func(): ZombieTests.watch(self)).call_deferred()
 	var dir := ProjectSettings.globalize_path("res://../analysis/autotest")
 	DirAccess.make_dir_recursive_absolute(dir)
 
@@ -35,7 +39,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if OS.get_cmdline_user_args().has("--hud-test"):
 		return
-	if OS.get_cmdline_user_args().has("--weapon-test"):
+	if OS.get_cmdline_user_args().has("--weapon-test") or OS.get_cmdline_user_args().has("--zombie-test"):
 		return
 	if OS.get_cmdline_user_args().has("--drink-test") or OS.get_cmdline_user_args().has("--teddy-test") or OS.get_cmdline_user_args().has("--music-test"):
 		return

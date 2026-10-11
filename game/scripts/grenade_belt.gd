@@ -157,7 +157,7 @@ func _build_hud() -> void:
 	add_child(layer)
 	_icons = HBoxContainer.new()
 	_icons.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	_icons.position += Vector2(-330, -120)
+	_icons.position += Vector2(-330, -48)  # under the ammo line, clear of the points popups
 	_icons.add_theme_constant_override("separation", 2)
 	_icons.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(_icons)
