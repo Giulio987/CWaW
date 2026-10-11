@@ -5,6 +5,7 @@ class_name Level
 extends Node3D
 
 signal navigation_ready
+signal power_changed(on: bool)
 
 const UNITS := 1.0 / 400.0
 
@@ -15,6 +16,8 @@ var windows := []           # Barricade nodes
 var debris := []            # Debris nodes (bought to open areas)
 var wall_buys := []         # {name, position, weapon, cost}
 var boxes := []             # MysteryBox nodes
+var perk_machines := []     # PerkMachine nodes (the power switch included)
+var power_on := true        # false until the GeneratorSwitch is used on maps that have one
 var player_spawn := Transform3D.IDENTITY
 var nav_region: NavigationRegion3D
 var static_root: Node3D
@@ -51,12 +54,14 @@ func load_level(name: String) -> void:
 	_build_debris()
 	_build_wall_buys()
 	_build_boxes()
+	_build_perks()
 
 
 func bake_navigation() -> void:
 	if nav_region.is_baking():
 		# a bake is running: bake again once it finishes so the latest geometry is used
-		nav_region.bake_finished.connect(bake_navigation, CONNECT_ONE_SHOT)
+		if not nav_region.bake_finished.is_connected(bake_navigation):
+			nav_region.bake_finished.connect(bake_navigation, CONNECT_ONE_SHOT)
 		return
 	var t0 := Time.get_ticks_msec()
 	nav_region.bake_finished.connect(func():
@@ -312,13 +317,68 @@ func _build_debris() -> void:
 
 
 func _build_boxes() -> void:
-	for n in entities:
-		if "CMysteryBoxSpec" in entities[n]["components"]:
+	# one active box per map, like the original (the teddy-bear move is not implemented)
+	var names := entities.keys().filter(func(n): return "CMysteryBoxSpec" in entities[n]["components"])
+	if names.size() > 1:
+		names = [names.pick_random()]
+	for n in names:
+		if true:
 			var b := MysteryBox.new()
 			b.name = "Box_" + n
 			nav_region.add_child(b)
 			b.setup(self, n)
 			boxes.append(b)
+
+
+# Perk-a-Cola machines. Maps with a GeneratorSwitch (Der Riese, Verrückt) need the
+# power on first (--power starts with it on). Shi No Numa has one entity per perk at
+# each of its four locations: each location shows a different perk, picked at random
+# (the original cycles them in shinonuma.lua).
+func _build_perks() -> void:
+	var by_place := {}   # rounded position -> [entity names]
+	for n in entities:
+		if "CActionBuyPerkSpec" in entities[n]["components"] and Perks.kind_of(entities[n]) != "":
+			var key := str(entity_transform(n).origin.snapped(Vector3(0.5, 0.5, 0.5)))
+			if not by_place.has(key):
+				by_place[key] = []
+			by_place[key].append(n)
+	var keys := by_place.keys()
+	keys.sort()
+	var order: Array = Perks.ORDER.duplicate()
+	order.shuffle()
+	for i in keys.size():
+		var names: Array = by_place[keys[i]]
+		names.sort()
+		var pick: String = names[0]
+		if names.size() > 1:
+			for n in names:
+				if Perks.kind_of(entities[n]) == order[i % order.size()]:
+					pick = n
+		_add_perk_machine(pick, Perks.kind_of(entities[pick]))
+	var switch: Dictionary = _by_lower.get("generatorswitch", {})
+	if not perk_machines.is_empty() and not switch.is_empty() and "CActionScriptableSpec" in switch["components"]:
+		power_on = OS.get_cmdline_user_args().has("--power")
+		_add_perk_machine(switch["name"], "power")
+	PerkMachine.release_cache()
+
+
+func _add_perk_machine(entity: String, kind: String) -> void:
+	var m := PerkMachine.new()
+	m.name = "Perk_" + entity
+	nav_region.add_child(m)
+	m.setup(self, entity, kind)
+	perk_machines.append(m)
+
+
+func turn_on_power() -> void:
+	if power_on:
+		return
+	power_on = true
+	power_changed.emit(true)
+	Sfx.instance.play("pa_power_on")
+	for m in perk_machines:
+		if m.kind != "power":
+			Sfx.instance.play_at(Sfx.iw_hash("perkpoweron"), m.global_position + Vector3.UP, -4.0)
 
 
 func _build_wall_buys() -> void:

@@ -40,6 +40,8 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_stairs_test(game)
 	if args.has("--box-test"):
 		_box_test(game)
+	if args.has("--perk-test"):
+		_perk_test(game)
 	if args.has("--knife-test"):
 		_knife_test(game)
 	if args.has("--door-test"):
@@ -384,4 +386,107 @@ func _window_shot_test(game: Game) -> void:
 		print("[shot] %s: %s (ray hits %s at %.2f m, zombie at %.2f m)" % [w.name, "hit" if hit else "MISS", "none" if rh.is_empty() else String(rh["collider"].get_parent().name) + "/" + String(rh["collider"].name), -1.0 if rh.is_empty() else cam.global_position.distance_to(rh["position"]), cam.global_position.distance_to(z.global_position)])
 		z.queue_free()
 	print("[shot] %d/%d windows" % [ok, game.level.windows.size()])
+	get_tree().quit()
+
+
+# Turn the power on, then walk up to every perk machine, buy it and check its
+# effect (prints OK/FAIL per step): -- derriese --perk-test
+func _perk_test(game: Game) -> void:
+	await game.level.navigation_ready
+	game.set_process(false)  # no zombies during the test
+	var p := game.player
+	var lv := game.level
+	var fails := [0]  # in an array: lambdas capture locals by value
+	var space := p.get_world_3d().direct_space_state
+	var place := func(m: PerkMachine) -> void:
+		# stand on the free side of the machine, facing it
+		var best := Vector3.ZERO
+		var best_free := -1.0
+		for k in 8:
+			var dir := Vector3.FORWARD.rotated(Vector3.UP, k * PI / 4)
+			var from: Vector3 = m._centre + Vector3.UP * 0.4
+			var q := PhysicsRayQueryParameters3D.create(from + dir * 0.9, from + dir * 2.0, 1)
+			var hit := space.intersect_ray(q)
+			var free: float = 2.0 if hit.is_empty() else (hit["position"] - q.from).length()
+			if free > best_free:
+				best_free = free
+				best = dir
+		p.global_position = m._centre + best * 1.4 + Vector3.DOWN * 0.3
+		p.velocity = Vector3.ZERO
+		var to: Vector3 = m._centre - p.global_position
+		p.rotation.y = atan2(-to.x, -to.z)
+	var check := func(ok: bool, what: String) -> void:
+		print("[perk] %s: %s" % ["OK" if ok else "FAIL", what])
+		if not ok:
+			fails[0] += 1
+	var machines := lv.perk_machines.filter(func(m): return m.kind != "power")
+	var switch: PerkMachine = null
+	for m in lv.perk_machines:
+		if m.kind == "power":
+			switch = m
+	check.call(machines.size() == 4, "%d perk machines %s" % [machines.size(), machines.map(func(m): return "%s=%s" % [m.entity, m.kind])])
+	p.points = 100000
+	if switch:
+		place.call(machines[0])
+		await get_tree().physics_frame
+		check.call(not lv.power_on and machines[0].prompt(p) == "Serve la corrente" and not p.has_perk(machines[0].kind), "power off: '%s'" % machines[0].prompt(p))
+		if OS.get_cmdline_user_args().has("--perk-reach"):
+			# the switch must be reachable once every door is open (slow: one rebake per door)
+			for d in lv.debris.duplicate():
+				d.open()
+			await get_tree().create_timer(1.0).timeout
+			while lv.nav_region.is_baking() or lv.nav_region.bake_finished.get_connections().size() > 0:
+				await get_tree().create_timer(1.0).timeout
+			await get_tree().create_timer(1.0).timeout
+			var path := NavigationServer3D.map_get_path(p.get_world_3d().navigation_map, lv.player_spawn.origin, switch._centre, true)
+			var gap := switch._centre.distance_to(path[-1]) if path.size() > 0 else INF
+			check.call(gap < 2.0, "switch reachable on the navmesh (path end %.2f m away, %d points)" % [gap, path.size()])
+		place.call(switch)
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		var t = p._interaction_target()
+		check.call(t == switch, "switch is the interaction target ('%s')" % switch.prompt(p))
+		if t == switch:
+			t.interact(p)
+		check.call(lv.power_on, "power on")
+		await get_tree().create_timer(1.0).timeout
+	for m in machines:
+		place.call(m)
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		var t = p._interaction_target()
+		var before := p.points
+		check.call(t == m, "%s target, prompt '%s'" % [m.entity, m.prompt(p)])
+		m.interact(p)
+		check.call(p.has_perk(m.kind) and before - p.points == m.cost, "bought %s for %d" % [Perks.display(m.kind), before - p.points])
+		match m.kind:
+			"jugga":
+				check.call(p.max_health == Perks.JUGG_HEALTH and p.health == Perks.JUGG_HEALTH, "max health %.0f" % p.max_health)
+			"speed":
+				p.give_weapon("thompson")
+				p._reloading = 0.0
+				p.weapon()["mag"] = 0
+				p.reload()
+				var base: float = Weapons.stats("thompson")["reload"]
+				check.call(absf(p._reloading - base * 0.5) < 0.01, "reload %.2f s (base %.2f)" % [p._reloading, base])
+				p._reloading = 0.0
+				p.weapon()["mag"] = 10
+			"dbtap":
+				p._cooldown = 0.0
+				p._reloading = 0.0
+				p._fire(p.weapon(), Weapons.stats(p.weapon()["name"]))
+				var rate: float = Weapons.stats(p.weapon()["name"])["rate"]
+				check.call(absf(p._cooldown - rate * 0.75) < 0.001, "fire interval %.3f s (base %.3f)" % [p._cooldown, rate])
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/perk_%s.png" % m.kind))
+		m.interact(p)
+		check.call(p.perks.count(m.kind) == 1, "%s can be bought only once" % m.kind)
+	print("[perk] perks owned %s" % [p.perks])
+	if p.has_perk("revive"):
+		p.take_hit(10000.0)
+		check.call(not p.dead and p.health == Player.MAX_HEALTH and p.perks.is_empty() and p.max_health == Player.MAX_HEALTH, "quick revive: dead=%s health=%.0f perks=%s" % [p.dead, p.health, p.perks])
+		p._revive_grace = 0.0
+		p.take_hit(10000.0)
+		check.call(p.dead, "second down is death")
+	print("[perk] %s (%d failures)" % ["OK" if fails[0] == 0 else "FAIL", fails[0]])
 	get_tree().quit()

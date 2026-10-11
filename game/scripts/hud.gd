@@ -9,6 +9,8 @@ var _ammo: Label
 var _prompt: Label
 var _msg: Label
 var _hurt: ColorRect
+var _perks: HBoxContainer
+var _shown_perks := []
 var _touch := false
 var _stick_id := -1
 var _stick_origin := Vector2.ZERO
@@ -26,6 +28,13 @@ func bind(g: Game) -> void:
 	_hurt.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_hurt)
 	_round = _label(64, Color(0.65, 0.05, 0.03), Control.PRESET_BOTTOM_LEFT, Vector2(24, -96))
+	# perk icons in a row above the round number
+	_perks = HBoxContainer.new()
+	_perks.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_perks.position += Vector2(24, -150)
+	_perks.add_theme_constant_override("separation", 6)
+	_perks.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_perks)
 	_points = _label(28, Color(1, 0.9, 0.5), Control.PRESET_BOTTOM_RIGHT, Vector2(-220, -150))
 	_ammo = _label(22, Color.WHITE, Control.PRESET_BOTTOM_RIGHT, Vector2(-320, -80))
 	_prompt = _label(22, Color.WHITE, Control.PRESET_CENTER_BOTTOM, Vector2(-260, -200))
@@ -58,7 +67,31 @@ func _refresh() -> void:
 	_points.text = str(p.points)
 	var w := p.weapon()
 	_ammo.text = "%s   %d / %d" % [Weapons.display(w["name"]), w["mag"], w["reserve"]]
-	_hurt.color.a = clamp((1.0 - p.health / Player.MAX_HEALTH) * 0.6, 0.0, 0.6)
+	_hurt.color.a = clamp((1.0 - p.health / p.max_health) * 0.6, 0.0, 0.6)
+	if p.perks != _shown_perks:
+		_show_perks(p.perks)
+
+
+func _show_perks(perks: Array) -> void:
+	_shown_perks = perks.duplicate()
+	for c in _perks.get_children():
+		c.queue_free()
+	for k in perks:
+		var tex := Perks.icon(k)
+		if tex:
+			var r := TextureRect.new()
+			r.texture = tex
+			r.custom_minimum_size = Vector2(44, 45)
+			r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_perks.add_child(r)
+		else:
+			var l := Label.new()
+			l.text = Perks.display(k)
+			l.add_theme_font_size_override("font_size", 16)
+			l.add_theme_color_override("font_color", Perks.INFO[k]["color"])
+			_perks.add_child(l)
 
 
 func _process(_d: float) -> void:

@@ -5,11 +5,12 @@ class_name MysteryBox
 extends Node3D
 
 const COST := 950
-const MODEL := "ecee0a62"
-const ANIM_OPEN := "d8283c46"
-const ANIM_CLOSE := "dc54990a"
-const ANIM_IDLE_OPEN := "ef143ac4"
-const ANIM_IDLE_CLOSED := "b4bcad2c"
+# Nacht's box (ecee0a62); other maps use 350fb630 with different animation names,
+# so open/close/poses are recognised from their key counts (see _pick_animations)
+var ANIM_OPEN := "d8283c46"
+var ANIM_CLOSE := "dc54990a"
+var ANIM_IDLE_OPEN := "ef143ac4"
+var ANIM_IDLE_CLOSED := "b4bcad2c"
 const CYCLE_TIME := 4.2
 const OFFER_TIME := 12.0
 # weapons the box can give (models and stats exist for all of them)
@@ -31,11 +32,14 @@ var _cache := {}
 func setup(level: Level, entity: String) -> void:
 	var e: Dictionary = level.entities[entity]
 	global_transform = level.entity_transform(entity, true)
-	var path := "res://assets/characters/levels/%s/dynamics/%s.glb" % [level.level_name, MODEL]
+	var model_hash: String = e["models"][0] if not e["models"].is_empty() else "ecee0a62"
+	var path := "res://assets/characters/levels/%s/dynamics/%s.glb" % [level.level_name, model_hash]
 	if ResourceLoader.exists(path):
 		var model: Node3D = (load(path) as PackedScene).instantiate()
 		add_child(model)
 		_anim = model.find_children("*", "AnimationPlayer")[0]
+		if not _anim.has_animation(ANIM_OPEN):
+			_pick_animations()
 		_pose(ANIM_IDLE_CLOSED)
 	# solid box from the entity collider (world aligned, like the debris)
 	var body := StaticBody3D.new()
@@ -49,6 +53,47 @@ func setup(level: Level, entity: String) -> void:
 		shape.shape = box
 		body.add_child(shape)
 		shape.global_transform = Transform3D(Basis(), level.entity_transform(entity).origin + (lo + hi) / 2)
+
+
+# Two one-key poses (closed/open) and two animations (open/close): the opening
+# animation starts from the closed pose.
+func _pick_animations() -> void:
+	var poses := []
+	var moves := []
+	for a in _anim.get_animation_list():
+		var anim := _anim.get_animation(a)
+		var keys := 0
+		for t in anim.get_track_count():
+			keys = max(keys, anim.track_get_key_count(t))
+		(poses if keys <= 1 else moves).append(a)
+	if poses.size() < 2 or moves.size() < 2:
+		return
+	# the opening animation ends far from where it starts and starts at a pose
+	var best := INF
+	for m in moves:
+		for p in poses:
+			var d := _pose_distance(p, m, 0.0)
+			if d < best:
+				best = d
+				ANIM_OPEN = m
+				ANIM_IDLE_CLOSED = p
+	ANIM_CLOSE = moves[0] if moves[1] == ANIM_OPEN else moves[1]
+	ANIM_IDLE_OPEN = poses[0] if poses[1] == ANIM_IDLE_CLOSED else poses[1]
+
+
+func _pose_distance(pose_name: String, move_name: String, t: float) -> float:
+	var pose := _anim.get_animation(pose_name)
+	var move := _anim.get_animation(move_name)
+	var d := 0.0
+	for i in pose.get_track_count():
+		var mt := move.find_track(pose.track_get_path(i), pose.track_get_type(i))
+		if mt < 0 or pose.track_get_key_count(i) == 0:
+			continue
+		if pose.track_get_type(i) == Animation.TYPE_ROTATION_3D:
+			d += (pose.track_get_key_value(i, 0) as Quaternion).angle_to(move.rotation_track_interpolate(mt, t))
+		elif pose.track_get_type(i) == Animation.TYPE_POSITION_3D:
+			d += (pose.track_get_key_value(i, 0) as Vector3).distance_to(move.position_track_interpolate(mt, t))
+	return d
 
 
 func _pose(a: String) -> void:

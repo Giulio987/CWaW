@@ -58,12 +58,13 @@ Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `
 | Tabelle ondate | ✅ | `tools/lua/dump_waves.lua` → `waves.json` (eseguite dagli script Lua originali) |
 | Collisioni / navmesh | ✅ | generate in Godot dalla geometria (non usano ancora `CIwNavMesh` originale) |
 | Gameplay Nacht | 🔶 | round, spawn, finestre, scavalcamento, inseguimento, attacco, armi a muro, macerie, coltello, punti, lightmap |
-| Altre mappe | 🔶 | versione base: aree/collegamenti dagli script Lua (`level.json`), niente cani/perk/trappole |
+| Altre mappe | 🔶 | versione base: aree/collegamenti dagli script Lua (`level.json`), niente cani/trappole |
 | Orientamento barricate/macerie | 🔶 | le entità non hanno rotazione: direzione dal muro, interno/esterno dai settori (`tools/wall_yaw.py`) |
 | Settori e LOD | ✅ | `CIwSGSectorBuilder` → `sectors.json`; `CIwLODControllerCameraVolume` mostra la variante del settore della telecamera |
 | Mystery box | ✅ | 950 punti, coperchio animato originale, armi che girano, offerta 12 s; test `--box-test` |
+| Perk-a-Cola | ✅ | Juggernog (250 hp), Speed Cola (ricarica ×0.5), Double Tap (cadenza ×0.75), Quick Revive (solo: si rialza una volta, perde i perk); corrente dal `GeneratorSwitch` su Der Riese/Verrückt (`--power` la accende subito), Shi No Numa un perk casuale per postazione; icone originali nell'HUD; `scripts/perk_machine.gd`, `scripts/perks.gd`, test `--perk-test` |
 | Suoni in gioco | ✅ | `tools/sound_index.py`: nomi ricostruiti, sequenze di ricarica originali, sparo da `CItemGun`, canali ambientali; `scripts/sfx.gd` |
-| Mancano | ⏳ | cani, perk, smembramento, power-up, musica, build iOS |
+| Mancano | ⏳ | cani, smembramento, power-up, musica, build iOS |
 
 ## Formati – appunti
 - Risorsa nel gruppo: `u32 size, u32 nameHash, body`. Le classi polimorfiche (es. `CIwSoundData`) hanno invece `u32 subclassHash` al posto del nome, e il nome è il primo u32 del body.

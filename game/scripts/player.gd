@@ -17,6 +17,8 @@ const INTERACT_RANGE := 1.8
 var game: Node  # Game
 var points := 500
 var health := MAX_HEALTH
+var max_health := MAX_HEALTH   # raised by Juggernog
+var perks := []                # owned perks (Perks.ORDER keys), lost when going down
 var dead := false
 var weapons := []          # [{name, mag, reserve}]
 var current := 0
@@ -154,8 +156,8 @@ func reload() -> void:
 	var s := Weapons.stats(w["name"])
 	if _reloading > 0.0 or w["mag"] >= s["mag"] or w["reserve"] <= 0:
 		return
-	_reloading = s["reload"]
-	_viewmodel.reload(s["reload"])
+	_reloading = s["reload"] * (Perks.SPEED_RELOAD if has_perk("speed") else 1.0)
+	_viewmodel.reload(_reloading)
 	Sfx.instance.sequence(w["name"] + "_reload")
 
 
@@ -166,8 +168,8 @@ func _physics_process(delta: float) -> void:
 	_repair_cooldown -= delta
 	_melee_cooldown -= delta
 	_since_hit += delta
-	if _since_hit > REGEN_DELAY and health < MAX_HEALTH:
-		health = min(MAX_HEALTH, health + 40.0 * delta)
+	if _since_hit > REGEN_DELAY and health < max_health:
+		health = min(max_health, health + 40.0 * delta)
 		changed.emit()
 	if _reloading > 0.0:
 		_reloading -= delta
@@ -212,7 +214,7 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 		reload()
 		return
 	w["mag"] -= 1
-	_cooldown = s["rate"]
+	_cooldown = s["rate"] * (Perks.DBTAP_RATE if has_perk("dbtap") else 1.0)
 	_viewmodel.kick()
 	Sfx.instance.weapon_fire(w["name"])
 	_camera.rotation.x = min(_camera.rotation.x + 0.012, 1.45)
@@ -258,7 +260,7 @@ func add_points(n: int) -> void:
 
 
 func take_hit(damage: float) -> void:
-	if dead:
+	if dead or _revive_grace > 0.0:
 		return
 	health -= damage
 	_since_hit = 0.0
@@ -266,8 +268,42 @@ func take_hit(damage: float) -> void:
 	Sfx.instance.play("player_pain", -4.0)
 	changed.emit()
 	if health <= 0.0:
+		if has_perk("revive"):
+			_self_revive()
+			return
 		dead = true
+		perks.clear()
 		died.emit()
+
+
+# ------------------------------------------------------------------ perks
+
+var _revive_grace := 0.0
+
+
+func has_perk(kind: String) -> bool:
+	return kind in perks
+
+
+func give_perk(kind: String) -> void:
+	if has_perk(kind):
+		return
+	perks.append(kind)
+	if kind == "jugga":
+		max_health = Perks.JUGG_HEALTH
+		health = max_health
+	changed.emit()
+
+
+# Solo Quick Revive: instead of dying, get back up once; every perk is lost (WaW).
+func _self_revive() -> void:
+	perks.clear()
+	max_health = MAX_HEALTH
+	health = max_health
+	_revive_grace = Perks.REVIVE_GRACE
+	get_tree().create_timer(Perks.REVIVE_GRACE, false).timeout.connect(func(): _revive_grace = 0.0)
+	Sfx.instance.play("player_heartbeat")
+	changed.emit()
 
 
 # ------------------------------------------------------------------ interaction
@@ -277,7 +313,7 @@ func _update_prompt() -> void:
 	var t = _interaction_target()
 	if t == null:
 		return
-	if t is MysteryBox:
+	if t is MysteryBox or t is PerkMachine:
 		prompt = t.prompt(self)
 	elif t is Barricade:
 		prompt = "Tieni premuto E per riparare la barricata"
@@ -299,6 +335,9 @@ func _interaction_target():
 	for b in game.level.boxes:
 		if b.global_position.distance_to(p) < INTERACT_RANGE + 0.6 and b.prompt(self) != "":
 			return b
+	for m in game.level.perk_machines:
+		if m.usable_from(p) and m.prompt(self) != "":
+			return m
 	for d in game.level.debris:
 		if is_instance_valid(d) and d.global_position.distance_to(p) < INTERACT_RANGE + 1.0:
 			return d
@@ -319,7 +358,7 @@ func interact() -> void:
 			Sfx.instance.play_at("window_repair", t.global_position)
 	elif not Input.is_action_just_pressed("interact"):
 		return
-	elif t is MysteryBox:
+	elif t is MysteryBox or t is PerkMachine:
 		t.interact(self)
 	elif t is Debris:
 		if points >= t.cost:
