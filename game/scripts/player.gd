@@ -119,17 +119,26 @@ func melee() -> void:
 		return
 	_melee_cooldown = 0.9
 	_viewmodel.melee()
-	var from := _camera.global_position
-	var dir := -_camera.global_basis.z
+	# a sphere in front of the camera: hits a zombie even when it is right on top
+	# of the player or hunched below the line of sight
 	var space := get_world_3d().direct_space_state
-	# a short fan of rays so a near miss still connects
-	for off in [Vector3.ZERO, Vector3(0.25, 0, 0), Vector3(-0.25, 0, 0), Vector3(0, -0.3, 0)]:
-		var q := PhysicsRayQueryParameters3D.create(from, from + (dir + _camera.global_basis * off).normalized() * KNIFE_RANGE)
-		q.exclude = [get_rid()]
-		var hit := space.intersect_ray(q)
-		if not hit.is_empty() and hit["collider"] is Zombie:
-			hit["collider"].take_damage(KNIFE_DAMAGE, false, self, true)
-			return
+	var q := PhysicsShapeQueryParameters3D.new()
+	var sphere := SphereShape3D.new()
+	sphere.radius = 0.7
+	q.shape = sphere
+	var fwd := -_camera.global_basis.z
+	fwd.y = clampf(fwd.y, -0.5, 0.5)
+	q.transform = Transform3D(Basis(), _camera.global_position + fwd.normalized() * 0.9 + Vector3.DOWN * 0.3)
+	q.collision_mask = 2  # zombies
+	q.exclude = [get_rid()]
+	var best: Zombie = null
+	for hit in space.intersect_shape(q, 8):
+		var z = hit["collider"]
+		if z is Zombie and z.state != Zombie.State.DEAD:
+			if best == null or z.global_position.distance_to(global_position) < best.global_position.distance_to(global_position):
+				best = z
+	if best:
+		best.take_damage(KNIFE_DAMAGE, false, self, true)
 
 
 func switch_weapon() -> void:

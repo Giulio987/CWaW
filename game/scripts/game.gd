@@ -76,7 +76,7 @@ func start(level_name_: String) -> void:
 		var centre := Vector3.ZERO
 		for o in room:
 			centre += o.global_position
-		w.finalize(space, centre / room.size() if room.size() > 2 else level.player_spawn.origin)
+		w.finalize(level, centre / room.size() if room.size() > 2 else level.player_spawn.origin)
 	hud.message("Caricamento navigazione…")
 	level.navigation_ready.connect(_begin, CONNECT_ONE_SHOT)
 	level.bake_navigation()

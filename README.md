@@ -59,7 +59,8 @@ Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `
 | Collisioni / navmesh | ✅ | generate in Godot dalla geometria (non usano ancora `CIwNavMesh` originale) |
 | Gameplay Nacht | 🔶 | round, spawn, finestre, scavalcamento, inseguimento, attacco, armi a muro, macerie, coltello, punti, lightmap |
 | Altre mappe | 🔶 | versione base: aree/collegamenti dagli script Lua (`level.json`), niente cani/perk/trappole |
-| Orientamento barricate/macerie | 🔶 | le entità non hanno rotazione: direzione dal muro (`tools/wall_yaw.py`) |
+| Orientamento barricate/macerie | 🔶 | le entità non hanno rotazione: direzione dal muro, interno/esterno dai settori (`tools/wall_yaw.py`) |
+| Settori e LOD | ✅ | `CIwSGSectorBuilder` → `sectors.json`; `CIwLODControllerCameraVolume` mostra la variante del settore della telecamera |
 | Mystery box | ✅ | 950 punti, coperchio animato originale, armi che girano, offerta 12 s; test `--box-test` |
 | Mancano | ⏳ | suoni in gioco, cani, perk, smembramento, power-up, build iOS |
 

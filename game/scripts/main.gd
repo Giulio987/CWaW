@@ -40,6 +40,8 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_stairs_test(game)
 	if args.has("--box-test"):
 		_box_test(game)
+	if args.has("--knife-test"):
+		_knife_test(game)
 	if args.has("--spin"):
 		_spin_shots(game)
 	var shots := args.find("--shots")
@@ -92,8 +94,8 @@ func _look_shots(game: Game, names: PackedStringArray) -> void:
 		var target := game.level.entity_transform(n).origin + Vector3.UP * 1.0
 		var from := game.level.player_spawn.origin
 		for w in game.level.windows:
-			if w.name == n:
-				from = w.inside + (w.inside - w.global_position).normalized() * 2.0
+			if String(w.name).to_lower() == n.to_lower():
+				from = w.global_position + (w.inside - w.global_position).normalized() * 3.0
 		var dir := (target - from)
 		dir.y = 0
 		dir = dir.rotated(Vector3.UP, orbit)
@@ -104,6 +106,19 @@ func _look_shots(game: Game, names: PackedStringArray) -> void:
 			await get_tree().process_frame
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/look_%s.png" % spec.replace("@", "_")))
+		if OS.get_cmdline_user_args().has("--pick"):
+			var cam := get_viewport().get_camera_3d()
+			var size := get_viewport().get_visible_rect().size
+			for fx in [0.05, 0.15, 0.3, 0.5]:
+				var sp := Vector2(size.x * fx, size.y * 0.4)
+				var q := PhysicsRayQueryParameters3D.create(cam.project_ray_origin(sp), cam.project_ray_origin(sp) + cam.project_ray_normal(sp) * 100.0)
+				q.collide_with_areas = false
+				var hit := get_viewport().get_world_3d().direct_space_state.intersect_ray(q)
+				var path := "none"
+				if not hit.is_empty():
+					var node: Node = hit["collider"]
+					path = "%s <- %s <- %s" % [node.get_parent().name, node.get_parent().get_parent().name, node.get_parent().get_parent().get_parent().name]
+				print("[pick] %s x=%.2f -> %s dist=%.1f" % [spec, fx, path, -1.0 if hit.is_empty() else cam.global_position.distance_to(hit["position"])])
 	get_tree().quit()
 
 
@@ -241,4 +256,32 @@ func _box_test(game: Game) -> void:
 			await get_tree().process_frame
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/box_side%d.png" % o))
+	get_tree().quit()
+
+
+# One knife slash against a 100 hp zombie at several distances/angles: -- nacht --knife-test
+func _knife_test(game: Game) -> void:
+	await game.level.navigation_ready
+	game.set_process(false)  # no wave spawns during the test
+	var p := game.player
+	var results := []
+	for dist in [0.5, 0.8, 1.1, 1.4, 1.7]:
+		for ang in [-30.0, 0.0, 30.0]:
+			var fwd := -p.global_basis.z
+			var at: Vector3 = p.global_position + fwd.rotated(Vector3.UP, deg_to_rad(ang)) * dist
+			var z := Zombie.new()
+			z.setup(at, game.level.windows[0], p, 100.0, false)
+			game.add_child(z)
+			z.state = Zombie.State.ATTACK
+			z.set_physics_process(false)
+			for i in 3:
+				await get_tree().physics_frame
+			p._melee_cooldown = 0.0
+			p.melee()
+			await get_tree().physics_frame
+			results.append("%.1fm %+.0f°: %s" % [dist, ang, "dead" if z.state == Zombie.State.DEAD else "ALIVE hp=%.0f" % z.health])
+			z.queue_free()
+			await get_tree().create_timer(0.1).timeout
+	for r in results:
+		print("[knife] ", r)
 	get_tree().quit()

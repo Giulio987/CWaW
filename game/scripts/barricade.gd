@@ -39,15 +39,26 @@ func setup(level: Level, entity: String) -> void:
 
 
 # Called after level collision exists and before navigation is baked.
-func finalize(_space: PhysicsDirectSpaceState3D, room_hint: Vector3) -> void:
-	var a := global_position + normal * 1.1
-	var b := global_position - normal * 1.1
-	if a.distance_to(room_hint) < b.distance_to(room_hint):
-		inside = a
-		outside = b
-	else:
-		inside = b
-		outside = a
+func finalize(level, room_hint: Vector3) -> void:
+	# inside = the side that lies in a room sector; the measured wall normal can be
+	# off by 90 degrees, so both axes are tried
+	inside = Vector3.ZERO
+	for axis: Vector3 in [normal, normal.rotated(Vector3.UP, PI / 2)]:
+		var a: Vector3 = global_position + axis * 1.1 + Vector3.UP
+		var b: Vector3 = global_position - axis * 1.1 + Vector3.UP
+		if level.is_indoors(a) != level.is_indoors(b):
+			inside = (a if level.is_indoors(a) else b) - Vector3.UP
+			outside = (b if level.is_indoors(a) else a) - Vector3.UP
+			normal = axis
+			break
+	if inside == Vector3.ZERO:
+		# no sector information: fall back to the side closer to the room
+		var a: Vector3 = global_position + normal * 1.1
+		var b: Vector3 = global_position - normal * 1.1
+		inside = a if a.distance_to(room_hint) < b.distance_to(room_hint) else b
+		outside = b if inside == a else a
+	# boards and blocker follow the axis that actually crosses the wall
+	global_transform = Transform3D(Basis(Vector3.UP, atan2(normal.x, normal.z)), global_position)
 	# invisible blocker in the opening: keeps the player in and splits the navmesh
 	_blocker = StaticBody3D.new()
 	var shape := CollisionShape3D.new()

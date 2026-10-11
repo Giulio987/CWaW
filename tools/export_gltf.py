@@ -128,7 +128,9 @@ class GlbWriter:
                 # byte 3 alone is ambiguous (2 is used by opaque wall atlases and by fire/smoke/glows):
                 # effects are told apart by being mostly transparent
                 effect = alpha_coverage(png0) > 0.35
-                if alpha_mode == ALPHA_ADD and effect:
+                # byte 2 == 4 marks effect materials (glows, light blobs on walls): additive even
+                # when the texture has no alpha, since black adds nothing
+                if alpha_mode == ALPHA_ADD and (effect or body[2] == 4):
                     m["alphaMode"] = "BLEND"
                     blend = "add"
                 elif alpha_mode == ALPHA_BLEND and has_alpha:

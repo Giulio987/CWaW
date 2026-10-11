@@ -34,6 +34,7 @@ def names_dictionary():
         bases.add(base)
         # area names ("StartRoom") also prefix their spawns and windows ("startroomZombieSpawn3")
         for suffix in ("ZombieSpawn", "ZombieWindow", "DogSpawn", "Spawn", "Window"):
+            bases.add("sector_" + base.lower())
             bases.add(base.lower() + suffix)
             bases.add(base + suffix)
     for base in bases:
@@ -67,6 +68,25 @@ def transforms(b):
 WEAPONS = ["colt45", "kar98", "carbine", "thompson", "mp40", "stg44", "trenchgun", "shotgun", "bar", "garand", "g43",
            "ppsh", "type100", "mg42", "raygun", "ptrs", "fg42", "sawnoff", "springfield", "arisaka", "browning",
            "flamethrower", "wunderwaffe", "grenade", "molotov", "betty", "knife"]
+
+
+def lod_controller(b, models):
+    """CIwLODControllerCameraVolumeSpec: u32 0, u32 n, n x (u32 sectorHash, u32 lod);
+    the renderable then lists its models from LOD 0 (most detailed) down."""
+    i = b.find(struct.pack("<I", iw_hash("CIwLODControllerCameraVolumeSpec")))
+    if i < 0:
+        return None
+    (n,) = struct.unpack_from("<I", b, i + 8)
+    pairs = {}
+    for k in range(n):
+        h, lod = struct.unpack_from("<II", b, i + 12 + 8 * k)
+        pairs[f"{h:08x}"] = lod
+    order = []
+    for j in range(i + 12 + 8 * n, len(b) - 3):
+        (h,) = struct.unpack_from("<I", b, j)
+        if h in models and f"{h:08x}" not in order:
+            order.append(f"{h:08x}")
+    return {"sectors": pairs, "lods": order}
 
 
 def colliders(b):
@@ -123,10 +143,20 @@ def main(out_path, group_path, *model_groups):
         ents.append({"name": d.get(r.name_hash, f"{r.name_hash:08x}"), "hash": f"{r.name_hash:08x}",
                      "components": comps, "models": [f"{h:08x}" for h in refs],
                      "transform": xf[-1] if xf else None, "children": xf[:-1], "size": len(b),
-                     "params": action_params(b, comps), "colliders": colliders(b)})
+                     "params": action_params(b, comps), "colliders": colliders(b),
+                     "lod": lod_controller(b, models)})
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(ents, f, indent=1)
+    # scene sectors (CIwSGSectorBuilder): u32 index, u8 0, s32 min[3], s32 max[3]
+    sectors = []
+    for r in g.resources:
+        if r.cls == iw_hash("CIwSGSectorBuilder"):
+            lo = struct.unpack_from("<iii", r.body, 5)
+            hi = struct.unpack_from("<iii", r.body, 17)
+            sectors.append({"hash": f"{r.name_hash:08x}", "name": d.get(r.name_hash, ""), "min": list(lo), "max": list(hi)})
+    with open(os.path.join(os.path.dirname(out_path), "sectors.json"), "w") as f:
+        json.dump(sectors, f, indent=1)
     print(out_path, len(ents), "entities,", sum(1 for e in ents if e["transform"]), "with transform")
 
 
