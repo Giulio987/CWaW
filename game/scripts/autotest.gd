@@ -190,6 +190,9 @@ func _crawl_test() -> void:
 func _knife_live() -> void:
 	await game.level.navigation_ready
 	game.set_process(false)
+	var args := OS.get_cmdline_user_args()
+	if args.has("--round"):
+		game.round_number = int(args[args.find("--round") + 1])
 	var p := game.player
 	p.health = 1e9
 	var fwd := -p.global_basis.z
@@ -201,7 +204,7 @@ func _knife_live() -> void:
 		await get_tree().create_timer(0.2).timeout
 		z.become_crawler()
 	var hits := 0
-	for i in 16:
+	for i in 24:
 		await get_tree().create_timer(1.0).timeout
 		# aim at the zombie like a player would (centre of its body)
 		var target: Vector3 = z.global_position + Vector3.UP * (0.3 if z.crawler else 1.1)
@@ -209,6 +212,8 @@ func _knife_live() -> void:
 		p.rotation.y = atan2(-to.x, -to.z)
 		p.get_viewport().get_camera_3d().rotation.x = 0.0 if OS.get_cmdline_user_args().has("--level-aim") else atan2(to.y, Vector2(to.x, to.z).length())
 		var before := z.health
+		if args.has("--round"):
+			game.round_number = int(args[args.find("--round") + 1])
 		p._melee_cooldown = 0.0
 		p.melee()
 		await get_tree().physics_frame

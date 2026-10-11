@@ -24,6 +24,7 @@ const CRAWL_ATTACK := "dddede7a"  # zombie_crawl_attack
 const CRAWL_DEATH := "bd4b9b0a"
 const CRAWL_CHANCE := 0.08
 var crawler := false
+var max_health := 100.0
 var _shape: CollisionShape3D
 # window: swipe at the boards in place, then climb through (its root-motion partner
 # 4c478fd4 moves 1.34 m forward over the 4.07 s animation)
@@ -55,6 +56,7 @@ func setup(spawn: Vector3, win: Barricade, player: Player, hp: float, runner: bo
 	window = win
 	target = player
 	health = hp
+	max_health = hp
 	var pool := RUNS if runner else WALKS
 	move_anim = pool.keys().pick_random()
 	speed = pool[move_anim]

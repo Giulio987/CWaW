@@ -143,11 +143,23 @@ func melee() -> void:
 		var q := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP, z.global_position + Vector3.UP * (0.4 if z.crawler else 1.0), 1)
 		if not get_world_3d().direct_space_state.intersect_ray(q).is_empty():
 			continue
+		# a crawler lies at your feet: you have to aim down at it
+		if z.crawler:
+			var aim := -_camera.global_basis.z
+			var body: Vector3 = (z.global_position + Vector3.UP * 0.3 - _camera.global_position).normalized()
+			if aim.angle_to(body) > deg_to_rad(35):
+				continue
 		if d < best_d:
 			best_d = d
 			best = z
 	if best:
-		best.take_damage(KNIFE_DAMAGE, false, self, true)
+		best.take_damage(knife_damage(best), false, self, true)
+
+
+# As in the original as remembered: one stab per round number (round 1: 1, round 2: 2...)
+func knife_damage(z: Zombie) -> float:
+	var rnd: int = max(1, game.round_number)
+	return z.max_health / rnd + 1.0
 
 
 func switch_weapon() -> void:
