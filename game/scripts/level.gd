@@ -101,8 +101,11 @@ func _prepare_meshes(root: Node) -> void:
 					mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 					mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 					mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+					# vertex colours fade the edges of shafts and glows; keep them subtle
+					mat.vertex_color_use_as_albedo = true
 					if blend == "add":
 						mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+						mat.albedo_color = Color(1, 1, 1, 0.45)
 			if not effect:
 				faces.append_array(_surface_faces(mi.mesh, s))
 		# collision from the solid surfaces only (a floor with a blood decal must stay solid)

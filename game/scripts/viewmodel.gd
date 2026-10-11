@@ -85,11 +85,37 @@ func _back_to_idle(action: String) -> void:
 		_play("idle", true)
 
 
-var _melee := 0.0
+var knife_swing := "d9b67069"   # arms animation of the knife slash (identified visually)
+const KNIFE_MODEL := "78d2d941"   # knife_lod1 in the player group
+var _knife: Node3D
 
 
 func melee() -> void:
-	_melee = 1.0
+	if _knife == null:
+		var models: Node = (load("res://assets/models/ingame/player.glb") as PackedScene).instantiate()
+		_knife = models.find_child(KNIFE_MODEL, true, false)
+		if _knife:
+			_knife.get_parent().remove_child(_knife)
+			_knife.transform = Transform3D.IDENTITY
+			_attach.add_child(_knife)
+		models.queue_free()
+	if not _arms_anim.has_animation(knife_swing):
+		return
+	if _weapon:
+		_weapon.visible = false
+	if _knife:
+		_knife.visible = true
+	_arms_anim.stop()
+	_arms_anim.play(knife_swing)
+	get_tree().create_timer(_arms_anim.get_animation(knife_swing).length).timeout.connect(_end_melee)
+
+
+func _end_melee() -> void:
+	if _knife:
+		_knife.visible = false
+	if _weapon:
+		_weapon.visible = true
+	_play("idle", true)
 
 
 func kick() -> void:
@@ -109,7 +135,4 @@ func _process(delta: float) -> void:
 	var amp := 0.008 if moving else 0.002
 	_kick = move_toward(_kick, 0.0, delta * 6.0)
 	var dip: float = clamp(-_kick, 0.0, 1.0) * 0.25
-	_melee = move_toward(_melee, 0.0, delta * 3.0)
-	var lunge := sin(_melee * PI)  # out and back
-	position = Vector3(sin(_bob) * amp - lunge * 0.12, abs(cos(_bob)) * amp - dip - lunge * 0.05, max(_kick, 0.0) * 0.02 - lunge * 0.25)
-	rotation = Vector3(0, PI + lunge * 0.6, lunge * 0.5)
+	position = Vector3(sin(_bob) * amp, abs(cos(_bob)) * amp - dip, max(_kick, 0.0) * 0.02)

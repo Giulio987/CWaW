@@ -16,8 +16,10 @@ const RUNS := {"c9903fc0": 3.03, "842441ac": 3.61, "842441ab": 3.49, "c349cc28":
 const IDLE := "c98b07c8"
 const ATTACKS := ["fab4136a", "fb0fe592"]
 const DEATHS := ["20b0e521", "371f7199", "f037474d"]
-const TEAR := "9c58e56e"
-const CLIMB := "32692427"
+# window: swipe at the boards in place, then climb through (its root-motion partner
+# 4c478fd4 moves 1.34 m forward over the 4.07 s animation)
+const TEAR := "fb0fe592"
+const CLIMB := "9c58e56e"
 const ATTACK_RANGE := 1.3
 const ATTACK_DAMAGE := 45.0
 
@@ -36,6 +38,8 @@ var _model: Node3D
 var _timer := 0.0
 var _hit_done := false
 var _repath := 0.0
+var _best_dist := INF
+var _stall := 0.0
 
 
 func setup(spawn: Vector3, win: Barricade, player: Player, hp: float, runner: bool) -> void:
@@ -65,7 +69,7 @@ func _ready() -> void:
 	for mi in _model.find_children("*", "MeshInstance3D"):
 		mi.visible = not (mi.name in HIDDEN_PARTS or mi.name.ends_with("_m1"))
 	_anim = _model.find_children("*", "AnimationPlayer")[0]
-	for a in WALKS.keys() + RUNS.keys() + [IDLE] + ATTACKS + [TEAR]:
+	for a in WALKS.keys() + RUNS.keys() + [IDLE] + ATTACKS:
 		if _anim.has_animation(a):
 			_anim.get_animation(a).loop_mode = Animation.LOOP_LINEAR
 	_agent = NavigationAgent3D.new()
@@ -86,7 +90,15 @@ func _play(a: String, blend := 0.2) -> void:
 func _physics_process(delta: float) -> void:
 	match state:
 		State.TO_WINDOW:
-			if global_position.distance_to(window.outside) < 0.7:
+			var d := global_position.distance_to(window.outside)
+			# progress watchdog: a zombie that stops getting closer is put at the window
+			if d < _best_dist - 0.2:
+				_best_dist = d
+				_stall = 0.0
+			else:
+				_stall += delta
+			if d < 0.7 or (_agent.is_navigation_finished() and d < 2.5) or _stall > 6.0:
+				global_position = window.outside
 				_start_tearing()
 			else:
 				_move_along_path(delta)
@@ -96,8 +108,11 @@ func _physics_process(delta: float) -> void:
 			if window.boards <= 0:
 				_start_climb()
 			elif _timer <= 0.0:
+				# one board per swipe, like the original
+				_anim.stop()
+				_anim.play(TEAR, 0.1)
 				window.tear_board()
-				_timer = 1.6
+				_timer = _anim.get_animation(TEAR).length + 0.15
 		State.CLIMBING:
 			pass  # driven by tween
 		State.CHASE:
@@ -169,7 +184,7 @@ func _start_climb() -> void:
 	_play(CLIMB, 0.1)
 	collision_mask = 0
 	var tw := create_tween()
-	tw.tween_property(self, "global_position", window.inside, 1.6)
+	tw.tween_property(self, "global_position", window.inside, _anim.get_animation(CLIMB).length)
 	tw.finished.connect(func():
 		collision_mask = 1
 		window.occupied_by = null

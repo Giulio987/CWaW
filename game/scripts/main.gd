@@ -6,7 +6,8 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	var level := ""
 	for a in args:
-		if not a.begins_with("--") and not a.is_valid_float() and not "," in a and not a in Weapons.STATS:
+		# only real level names count; anything else (option values) is ignored
+		if DirAccess.dir_exists_absolute("res://assets/levels/" + a) and a != "":
 			level = a
 	if level == "":
 		_show_menu(args.has("--menu-shot"))
@@ -55,11 +56,26 @@ func _weapon_shots(game: Game, names: PackedStringArray) -> void:
 	for i in 6:
 		await get_tree().physics_frame
 	for n in names:
-		game.player.give_weapon(n)
-		for i in 10:
-			await get_tree().process_frame
+		if n.begins_with("swing="):
+			# swing=<arms anim>: 5 frames of one knife slash with that animation
+			game.player._viewmodel.knife_swing = n.get_slice("=", 1)
+			game.player.melee()
+			for f in 5:
+				await get_tree().create_timer(0.09).timeout
+				await RenderingServer.frame_post_draw
+				get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/swing_%s_%d.png" % [n.get_slice("=", 1), f]))
+			await get_tree().create_timer(1.0).timeout
+			continue
+		if n.begins_with("knife"):
+			# knife@0.2 = mid-swing screenshot 0.2 s after the slash starts
+			game.player.melee()
+			await get_tree().create_timer(float(n.get_slice("@", 1)) if "@" in n else 0.2).timeout
+		else:
+			game.player.give_weapon(n)
+			for i in 10:
+				await get_tree().process_frame
 		await RenderingServer.frame_post_draw
-		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/wpn_%s.png" % n))
+		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/wpn_%s.png" % n.replace("@", "_")))
 	get_tree().quit()
 
 

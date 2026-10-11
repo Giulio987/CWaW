@@ -40,6 +40,9 @@ func setup(level: Level, name_: String) -> void:
 		if aps.size() > 0:
 			_anim = aps[0]
 			_pick_animations()
+			var forced := OS.get_cmdline_user_args().find("--debris-pose")
+			if forced >= 0 and _anim.has_animation(OS.get_cmdline_user_args()[forced + 1]):
+				_closed = OS.get_cmdline_user_args()[forced + 1]
 			if _closed != "":
 				_anim.play(_closed)
 				_anim.seek(0.0, true)

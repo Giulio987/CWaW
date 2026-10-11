@@ -51,6 +51,9 @@ func _process(delta: float) -> void:
 				var k: String = Zombie.State.keys()[z.state]
 				states[k] = states.get(k, 0) + 1
 		var boards := game.level.windows.map(func(w): return w.boards) if game.level else []
+		for z in game.get_children():
+			if z is Zombie and z.state == Zombie.State.TO_WINDOW and Vector2(z.velocity.x, z.velocity.z).length() < 0.1:
+				print("[autotest]   to_window: pos=%s dist=%.1f vel=%.2f occupied=%s next=%s" % [z.global_position.snapped(Vector3(0.1, 0.1, 0.1)), z.global_position.distance_to(z.window.outside), Vector2(z.velocity.x, z.velocity.z).length(), z.window.occupied_by != null, z._agent.get_next_path_position().snapped(Vector3(0.1, 0.1, 0.1))])
 		print("[autotest] t=%.0f round=%d points=%d hp=%.0f zombies=%s boards=%s" % [_t, game.round_number, p.points, p.health, states, boards])
 	_shot -= delta
 	if _shot <= 0.0:
