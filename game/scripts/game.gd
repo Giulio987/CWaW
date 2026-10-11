@@ -188,7 +188,8 @@ func _on_debris_opened(d: Debris) -> void:
 		if not area in open_areas:
 			open_areas.append(area)
 	level.debris.erase(d)
-	await get_tree().process_frame
+	await get_tree().physics_frame
+	await get_tree().physics_frame
 	level.bake_navigation()
 
 

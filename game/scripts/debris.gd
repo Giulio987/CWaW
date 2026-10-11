@@ -55,16 +55,38 @@ func setup(level: Level, name_: String) -> void:
 
 
 # The rigs have a closed pose (1 key), an opening animation (many keys) and an
-# open pose (1 key); the closed one is the first single-key animation.
+# open pose (1 key). The closed pose is the single-key one matching the first
+# frame of the opening animation.
 func _pick_animations() -> void:
 	var longest := 0.0
+	var poses := []
 	for a in _anim.get_animation_list():
 		var anim := _anim.get_animation(a)
 		if anim.length > longest:
 			longest = anim.length
 			_opening = a
-		elif anim.length == 0.0 and _closed == "":
-			_closed = a
+		elif anim.length == 0.0:
+			poses.append(a)
+	if _opening == "" or poses.is_empty():
+		_closed = poses[0] if poses.size() > 0 else ""
+		return
+	var open_anim := _anim.get_animation(_opening)
+	var best := INF
+	for p in poses:
+		var pose := _anim.get_animation(p)
+		var d := 0.0
+		for t in pose.get_track_count():
+			var ot := open_anim.find_track(pose.track_get_path(t), pose.track_get_type(t))
+			if ot < 0 or pose.track_get_key_count(t) == 0:
+				continue
+			match pose.track_get_type(t):
+				Animation.TYPE_ROTATION_3D:
+					d += (pose.track_get_key_value(t, 0) as Quaternion).angle_to(open_anim.rotation_track_interpolate(ot, 0.0))
+				Animation.TYPE_POSITION_3D:
+					d += (pose.track_get_key_value(t, 0) as Vector3).distance_to(open_anim.position_track_interpolate(ot, 0.0))
+		if d < best:
+			best = d
+			_closed = p
 
 
 func interact_position() -> Vector3:

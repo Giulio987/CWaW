@@ -49,6 +49,10 @@ func load_level(name: String) -> void:
 
 
 func bake_navigation() -> void:
+	if nav_region.is_baking():
+		# a bake is running: bake again once it finishes so the latest geometry is used
+		nav_region.bake_finished.connect(bake_navigation, CONNECT_ONE_SHOT)
+		return
 	nav_region.bake_finished.connect(func(): navigation_ready.emit(), CONNECT_ONE_SHOT)
 	nav_region.bake_navigation_mesh(true)
 
@@ -85,18 +89,44 @@ func entities_matching(prefix: String) -> Array:
 
 func _prepare_meshes(root: Node) -> void:
 	for mi in root.find_children("*", "MeshInstance3D", true, false):
-		var solid := true
+		var faces := PackedVector3Array()
 		for s in mi.mesh.get_surface_count():
 			var mat := mi.mesh.surface_get_material(s) as StandardMaterial3D
-			if mat == null:
-				continue
-			_apply_lightmap(mat)
-			if mat.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA:
-				solid = false  # light shafts, glows: no collision
-				mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-				mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		if solid:
-			mi.create_trimesh_collision()
+			var effect := false
+			if mat != null:
+				_apply_lightmap(mat)
+				var blend: String = mat.get_meta("extras", {}).get("blend", "")
+				if blend != "":
+					effect = true  # fire, smoke, glows, light shafts, fog cards
+					mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+					mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+					mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+					if blend == "add":
+						mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+			if not effect:
+				faces.append_array(_surface_faces(mi.mesh, s))
+		# collision from the solid surfaces only (a floor with a blood decal must stay solid)
+		if not faces.is_empty():
+			var shape := ConcavePolygonShape3D.new()
+			shape.set_faces(faces)
+			shape.backface_collision = true
+			var body := StaticBody3D.new()
+			var cs := CollisionShape3D.new()
+			cs.shape = shape
+			body.add_child(cs)
+			mi.add_child(body)
+
+
+static func _surface_faces(mesh: Mesh, surface: int) -> PackedVector3Array:
+	var arrays := mesh.surface_get_arrays(surface)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var out := PackedVector3Array()
+	var idx = arrays[Mesh.ARRAY_INDEX]
+	if idx == null or (idx as PackedInt32Array).is_empty():
+		return verts
+	for i in idx:
+		out.append(verts[i])
+	return out
 
 
 func _apply_lightmap(mat: StandardMaterial3D) -> void:

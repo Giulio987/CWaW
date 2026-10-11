@@ -35,6 +35,8 @@ var _repair_cooldown := 0.0
 
 func _ready() -> void:
 	collision_mask = 1 | 2  # world and zombies
+	floor_snap_length = 0.5   # stick to stairs when walking down
+	floor_max_angle = deg_to_rad(50)
 	var shape := CollisionShape3D.new()
 	var cap := CapsuleShape3D.new()
 	cap.radius = 0.3
@@ -172,6 +174,8 @@ func _physics_process(delta: float) -> void:
 			velocity.y = JUMP
 	else:
 		velocity.y -= GRAVITY * delta
+	if is_on_floor():
+		Stairs.step_up(self, delta)
 	move_and_slide()
 
 	var w := weapon()

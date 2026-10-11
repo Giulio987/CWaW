@@ -31,7 +31,8 @@ Anteprima di un modello: `Godot --path game -s res://tools/preview.gd -- res://a
 Senza argomenti parte il menu principale (texture originali) per scegliere la mappa.
 Comandi: WASD, mouse, clic sinistro spara, V coltello, R ricarica, Q cambia arma, E compra/ripara, Shift corre, Spazio salta, Esc pausa.
 Su touch (iPhone): stick virtuale a sinistra, trascina a destra per guardare, pulsanti FUOCO/E/R/⇄/🔪.
-Debug: `-- nacht --look <entità,...>` e `-- nacht --shots <armi,...>` salvano screenshot in `analysis/preview`.
+Debug: `-- nacht --look <entità,...>`, `-- nacht --shots <armi,...>`, `-- nacht --spin` salvano screenshot in `analysis/preview`;
+`-- nacht --stairs-test` apre le macerie e fa salire il giocatore al piano di sopra (stampa OK/FAIL).
 
 Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `barricade.gd`, `debris.gd`,
 `player.gd`, `zombie.gd`, `game.gd` (round da `waves.json` estratto dagli script Lua originali), `hud.gd`, `weapons.gd`.

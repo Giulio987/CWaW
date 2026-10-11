@@ -27,6 +27,20 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 C_MODEL, C_MAT, C_TEX = iw_hash("CIwModel"), iw_hash("CIwMaterial"), iw_hash("CIwTexture")
 SCALE = 1 / 400.0
 ALPHA_BLEND = 4
+ALPHA_ADD = 2
+_alpha_cache = {}
+
+
+def alpha_coverage(png):
+    """Fraction of the texture that is clearly transparent (effects are mostly empty)."""
+    if png not in _alpha_cache:
+        im = Image.open(png)
+        if im.mode != "RGBA":
+            _alpha_cache[png] = 0.0
+        else:
+            a = np.asarray(im)[:, :, 3]
+            _alpha_cache[png] = float((a < 128).mean())
+    return _alpha_cache[png]
 
 
 class Index:
@@ -107,15 +121,23 @@ class GlbWriter:
             alpha_mode = body[3]
             t0, t1 = struct.unpack_from("<II", body, 0x1D)
             png0 = index.texture(t0, gdir)
+            blend = ""
             if png0:
                 m["pbrMetallicRoughness"]["baseColorTexture"] = {"index": self.image(png0)}
                 has_alpha = Image.open(png0).mode == "RGBA"
-                if alpha_mode == ALPHA_BLEND and has_alpha:
+                # byte 3 alone is ambiguous (2 is used by opaque wall atlases and by fire/smoke/glows):
+                # effects are told apart by being mostly transparent
+                effect = alpha_coverage(png0) > 0.35
+                if alpha_mode == ALPHA_ADD and effect:
                     m["alphaMode"] = "BLEND"
+                    blend = "add"
+                elif alpha_mode == ALPHA_BLEND and has_alpha:
+                    m["alphaMode"] = "BLEND"
+                    blend = "mix"
                 elif has_alpha:
                     m["alphaMode"] = "MASK"
             png1 = index.texture(t1, gdir) if t1 else None
-            m["extras"] = {"iw_flags": body[:5].hex(), "texture0": f"{t0:08x}"}
+            m["extras"] = {"iw_flags": body[:5].hex(), "texture0": f"{t0:08x}", "blend": blend}
             if png1:
                 m["extras"]["lightmap"] = os.path.relpath(png1, os.path.dirname(self.out_path))
         self.j["materials"].append(m)

@@ -51,6 +51,8 @@ func setup(spawn: Vector3, win: Barricade, player: Player, hp: float, runner: bo
 func _ready() -> void:
 	collision_layer = 2
 	collision_mask = 1
+	floor_snap_length = 0.5
+	floor_max_angle = deg_to_rad(50)
 	var shape := CollisionShape3D.new()
 	var cap := CapsuleShape3D.new()
 	cap.radius = 0.3
@@ -139,6 +141,8 @@ func _move_along_path(delta: float) -> void:
 	velocity.x = dir.x * speed
 	velocity.z = dir.z * speed
 	velocity.y = 0.0 if is_on_floor() else velocity.y - 12.0 * delta
+	if is_on_floor():
+		Stairs.step_up(self, delta)
 	move_and_slide()
 
 
