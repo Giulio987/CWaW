@@ -16,6 +16,8 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.has("--gib-test"):
 		_gib_test.call_deferred()
+	elif args.has("--knife-live"):
+		_knife_live.call_deferred()
 	elif args.has("--crawl-test"):
 		_crawl_test.call_deferred()
 	elif args.has("--powerup-test"):
@@ -25,7 +27,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if OS.get_cmdline_user_args().has("--gib-test") or OS.get_cmdline_user_args().has("--powerup-test") or OS.get_cmdline_user_args().has("--crawl-test"):
+	if OS.get_cmdline_user_args().has("--gib-test") or OS.get_cmdline_user_args().has("--powerup-test") or OS.get_cmdline_user_args().has("--crawl-test") or OS.get_cmdline_user_args().has("--knife-live"):
 		return
 	_t += delta
 	if game.player == null:
@@ -180,4 +182,41 @@ func _crawl_test() -> void:
 	z.take_damage(1e7, false, p)
 	await get_tree().create_timer(2.5).timeout
 	await _snap("crawl_dead")
+	get_tree().quit()
+
+
+# Live knife fight: a chasing zombie (round-5 health) attacks, the player keeps knifing
+# whatever is in front: -- nacht --autotest 60 --knife-live [--crawler]
+func _knife_live() -> void:
+	await game.level.navigation_ready
+	game.set_process(false)
+	var p := game.player
+	p.health = 1e9
+	var fwd := -p.global_basis.z
+	var z := Zombie.new()
+	z.setup(p.global_position + fwd * 4.0, game.level.windows[0], p, 400.0, false)
+	game.add_child(z)
+	z.state = Zombie.State.CHASE
+	if OS.get_cmdline_user_args().has("--crawler"):
+		await get_tree().create_timer(0.2).timeout
+		z.become_crawler()
+	var hits := 0
+	for i in 16:
+		await get_tree().create_timer(1.0).timeout
+		# aim at the zombie like a player would (centre of its body)
+		var target: Vector3 = z.global_position + Vector3.UP * (0.3 if z.crawler else 1.1)
+		var to: Vector3 = target - (p.global_position + Vector3.UP * 1.6)
+		p.rotation.y = atan2(-to.x, -to.z)
+		p.get_viewport().get_camera_3d().rotation.x = 0.0 if OS.get_cmdline_user_args().has("--level-aim") else atan2(to.y, Vector2(to.x, to.z).length())
+		var before := z.health
+		p._melee_cooldown = 0.0
+		p.melee()
+		await get_tree().physics_frame
+		var dist := p.global_position.distance_to(z.global_position)
+		var hit := z.health < before
+		hits += int(hit)
+		print("[knife-live] t=%d dist=%.2f state=%s hit=%s health=%.0f" % [i, dist, Zombie.State.keys()[z.state], hit, z.health])
+		if z.state == Zombie.State.DEAD:
+			break
+	print("[knife-live] %s hits=%d" % ["OK" if z.state == Zombie.State.DEAD else "FAIL", hits])
 	get_tree().quit()

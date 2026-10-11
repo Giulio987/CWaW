@@ -62,6 +62,7 @@ func setup(spawn: Vector3, win: Barricade, player: Player, hp: float, runner: bo
 
 
 func _ready() -> void:
+	add_to_group("zombies")
 	collision_layer = 2
 	collision_mask = 1 | 4
 	floor_snap_length = 0.5

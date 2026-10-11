@@ -111,7 +111,7 @@ func look(delta: Vector2) -> void:
 
 
 const KNIFE_DAMAGE := 150.0
-const KNIFE_RANGE := 1.8
+const KNIFE_RANGE := 1.8  # metres, horizontal
 var _melee_cooldown := 0.0
 
 
@@ -122,24 +122,30 @@ func melee() -> void:
 	_melee_cooldown = 0.9
 	_viewmodel.melee()
 	Sfx.instance.play("knife_slash", -3.0)
-	# a sphere in front of the camera: hits a zombie even when it is right on top
-	# of the player or hunched below the line of sight
-	var space := get_world_3d().direct_space_state
-	var q := PhysicsShapeQueryParameters3D.new()
-	var sphere := SphereShape3D.new()
-	sphere.radius = 0.7
-	q.shape = sphere
-	var fwd := -_camera.global_basis.z
-	fwd.y = clampf(fwd.y, -0.5, 0.5)
-	q.transform = Transform3D(Basis(), _camera.global_position + fwd.normalized() * 0.9 + Vector3.DOWN * 0.3)
-	q.collision_mask = 2  # zombies
-	q.exclude = [get_rid()]
+	# like the original, the knife hits the zombie in front of the player whatever the
+	# vertical aim (crawlers at your feet, zombies slightly to the side)
+	var facing := -global_basis.z
+	facing.y = 0.0
+	facing = facing.normalized()
 	var best: Zombie = null
-	for hit in space.intersect_shape(q, 8):
-		var z = hit["collider"]
-		if z is Zombie and z.state != Zombie.State.DEAD:
-			if best == null or z.global_position.distance_to(global_position) < best.global_position.distance_to(global_position):
-				best = z
+	var best_d := INF
+	for z in get_tree().get_nodes_in_group("zombies"):
+		if not z is Zombie or z.state == Zombie.State.DEAD:
+			continue
+		var to: Vector3 = z.global_position - global_position
+		if absf(to.y) > 2.0:
+			continue
+		to.y = 0.0
+		var d := to.length()
+		if d > KNIFE_RANGE or (d > 0.3 and facing.angle_to(to / d) > deg_to_rad(60)):
+			continue
+		# nothing solid in between (no stabbing through walls or window boards)
+		var q := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP, z.global_position + Vector3.UP * (0.4 if z.crawler else 1.0), 1)
+		if not get_world_3d().direct_space_state.intersect_ray(q).is_empty():
+			continue
+		if d < best_d:
+			best_d = d
+			best = z
 	if best:
 		best.take_damage(KNIFE_DAMAGE, false, self, true)
 
