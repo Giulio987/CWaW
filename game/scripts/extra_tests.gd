@@ -12,7 +12,7 @@ static var _fails := 0
 
 static func run(at: Node) -> void:
 	var game: Game = at.game
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	var args := OS.get_cmdline_user_args()
 	if args.has("--music-test"):
 		await _music(at, game)

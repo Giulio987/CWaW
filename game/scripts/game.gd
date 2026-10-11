@@ -147,6 +147,13 @@ func start(level_name_: String) -> void:
 	level.bake_navigation()
 
 
+# node caches kept in static vars are not freed with the scene
+func _exit_tree() -> void:
+	Grenade.release_cache()
+	Powerup.release_cache()
+	PerkMachine.release_cache()
+
+
 func _begin() -> void:
 	hud.message("")
 	get_tree().create_timer(2.0).timeout.connect(_next_round)

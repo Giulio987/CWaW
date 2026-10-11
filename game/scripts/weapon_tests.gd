@@ -6,7 +6,7 @@ class_name WeaponTests
 
 static func run(at: Node) -> void:
 	var game: Game = at.game
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	await at.get_tree().create_timer(2.5).timeout   # round 1 has started (grenade refill)
 	game.set_process(false)
 	var args := OS.get_cmdline_user_args()

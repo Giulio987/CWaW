@@ -10,6 +10,13 @@ const MODEL_NODE := "c53574cc"   # iw_hash("grenade1")
 static var _template: Node3D
 static var last_result := {}   # for tests
 
+
+# frees the model template (game exit)
+static func release_cache() -> void:
+	if _template:
+		_template.free()
+		_template = null
+
 var by: Player
 var fuse := FUSE
 var _exploded := false

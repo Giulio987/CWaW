@@ -363,17 +363,34 @@ func _interaction_target():
 	for m in game.level.perk_machines:
 		if m.usable_from(p) and m.prompt(self) != "":
 			return m
+	# doors, traps, teleporters, Pack-a-Punch and wall buys can be in reach together
+	# (the Der Riese lab trap lever is next to a door): the one looked at wins
+	var cands := []
 	for d in game.level.debris:
 		if is_instance_valid(d) and d.global_position.distance_to(p) < INTERACT_RANGE + 1.0:
-			return d
-	# traps, teleporters, Pack-a-Punch (level.gd)
+			cands.append([d, d.global_position])
 	for o in game.level.interactables:
 		if o.usable_from(p) and o.prompt(self) != "":
-			return o
+			var at: Vector3 = (o as Node3D).global_position
+			for k in ["use_point", "centre", "_centre"]:
+				if k in o:
+					at = o.get(k)
+					break
+			cands.append([o, at])
 	for b in game.wall_buys:
 		if (b["position"] as Vector3).distance_to(p) < INTERACT_RANGE:
-			return b
-	return null
+			cands.append([b, b["position"]])
+	var best = null
+	var best_score := -INF
+	var eye := _camera.global_position
+	var fwd := -_camera.global_basis.z
+	for c in cands:
+		var to: Vector3 = c[1] - eye
+		var score := fwd.dot(to.normalized()) - to.length() * 0.05
+		if score > best_score:
+			best_score = score
+			best = c[0]
+	return best
 
 
 func interact() -> void:

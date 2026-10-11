@@ -81,7 +81,7 @@ func _process(delta: float) -> void:
 		for z in game.get_children():
 			if z is Zombie and z.state == Zombie.State.TO_WINDOW and Vector2(z.velocity.x, z.velocity.z).length() < 0.1:
 				print("[autotest]   to_window: pos=%s dist=%.1f vel=%.2f occupied=%s next=%s" % [z.global_position.snapped(Vector3(0.1, 0.1, 0.1)), z.global_position.distance_to(z.window.outside), Vector2(z.velocity.x, z.velocity.z).length(), z.window.occupied_by != null, z._agent.get_next_path_position().snapped(Vector3(0.1, 0.1, 0.1))])
-		print("[autotest] t=%.0f round=%d points=%d hp=%.0f zombies=%s boards=%s" % [_t, game.round_number, p.points, p.health, states, boards])
+		print("[autotest] t=%.0f round=%d points=%d hp=%.0f zombies=%s boards=%s%s" % [_t, game.round_number, p.points, p.health, states, boards, " PAUSED" if get_tree().paused else ""])
 	_shot -= delta
 	if _shot <= 0.0:
 		_shot = 15.0
@@ -100,7 +100,7 @@ func _snap(name: String) -> void:
 
 # Zombie in front of the player loses an arm, then its head: -- nacht --autotest 60 --gib-test
 func _gib_test() -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)
 	var p := game.player
 	var z := Zombie.new()
@@ -125,7 +125,7 @@ func _gib_test() -> void:
 
 # Drop every power-up, screenshot them, then pick each and print the effect.
 func _powerup_test() -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)
 	var p := game.player
 	var fwd := -p.global_basis.z
@@ -172,7 +172,7 @@ func _powerup_test() -> void:
 
 # A zombie loses its legs, crawls to the player and attacks: -- nacht --autotest 60 --crawl-test
 func _crawl_test() -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)
 	var p := game.player
 	p.health = 1e9
@@ -204,7 +204,7 @@ func _crawl_test() -> void:
 # Live knife fight: a chasing zombie (round-5 health) attacks, the player keeps knifing
 # whatever is in front: -- nacht --autotest 60 --knife-live [--crawler]
 func _knife_live() -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)
 	var args := OS.get_cmdline_user_args()
 	if args.has("--round"):
@@ -249,7 +249,7 @@ func _knife_live() -> void:
 # HUD (ui agent): points popups, WaW round counter, pause menu + settings:
 #   -- nacht --autotest 120 --hud-test   (screenshots in analysis/preview/hud_*.png)
 func _hud_test() -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	var p := game.player
 	p.health = 1e9
 	var hud := game.hud

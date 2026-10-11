@@ -24,6 +24,7 @@ var interactables := []     # nodes with usable_from(pos) / prompt(player) / int
 var teleporters: TeleporterNetwork   # Der Riese
 var pack_a_punch: PackAPunch         # Der Riese
 var nav_region: NavigationRegion3D
+var nav_ready := false      # set once the first bake has finished
 var static_root: Node3D
 
 
@@ -92,8 +93,16 @@ func bake_navigation() -> void:
 	nav_region.bake_finished.connect(func():
 		if OS.get_cmdline_user_args().has("--nav-time"):
 			print("[nav] bake %d ms" % (Time.get_ticks_msec() - t0))
+		nav_ready = true
 		navigation_ready.emit(), CONNECT_ONE_SHOT)
 	nav_region.bake_navigation_mesh(true)
+
+
+# Await the first navmesh bake; returns at once if it already finished (a test that
+# starts awaiting navigation_ready after a fast bake would otherwise wait forever).
+func wait_navigation() -> void:
+	if not nav_ready:
+		await navigation_ready
 
 
 # ---------------------------------------------------------------- helpers

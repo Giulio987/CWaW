@@ -21,6 +21,13 @@ var _model: Node3D
 static var _models: Node
 
 
+# frees the pickup models (game exit)
+static func release_cache() -> void:
+	if _models:
+		_models.free()
+		_models = null
+
+
 func setup(g: Game, k: String, at: Vector3) -> void:
 	game = g
 	kind = k

@@ -154,7 +154,7 @@ func _spin_shots(game: Game) -> void:
 
 # Walk the player from spawn up the stairs to an upstairs window: -- nacht --stairs-test
 func _stairs_test(game: Game) -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	var jumping := OS.get_cmdline_user_args().has("--no-open")
 	if not jumping:
 		for d in game.level.debris.duplicate():
@@ -236,7 +236,7 @@ func _stairs_test(game: Game) -> void:
 
 # Buy from the mystery box and take the weapon: -- nacht --box-test
 func _box_test(game: Game) -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	var box: MysteryBox = game.level.boxes[0]
 	var p := game.player
 	p.points = 5000
@@ -278,7 +278,7 @@ func _box_test(game: Game) -> void:
 
 # One knife slash against a 100 hp zombie at several distances/angles: -- nacht --knife-test
 func _knife_test(game: Game) -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)  # no wave spawns during the test
 	var p := game.player
 	var results := []
@@ -307,14 +307,14 @@ func _knife_test(game: Game) -> void:
 # Open the HELP door, put zombies in the box room chasing the player in the start
 # room and check they come through: -- nacht --door-test
 func _door_test(game: Game) -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)
 	var p := game.player
 	p.health = 1e9
 	for d in game.level.debris.duplicate():
 		if d.entity.to_lower() == "doortrigger":
 			d.open()
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	await get_tree().create_timer(2.0).timeout
 	var spawn := game.level.entity_transform("DoorTrigger").origin
 	var box_side: Vector3 = game.level.boxes[0].global_position
@@ -369,7 +369,7 @@ func _door_test(game: Game) -> void:
 
 # Shoot from inside at a zombie standing outside each window: -- nacht --window-shot-test
 func _window_shot_test(game: Game) -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)
 	var p := game.player
 	var ok := 0
@@ -404,7 +404,7 @@ func _window_shot_test(game: Game) -> void:
 # Turn the power on, then walk up to every perk machine, buy it and check its
 # effect (prints OK/FAIL per step): -- derriese --perk-test
 func _perk_test(game: Game) -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)  # no zombies during the test
 	var p := game.player
 	var lv := game.level
@@ -507,7 +507,7 @@ func _perk_test(game: Game) -> void:
 # Open every debris (and turn the power on with --power), then report which
 # areas the navmesh connects to the player spawn: -- derriese --reach-test [--power]
 func _reach_test(game: Game) -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)
 	var lv := game.level
 	if OS.get_cmdline_user_args().has("--power"):
@@ -579,7 +579,7 @@ func _dog_test(game: Game) -> void:
 	var check := func(ok: bool, what: String) -> void:
 		print("[dog] %s: %s" % ["OK" if ok else "FAIL", what])
 		fails[0] += int(not ok)
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	var p := game.player
 	p.health = 1e6
 	p.max_health = 1e6
@@ -642,7 +642,7 @@ func _trap_test(game: Game) -> void:
 	var check := func(ok: bool, what: String) -> void:
 		print("[trap] %s: %s" % ["OK" if ok else "FAIL", what])
 		fails[0] += int(not ok)
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)
 	var lv := game.level
 	var p := game.player
@@ -701,7 +701,7 @@ func _tele_test(game: Game) -> void:
 	var check := func(ok: bool, what: String) -> void:
 		print("[tele] %s: %s" % ["OK" if ok else "FAIL", what])
 		fails[0] += int(not ok)
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)
 	var lv := game.level
 	var net := lv.teleporters
@@ -770,7 +770,7 @@ func _pap_test(game: Game) -> void:
 	var check := func(ok: bool, what: String) -> void:
 		print("[pap] %s: %s" % ["OK" if ok else "FAIL", what])
 		fails[0] += int(not ok)
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)
 	var lv := game.level
 	var pap := lv.pack_a_punch
@@ -813,7 +813,7 @@ func _pap_test(game: Game) -> void:
 
 # A dog standing 3 m in front of the player, seen from the front and the side: -- derriese --dog-look
 func _dog_look(game: Game) -> void:
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	game.set_process(false)
 	var p := game.player
 	var fwd := -p.global_basis.z

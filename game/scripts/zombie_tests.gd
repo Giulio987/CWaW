@@ -9,7 +9,7 @@ class_name ZombieTests
 
 static func run(at: Node) -> void:
 	var game: Game = at.game
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	await at.get_tree().create_timer(0.5).timeout
 	game.set_process(false)
 	var args := OS.get_cmdline_user_args()
@@ -372,12 +372,12 @@ static func _no_sky(game: Game) -> void:
 			n += 1
 	print("[zwatch] removed %d sky colliders, rebaking" % n)
 	game.level.bake_navigation()
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 
 
 static func watch(at: Node) -> void:
 	var game: Game = at.game
-	await game.level.navigation_ready
+	await game.level.wait_navigation()
 	await _no_sky(game)
 	var args := OS.get_cmdline_user_args()
 	var i := args.find("--start-round")
