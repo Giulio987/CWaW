@@ -96,9 +96,9 @@ func _back_to_idle(action: String) -> void:
 # slash so its tip points to the left of the screen; the arms then sweep left -> right.
 const KNIFE_MODEL := "78d2d941"   # knife_lod1 in the player group
 const GRIP_BONE := 15             # left hand (chain 13-14-15, fingers 16-21); the knife uses the left arm only
-const PALM := Vector3(0.011, 0.005, 0.036)  # palm centre measured from the skin
+const PALM := Vector3(0.011, -0.012, 0.004)  # inside the fist: palm centroid moved back towards the wrist and into the palm
 const HIDE_BONE := 4              # right upper arm: collapsed while knifing
-const KNIFE_GRIP := 0.06          # metres from the model origin (pommel end) to mid-handle
+const KNIFE_GRIP := 0.05          # metres from the model origin (pommel end) to the middle of the handle
 const SLASH_TIME := 0.42
 var _knife: Node3D
 var _hand: BoneAttachment3D
