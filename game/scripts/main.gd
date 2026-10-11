@@ -62,10 +62,9 @@ func _weapon_shots(game: Game, names: PackedStringArray) -> void:
 	for n in names:
 		if n.begins_with("swing="):
 			# swing=<arms anim>: 5 frames of one knife slash with that animation
-			game.player._viewmodel.knife_swing = n.get_slice("=", 1)
 			game.player.melee()
 			for f in 5:
-				await get_tree().create_timer(0.09).timeout
+				await get_tree().create_timer(0.075).timeout
 				await RenderingServer.frame_post_draw
 				get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/swing_%s_%d.png" % [n.get_slice("=", 1), f]))
 			await get_tree().create_timer(1.0).timeout

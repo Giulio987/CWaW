@@ -39,6 +39,7 @@ func _ready() -> void:
 	add_child(_arms)
 	_arms_anim = _arms.find_children("*", "AnimationPlayer")[0]
 	var skel: Skeleton3D = _arms.find_children("*", "Skeleton3D")[0]
+	_skel = skel
 	_attach = BoneAttachment3D.new()
 	skel.add_child(_attach)
 	_attach.bone_idx = int(_pairs["tag_weapon"])
@@ -90,37 +91,73 @@ func _back_to_idle(action: String) -> void:
 		_play("idle", true)
 
 
-var knife_swing := "92679329"   # arms animation of the knife stab: World at War stabs forward and retracts (the knife tip goes out and back with little sideways travel)
+# Knife slash: none of the original arms animations matches the iOS knife, so it is
+# procedural. The knife is a rigid child of the right hand, set at the start of the
+# slash so its tip points to the left of the screen; the arms then sweep left -> right.
 const KNIFE_MODEL := "78d2d941"   # knife_lod1 in the player group
+const GRIP_BONE := 6              # right hand (chain 3-4-5-6, fingers 7-12; 15 is the left hand)
+const PALM := Vector3(0.0, 0.0, 0.062)  # palm centre measured from the skin (raised into the fist)
+const KNIFE_GRIP := 0.06          # metres from the model origin (pommel end) to mid-handle
+const SLASH_TIME := 0.42
 var _knife: Node3D
+var _hand: BoneAttachment3D
+var _skel: Skeleton3D
+var _slash := -1.0                # 0..1 while slashing
+var _knife_set := false
 
 
 func melee() -> void:
+	if _slash >= 0.0:
+		return
 	if _knife == null:
+		_hand = BoneAttachment3D.new()
+		_skel.add_child(_hand)
+		_hand.bone_idx = GRIP_BONE
 		var models: Node = (load("res://assets/models/ingame/player.glb") as PackedScene).instantiate()
 		_knife = models.find_child(KNIFE_MODEL, true, false)
 		if _knife:
 			_knife.get_parent().remove_child(_knife)
-			_knife.transform = Transform3D.IDENTITY
-			_attach.add_child(_knife)
+			_hand.add_child(_knife)
+			if _knife is GeometryInstance3D:
+				_knife.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		models.queue_free()
-	if not _arms_anim.has_animation(knife_swing):
-		return
 	if _weapon:
 		_weapon.visible = false
 	if _knife:
-		_knife.visible = true
-	_arms_anim.stop()
-	_arms_anim.play(knife_swing)
-	get_tree().create_timer(_arms_anim.get_animation(knife_swing).length).timeout.connect(_end_melee)
+		_knife.visible = false  # shown once oriented on the first slash frame
+	_play("idle", true)
+	_slash = 0.0
+	_knife_set = false
 
 
 func _end_melee() -> void:
+	_slash = -1.0
 	if _knife:
 		_knife.visible = false
 	if _weapon:
 		_weapon.visible = true
-	_play("idle", true)
+
+
+# Arms offset in camera space: wind-up on the left, quick sweep to the right.
+func _slash_offset() -> Transform3D:
+	var t := _slash
+	var sweep := smoothstep(0.1, 0.7, t)
+	var arc := sin(clampf(t / 0.85, 0.0, 1.0) * PI)
+	var pos := Vector3(lerpf(-0.40, 0.06, sweep), 0.15 + 0.03 * arc, -0.10 * arc)
+	var yaw := lerpf(0.4, -0.3, sweep)
+	return Transform3D(Basis.from_euler(Vector3(0.0, yaw, -0.2 * arc)), pos)
+
+
+func _orient_knife() -> void:
+	if _knife == null or _hand == null:
+		return
+	var cam := get_viewport().get_camera_3d()
+	var palm := _hand.global_transform * PALM
+	# model blade runs along +X: point it to the camera's left, edge slightly forward
+	var b := cam.global_basis * Basis(Vector3.UP, PI - 0.3) * Basis(Vector3.RIGHT, 0.25)
+	_knife.global_transform = Transform3D(b, palm - b.x * KNIFE_GRIP)
+	_knife.visible = true
+	_knife_set = true
 
 
 func kick() -> void:
@@ -140,4 +177,13 @@ func _process(delta: float) -> void:
 	var amp := 0.008 if moving else 0.002
 	_kick = move_toward(_kick, 0.0, delta * 6.0)
 	var dip: float = clamp(-_kick, 0.0, 1.0) * 0.25
-	position = Vector3(sin(_bob) * amp, abs(cos(_bob)) * amp - dip, max(_kick, 0.0) * 0.02)
+	var base := Transform3D(Basis(Vector3.UP, PI), Vector3(sin(_bob) * amp, abs(cos(_bob)) * amp - dip, max(_kick, 0.0) * 0.02))
+	if _slash >= 0.0:
+		_slash += delta / SLASH_TIME
+		if _slash >= 1.0:
+			_end_melee()
+		else:
+			base = _slash_offset() * base
+	transform = base
+	if _slash >= 0.0 and not _knife_set:
+		_orient_knife()
