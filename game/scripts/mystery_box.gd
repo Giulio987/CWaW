@@ -85,6 +85,7 @@ func interact(player: Player) -> void:
 func _open() -> void:
 	state = State.CYCLING
 	_timer = CYCLE_TIME
+	Sfx.instance.play_at("music_box_open", global_position + Vector3.UP)
 	if _anim:
 		_anim.play(ANIM_OPEN)
 	_show_weapon(POOL.pick_random())
@@ -92,6 +93,7 @@ func _open() -> void:
 
 func _close() -> void:
 	state = State.CLOSING
+	Sfx.instance.play_at("music_box_close", global_position + Vector3.UP)
 	if _weapon:
 		_weapon.queue_free()
 		_weapon = null

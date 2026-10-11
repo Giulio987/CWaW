@@ -119,6 +119,7 @@ func melee() -> void:
 		return
 	_melee_cooldown = 0.9
 	_viewmodel.melee()
+	Sfx.instance.play("knife_slash", -3.0)
 	# a sphere in front of the camera: hits a zombie even when it is right on top
 	# of the player or hunched below the line of sight
 	var space := get_world_3d().direct_space_state
@@ -155,6 +156,7 @@ func reload() -> void:
 		return
 	_reloading = s["reload"]
 	_viewmodel.reload(s["reload"])
+	Sfx.instance.sequence(w["name"] + "_reload")
 
 
 func _physics_process(delta: float) -> void:
@@ -212,6 +214,7 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 	w["mag"] -= 1
 	_cooldown = s["rate"]
 	_viewmodel.kick()
+	Sfx.instance.weapon_fire(w["name"])
 	_camera.rotation.x = min(_camera.rotation.x + 0.012, 1.45)
 	var space := get_world_3d().direct_space_state
 	for p in s["pellets"]:
@@ -259,6 +262,8 @@ func take_hit(damage: float) -> void:
 		return
 	health -= damage
 	_since_hit = 0.0
+	Sfx.instance.play("zombie_hit", -2.0)
+	Sfx.instance.play("player_pain", -4.0)
 	changed.emit()
 	if health <= 0.0:
 		dead = true
@@ -311,6 +316,7 @@ func interact() -> void:
 		if _repair_cooldown <= 0.0 and t.repair_board():
 			_repair_cooldown = 1.0
 			add_points(10)
+			Sfx.instance.play_at("window_repair", t.global_position)
 	elif not Input.is_action_just_pressed("interact"):
 		return
 	elif t is MysteryBox:
@@ -319,9 +325,16 @@ func interact() -> void:
 		if points >= t.cost:
 			add_points(-t.cost)
 			t.open()
+			Sfx.instance.play("buy_success")
+			Sfx.instance.play_at("dooropen", t.global_position)
+		else:
+			Sfx.instance.play("buy_fail")
 	elif t is Dictionary:
 		var has := weapons.any(func(w): return w["name"] == t["weapon"])
 		var cost: int = t["ammo_cost"] if has else t["cost"]
 		if points >= cost:
 			add_points(-cost)
 			give_weapon(t["weapon"])
+			Sfx.instance.play("buy_success")
+		else:
+			Sfx.instance.play("buy_fail")

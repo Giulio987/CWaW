@@ -57,11 +57,15 @@ func start(level_name_: String) -> void:
 	for d in level.debris:
 		d.opened.connect(_on_debris_opened)
 
+	var sfx := Sfx.new()
+	add_child(sfx)
+	sfx.start_ambience(["zombies", "world", "wind"])
 	player = Player.new()
 	player.game = self
 	add_child(player)
 	player.global_transform = level.player_spawn
 	player.died.connect(_on_player_died)
+	sfx.listener = player
 
 	hud = Hud.new()
 	add_child(hud)
@@ -151,6 +155,7 @@ func _process(delta: float) -> void:
 			_spawn_timer = _spawn_interval
 	if _spawned >= _to_spawn and _alive <= 0:
 		_between_rounds = true
+		Sfx.instance.play("end_wave")
 		get_tree().create_timer(8.0).timeout.connect(_next_round)
 
 
@@ -194,6 +199,8 @@ func _on_debris_opened(d: Debris) -> void:
 
 
 func _on_player_died() -> void:
+	Sfx.instance.ambience = []
+	Sfx.instance.play("gameover_intro")
 	hud.game_over(round_number)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 

@@ -27,4 +27,5 @@ done
 $PY -I tools/export_gltf.py "$A/models" $G
 $PY -I tools/export_characters.py "$A/characters" $G > /dev/null
 $PY -I tools/pair_arms.py > /dev/null
+$PY -I tools/sound_index.py "$A/sounds/index.json"
 echo "assets rebuilt"

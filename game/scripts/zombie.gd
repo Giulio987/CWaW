@@ -125,6 +125,7 @@ func _physics_process(delta: float) -> void:
 				_timer = 1.0
 				_hit_done = false
 				_play(ATTACKS.pick_random(), 0.1)
+				Sfx.instance.play_at("zombie_attack", global_position + Vector3.UP * 1.5)
 			else:
 				_repath -= delta
 				if _repath <= 0.0:
@@ -202,6 +203,7 @@ func take_damage(amount: float, headshot: bool, by: Player, knife := false) -> v
 
 
 func _die(headshot: bool, knife := false) -> void:
+	Sfx.instance.play_at("zombie_death", global_position + Vector3.UP * 1.5)
 	state = State.DEAD
 	if window.occupied_by == self:
 		window.occupied_by = null

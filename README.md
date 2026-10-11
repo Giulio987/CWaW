@@ -62,7 +62,8 @@ Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `
 | Orientamento barricate/macerie | 🔶 | le entità non hanno rotazione: direzione dal muro, interno/esterno dai settori (`tools/wall_yaw.py`) |
 | Settori e LOD | ✅ | `CIwSGSectorBuilder` → `sectors.json`; `CIwLODControllerCameraVolume` mostra la variante del settore della telecamera |
 | Mystery box | ✅ | 950 punti, coperchio animato originale, armi che girano, offerta 12 s; test `--box-test` |
-| Mancano | ⏳ | suoni in gioco, cani, perk, smembramento, power-up, build iOS |
+| Suoni in gioco | ✅ | `tools/sound_index.py`: nomi ricostruiti, sequenze di ricarica originali, sparo da `CItemGun`, canali ambientali; `scripts/sfx.gd` |
+| Mancano | ⏳ | cani, perk, smembramento, power-up, musica, build iOS |
 
 ## Formati – appunti
 - Risorsa nel gruppo: `u32 size, u32 nameHash, body`. Le classi polimorfiche (es. `CIwSoundData`) hanno invece `u32 subclassHash` al posto del nome, e il nome è il primo u32 del body.

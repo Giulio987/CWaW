@@ -78,6 +78,7 @@ func tear_board() -> bool:
 		return false
 	boards -= 1
 	_update_boards()
+	Sfx.instance.play_at("window_break1", global_position)
 	return true
 
 
