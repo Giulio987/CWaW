@@ -197,8 +197,11 @@ func _knife_live() -> void:
 	p.health = 1e9
 	var fwd := -p.global_basis.z
 	var z := Zombie.new()
+	if args.has("--round"):
+		game.round_number = int(args[args.find("--round") + 1])
 	z.setup(p.global_position + fwd * 4.0, game.level.windows[0], p, 400.0, false)
 	game.add_child(z)
+	print("[knife-live] round %d health %.0f" % [game.round_number, z.health])
 	z.state = Zombie.State.CHASE
 	if OS.get_cmdline_user_args().has("--crawler"):
 		await get_tree().create_timer(0.2).timeout

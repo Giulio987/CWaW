@@ -156,10 +156,9 @@ func melee() -> void:
 		best.take_damage(knife_damage(best), false, self, true)
 
 
-# As in the original as remembered: one stab per round number (round 1: 1, round 2: 2...)
-func knife_damage(z: Zombie) -> float:
-	var rnd: int = max(1, game.round_number)
-	return z.max_health / rnd + 1.0
+# World at War knife: always 150 damage (one stab at round 1, two at round 2...)
+func knife_damage(_z: Zombie) -> float:
+	return KNIFE_DAMAGE
 
 
 func switch_weapon() -> void:

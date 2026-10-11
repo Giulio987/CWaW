@@ -63,8 +63,21 @@ func setup(spawn: Vector3, win: Barricade, player: Player, hp: float, runner: bo
 	position = spawn
 
 
+# World at War zombie health: 150 at round 1, +100 per round up to 950 at round 9,
+# then x1.1 per round (2710 at round 20). Used instead of the iOS wave table values.
+static func round_health(r: int) -> float:
+	r = maxi(r, 1)
+	if r <= 9:
+		return 150.0 + 100.0 * (r - 1)
+	return 950.0 * pow(1.1, r - 9)
+
+
 func _ready() -> void:
 	add_to_group("zombies")
+	var g := get_parent() as Game
+	if g and g.round_number > 0 and health < 1e5:  # tests use huge health on purpose
+		health = round_health(g.round_number)
+		max_health = health
 	collision_layer = 2
 	collision_mask = 1 | 4
 	floor_snap_length = 0.5
