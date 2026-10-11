@@ -59,6 +59,10 @@ func set_count(n: int) -> void:
 
 # Press / release (keyboard or touch).
 func set_held(down: bool) -> void:
+	var monkeys := MonkeyBelt.of(player)   # monkey bombs take the grenade slot (monkey_belt.gd)
+	if monkeys and monkeys.active() and not _held:
+		monkeys.set_held(down)
+		return
 	if down and not _held:
 		_held = true
 		_start_cook()

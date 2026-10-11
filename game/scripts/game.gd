@@ -125,6 +125,7 @@ func start(level_name_: String) -> void:
 	player.global_transform = level.player_spawn
 	player.died.connect(_on_player_died)
 	sfx.listener = player
+	RadioEggs.create(self)   # shootable radios/phone easter eggs (radio_egg.gd)
 
 	hud = Hud.new()
 	add_child(hud)

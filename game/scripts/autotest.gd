@@ -26,7 +26,7 @@ func _ready() -> void:
 		_hud_test.call_deferred()
 	elif args.has("--weapon-test"):   # grenade | raygun | flame | buy (weapon_tests.gd)
 		(func(): WeaponTests.run(self)).call_deferred()
-	elif args.has("--drink-test") or args.has("--teddy-test") or args.has("--music-test"):   # extra_tests.gd
+	elif args.has("--drink-test") or args.has("--teddy-test") or args.has("--music-test") or args.has("--egg-test") or args.has("--monkey-test"):   # extra_tests.gd
 		(func(): ExtraTests.run(self)).call_deferred()
 	elif args.has("--zombie-test"):   # rise | arm | speed (zombie_tests.gd)
 		(func(): ZombieTests.run(self)).call_deferred()
@@ -41,7 +41,7 @@ func _process(delta: float) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--weapon-test") or OS.get_cmdline_user_args().has("--zombie-test"):
 		return
-	if OS.get_cmdline_user_args().has("--drink-test") or OS.get_cmdline_user_args().has("--teddy-test") or OS.get_cmdline_user_args().has("--music-test"):
+	if OS.get_cmdline_user_args().has("--drink-test") or OS.get_cmdline_user_args().has("--teddy-test") or OS.get_cmdline_user_args().has("--music-test") or OS.get_cmdline_user_args().has("--egg-test") or OS.get_cmdline_user_args().has("--monkey-test"):
 		return
 	if OS.get_cmdline_user_args().has("--gib-test") or OS.get_cmdline_user_args().has("--powerup-test") or OS.get_cmdline_user_args().has("--crawl-test") or OS.get_cmdline_user_args().has("--knife-live"):
 		return

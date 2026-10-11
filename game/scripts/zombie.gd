@@ -60,6 +60,7 @@ var state := State.TO_WINDOW
 var health := 100.0
 var window: Barricade
 var target: Player
+var lure: Node3D   # a thrown Monkey Bomb (monkey_bomb.gd): CHASE goes for it while valid
 var move_anim := ""
 var speed := 1.0
 var move_rate := 1.0     # playback rate of move_anim (SPEED_STATES)
@@ -237,7 +238,16 @@ func _physics_process(delta: float) -> void:
 				_stall = 0.0
 			else:
 				_stall += delta
-			if d < 0.7 or (_agent.is_navigation_finished() and d < 2.5) or _stall > 6.0:
+			if _dropping:
+				pass
+			elif d < 0.7 or (_agent.is_navigation_finished() and d < 2.5):
+				global_position = window.outside
+				_start_tearing()
+			elif (_agent.is_navigation_finished() or _stall > 2.0) and _try_drop():
+				pass  # jumping down from a roof / ledge towards a lower window
+			elif _stall > 6.0 or (_agent.is_navigation_finished() and _stall > 0.5 and not _seen()):
+				# the navmesh does not reach the window (or the zombie is stuck): put it
+				# there, at once when the player cannot see the jump
 				global_position = window.outside
 				_start_tearing()
 			else:
@@ -256,6 +266,9 @@ func _physics_process(delta: float) -> void:
 		State.CLIMBING:
 			pass  # driven by tween
 		State.CHASE:
+			if is_instance_valid(lure):
+				_chase_lure(delta)
+				return
 			if target.dead:
 				_play(IDLE)
 				return
@@ -288,6 +301,8 @@ func _physics_process(delta: float) -> void:
 
 func _move_along_path(delta: float) -> void:
 	_play(move_anim)
+	if _unsticking:
+		return
 	var next := _agent.get_next_path_position()
 	var dir := next - global_position
 	dir.y = 0.0
@@ -300,6 +315,145 @@ func _move_along_path(delta: float) -> void:
 	if is_on_floor():
 		Stairs.step_up(self, delta)
 	move_and_slide()
+	_check_progress(delta, next)
+
+
+# Jumping down: spawns on roofs and ledges (Shi No Numa huts, Verrückt balconies)
+# whose window is below and not linked by the navmesh. The original has four drop
+# animations, body + root-motion pairs for drops of 1.82 / 2.52 / 3.61 / 4.85 m.
+const DROPS := [[1.82, "31de2da0"], [2.52, "31de2d9f"], [3.61, "31de2da1"], [4.85, "31de2da2"]]
+var _dropping := false
+
+
+func _try_drop() -> bool:
+	var to := window.outside - global_position
+	var flat := Vector3(to.x, 0.0, to.z)
+	if to.y > -1.0 or flat.length() < 0.3:
+		return false
+	var dir := flat.normalized()
+	var space := get_world_3d().direct_space_state
+	var landing := Vector3.INF
+	var chest := global_position + Vector3.UP * 1.0
+	for ahead in [0.7, 1.1, 1.6, 2.2]:
+		# nothing in the way at chest height, then a floor at least 1 m below
+		var wall := PhysicsRayQueryParameters3D.create(chest, chest + dir * (ahead + 0.3), 1)
+		if not space.intersect_ray(wall).is_empty():
+			break
+		var p: Vector3 = global_position + dir * ahead
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(p + Vector3.UP * 0.5, p + Vector3.DOWN * 7.0, 1))
+		if not hit.is_empty() and global_position.y - (hit["position"] as Vector3).y >= 1.0:
+			landing = hit["position"]
+			break
+	if landing == Vector3.INF:
+		return false
+	var drop := global_position.y - landing.y
+	var anim: String = DROPS[0][1]
+	for dd in DROPS:
+		if absf(dd[0] - drop) < absf(_drop_h(anim) - drop):
+			anim = dd[1]
+	_dropping = true
+	_end_unstick()
+	collision_mask = 0
+	_face(landing)
+	rotation.y = atan2(dir.x, dir.z)
+	_anim.get_animation(anim).loop_mode = Animation.LOOP_NONE
+	_anim.play(anim, 0.15)
+	var t: float = _anim.get_animation(anim).length
+	var edge := Vector3(landing.x, global_position.y, landing.z).lerp(global_position, 0.35)
+	var tw := create_tween()
+	tw.tween_property(self, "global_position", edge, t * 0.35)
+	tw.tween_property(self, "global_position", landing, t * 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.tween_interval(t * 0.15)
+	tw.finished.connect(func():
+		_dropping = false
+		if state == State.TO_WINDOW:
+			collision_mask = 1 | 4
+			_best_dist = INF
+			_stall = 0.0
+			_agent.target_position = window.outside
+			_play(move_anim))
+	return true
+
+
+# True when the player's camera has a clear view of this zombie.
+func _seen() -> bool:
+	var cam := get_viewport().get_camera_3d()
+	if cam == null:
+		return false
+	var chest := global_position + Vector3.UP * 1.2
+	if not cam.is_position_in_frustum(chest) or cam.global_position.distance_to(chest) > 40.0:
+		return false
+	var q := PhysicsRayQueryParameters3D.create(cam.global_position, chest, 1)
+	return get_world_3d().direct_space_state.intersect_ray(q).is_empty()
+
+
+func _drop_h(anim: String) -> float:
+	for dd in DROPS:
+		if dd[1] == anim:
+			return dd[0]
+	return 0.0
+
+
+# Snag watchdog: the navmesh is baked for a thinner, shorter agent than the body
+# capsule and steep stairs are not always climbable by Stairs.step_up, so a zombie
+# can stall against a stair stringer, a door frame or a high step. If it has not
+# moved for UNSTICK_TIME while it should, it is carried to the next path point
+# (collision off, at walking pace) and carries on from there.
+const UNSTICK_TIME := 1.5
+const UNSTICK_MIN_MOVE := 0.2
+const UNSTICK_MAX_HOP := 4.0
+var _unsticking := false
+var _unstick_tw: Tween
+var _prog_pos := Vector3.INF
+var _prog_t := 0.0
+var unstuck_count := 0
+var _last_unstick := -INF
+
+
+func _check_progress(delta: float, next: Vector3) -> void:
+	_prog_t += delta
+	if _prog_pos == Vector3.INF:
+		_prog_pos = global_position
+	# right after a hop (a flight of high steps) the next stall is handled sooner
+	if _prog_t < (0.5 if life - _last_unstick < 3.0 else UNSTICK_TIME):
+		return
+	var moved := global_position.distance_to(_prog_pos)
+	_prog_t = 0.0
+	_prog_pos = global_position
+	if moved >= UNSTICK_MIN_MOVE or _agent.is_navigation_finished():
+		return
+	var hop := global_position.distance_to(next)
+	if hop < 0.3:
+		return
+	if hop > UNSTICK_MAX_HOP:
+		# far waypoint (long stair flight): go part of the way, to a navmesh point
+		next = NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map,
+			global_position + (next - global_position).normalized() * UNSTICK_MAX_HOP * 0.6)
+		hop = global_position.distance_to(next)
+		if hop < 0.3:
+			return
+	if state == State.CHASE and global_position.distance_to(target.global_position) < 2.5:
+		return  # crowding around the player, not a snag
+	for z in get_tree().get_nodes_in_group("zombies"):
+		if z != self and z is Zombie and z.state != State.DEAD and (z as Node3D).global_position.distance_to(next) < 0.6:
+			return  # the way is blocked by another zombie: wait
+	unstuck_count += 1
+	_unsticking = true
+	collision_mask = 0
+	_face(next)
+	_unstick_tw = create_tween()
+	_unstick_tw.tween_property(self, "global_position", next + Vector3.UP * 0.05, maxf(0.25, hop / maxf(speed, 0.8)))
+	_unstick_tw.finished.connect(_end_unstick)
+
+
+func _end_unstick() -> void:
+	if _unstick_tw and _unstick_tw.is_valid():
+		_unstick_tw.kill()
+	if _unsticking:
+		_unsticking = false
+		_last_unstick = life
+		if state in [State.TO_WINDOW, State.CHASE, State.ATTACK, State.TEARING]:
+			collision_mask = 1 | 4
 
 
 func _face(p: Vector3) -> void:
@@ -311,6 +465,7 @@ func _face(p: Vector3) -> void:
 
 
 func _start_tearing() -> void:
+	_end_unstick()
 	if reached_window < 0.0:
 		reached_window = life
 	if window.occupied_by != null and window.occupied_by != self and is_instance_valid(window.occupied_by):
@@ -522,6 +677,7 @@ func nuke_kill() -> void:
 
 
 func _die(headshot: bool, knife := false) -> void:
+	_end_unstick()
 	Sfx.instance.play_at("zombie_death", global_position + Vector3.UP * 1.5)
 	if headshot:
 		lose_head()
@@ -535,3 +691,18 @@ func _die(headshot: bool, knife := false) -> void:
 	_anim.play(death, 0.1)
 	killed.emit(self, headshot, knife)
 	get_tree().create_timer(6.0).timeout.connect(queue_free)
+
+
+# Walk to the Monkey Bomb and stand at it (the player is ignored meanwhile).
+func _chase_lure(delta: float) -> void:
+	var p := lure.global_position
+	if global_position.distance_to(Vector3(p.x, global_position.y, p.z)) < 1.0:
+		velocity = Vector3.ZERO
+		_face(p)
+		_play(IDLE)
+		return
+	_repath -= delta
+	if _repath <= 0.0:
+		_agent.target_position = p
+		_repath = 0.4
+	_move_along_path(delta)

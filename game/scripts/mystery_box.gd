@@ -165,7 +165,10 @@ func interact(player: Player) -> void:
 			_open()
 		State.OFFERED:
 			if player == _buyer:
-				player.give_weapon(offered)
+				if offered == MonkeyBomb.ITEM:
+					MonkeyBelt.give(player)
+				else:
+					player.give_weapon(offered)
 				_close()
 
 
@@ -176,7 +179,7 @@ func _open() -> void:
 	Sfx.instance.play_at("box_music", global_position + Vector3.UP)
 	if _anim:
 		_anim.play(ANIM_OPEN)
-	_show_weapon(POOL.pick_random())
+	_show_weapon(pool().pick_random())
 
 
 func _close() -> void:
@@ -211,7 +214,7 @@ func _process(delta: float) -> void:
 				_timer = OFFER_TIME
 			elif _swap <= 0.0:
 				_swap = lerpf(0.08, 0.35, p)  # slows down like the original
-				_show_weapon(POOL.pick_random())
+				_show_weapon(pool().pick_random())
 		State.OFFERED:
 			_timer -= delta
 			if _weapon:
@@ -323,11 +326,21 @@ func _warp() -> void:
 
 func _pick() -> String:
 	var owned := _buyer.weapons.map(func(w): return w["name"]) if _buyer else []
-	var choices := POOL.filter(func(w): return not w in owned)
-	return choices.pick_random() if not choices.is_empty() else POOL.pick_random()
+	var choices := pool().filter(func(w): return not w in owned)
+	return choices.pick_random() if not choices.is_empty() else pool().pick_random()
+
+
+# Der Riese also has the Monkey Bomb in the box (CItemMonkey in the player group)
+func pool() -> Array:
+	return POOL + [MonkeyBomb.ITEM] if level and level.level_name == "derriese" else POOL
 
 
 func _show_weapon(name: String) -> void:
+	if name == MonkeyBomb.ITEM:
+		var m := MonkeyBomb.model()
+		m.scale = Vector3.ONE * 2.0
+		_show_model(m)
+		return
 	if _weapon:
 		_weapon.queue_free()
 		_weapon = null

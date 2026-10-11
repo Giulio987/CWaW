@@ -2,6 +2,8 @@
 #   tools/run_godot.sh 60 -- nacht --autotest 50 --music-test
 #   tools/run_godot.sh 60 -- nacht --autotest 50 --drink-test
 #   tools/run_godot.sh 90 -- verruckt --autotest 80 --teddy-test
+#   tools/run_godot.sh 120 -- shinonuma --autotest 110 --egg-test   (egg_tests.gd, any map)
+#   tools/run_godot.sh 90 -- derriese --autotest 80 --monkey-test
 # Prints OK/FAIL lines and saves screenshots to analysis/preview/.
 class_name ExtraTests
 
@@ -18,6 +20,10 @@ static func run(at: Node) -> void:
 		await _drink(at, game)
 	elif args.has("--teddy-test"):
 		await _teddy(at, game)
+	elif args.has("--egg-test"):
+		await EggTests.eggs(at, game)
+	elif args.has("--monkey-test"):
+		await EggTests.monkey(at, game)
 	print("[extra] %s (%d failures)" % ["OK" if _fails == 0 else "FAIL", _fails])
 	at.get_tree().quit()
 

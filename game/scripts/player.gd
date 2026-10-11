@@ -252,6 +252,7 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 		var q := PhysicsRayQueryParameters3D.create(from, from + dir * s["range"], 1 | 2)  # bullets ignore window blockers
 		q.exclude = [get_rid()]
 		var hit := space.intersect_ray(q)
+		RadioEggs.bullet(self, from, (hit["position"] as Vector3) + dir * 0.5 if not hit.is_empty() else from + dir * s["range"])   # easter-egg triggers
 		if hit.is_empty():
 			continue
 		var target: Object = hit["collider"]
