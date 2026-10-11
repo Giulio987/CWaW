@@ -8,6 +8,7 @@ extends Node3D
 signal opened(debris: Debris)
 
 const AUTHORED_YAW := PI / 2
+const JUMP_GUARD := 2.5  # metres added above the original volume
 
 var cost := 1000
 var entity := ""
@@ -47,14 +48,17 @@ func setup(level: Level, name_: String) -> void:
 				_anim.play(_closed)
 				_anim.seek(0.0, true)
 				_anim.pause()
-		for mi in model.find_children("*", "MeshInstance3D"):
-			var aabb: AABB = mi.get_aabb()
-			var shape := CollisionShape3D.new()
-			var box := BoxShape3D.new()
-			box.size = aabb.size.max(Vector3(0.2, 0.2, 0.2))
-			shape.shape = box
-			_body.add_child(shape)
-			shape.transform = (model.transform * Transform3D(Basis(), aabb.get_center()))
+	# the entity's own collision volume (CIwColliderSpec) blocks the whole passage;
+	# it is world aligned (entities carry no rotation) and raised so it cannot be jumped
+	for c in e.get("colliders", []):
+		var lo := Vector3(c["min"][0], c["min"][1], c["min"][2]) * Level.UNITS
+		var hi := Vector3(c["max"][0], c["max"][1], c["max"][2]) * Level.UNITS + Vector3.UP * JUMP_GUARD
+		var shape := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		box.size = (hi - lo).max(Vector3(0.2, 0.2, 0.2))
+		shape.shape = box
+		_body.add_child(shape)
+		shape.global_transform = Transform3D(Basis(), root.origin + (lo + hi) / 2)
 
 
 # The rigs have a closed pose (1 key), an opening animation (many keys) and an
@@ -65,11 +69,14 @@ func _pick_animations() -> void:
 	var poses := []
 	for a in _anim.get_animation_list():
 		var anim := _anim.get_animation(a)
-		if anim.length > longest:
+		var keys := 0
+		for t in anim.get_track_count():
+			keys = max(keys, anim.track_get_key_count(t))
+		if keys <= 1:
+			poses.append(a)  # single-key pose (its imported length is not 0)
+		elif anim.length > longest:
 			longest = anim.length
 			_opening = a
-		elif anim.length == 0.0:
-			poses.append(a)
 	if _opening == "" or poses.is_empty():
 		_closed = poses[0] if poses.size() > 0 else ""
 		return

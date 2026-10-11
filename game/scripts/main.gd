@@ -83,7 +83,10 @@ func _weapon_shots(game: Game, names: PackedStringArray) -> void:
 func _look_shots(game: Game, names: PackedStringArray) -> void:
 	for i in 6:
 		await get_tree().physics_frame
-	for n in names:
+	for spec in names:
+		# name@deg: orbit the camera that many degrees around the target (side views)
+		var n := spec.get_slice("@", 0)
+		var orbit := deg_to_rad(float(spec.get_slice("@", 1))) if "@" in spec else 0.0
 		var target := game.level.entity_transform(n).origin + Vector3.UP * 1.0
 		var from := game.level.player_spawn.origin
 		for w in game.level.windows:
@@ -91,13 +94,14 @@ func _look_shots(game: Game, names: PackedStringArray) -> void:
 				from = w.inside + (w.inside - w.global_position).normalized() * 2.0
 		var dir := (target - from)
 		dir.y = 0
+		dir = dir.rotated(Vector3.UP, orbit)
 		from = target - dir.normalized() * 3.0
 		game.player.global_position = Vector3(from.x, target.y - 1.0, from.z)
 		game.player.rotation.y = atan2(-dir.x, -dir.z)
 		for i in 8:
 			await get_tree().process_frame
 		await RenderingServer.frame_post_draw
-		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/look_%s.png" % n))
+		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/look_%s.png" % spec.replace("@", "_")))
 	get_tree().quit()
 
 
@@ -117,20 +121,26 @@ func _spin_shots(game: Game) -> void:
 # Walk the player from spawn up the stairs to an upstairs window: -- nacht --stairs-test
 func _stairs_test(game: Game) -> void:
 	await game.level.navigation_ready
-	for d in game.level.debris.duplicate():
-		if d.entity == "FrontSofaTrigger":
-			d.open()
+	var jumping := OS.get_cmdline_user_args().has("--no-open")
+	if not jumping:
+		for d in game.level.debris.duplicate():
+			if d.entity == "FrontSofaTrigger":
+				d.open()
 	var target := Vector3.ZERO
 	for w in game.level.windows:
 		if w.area == "upstairsroom":
 			target = w.inside
 	var p := game.player
 	var path := PackedVector3Array()
-	for attempt in 40:  # wait for the rebake without the debris to reach upstairs
+	for attempt in (1 if jumping else 40):  # wait for the rebake without the debris to reach upstairs
 		await get_tree().create_timer(0.5).timeout
 		path = NavigationServer3D.map_get_path(p.get_world_3d().navigation_map, p.global_position, target, true)
 		if path.size() > 0 and path[-1].y > 3.0:
 			break
+	if jumping:
+		# debris still there: walk the straight stair line instead (navmesh is blocked)
+		var top := game.level.entity_transform("FrontSofaTrigger").origin
+		path = PackedVector3Array([Vector3(-11.6, 0, -7.0), Vector3(-11.6, 1.25, -8.5), Vector3(-12.6, 2.0, -10.0), Vector3(-13.9, 2.75, -10.5), top + Vector3(-1.0, 0.6, 0), Vector3(-19.3, 4.0, -11.2)])
 	print("[stairs] path points=%d from %s to %s\n%s" % [path.size(), p.global_position, target, path])
 	var i := 0
 	var t := 0.0
@@ -145,6 +155,8 @@ func _stairs_test(game: Game) -> void:
 			i += 1
 			continue
 		p.rotation.y = atan2(-to.x, -to.z)  # face where we walk
+		if jumping and p.is_on_floor():
+			p.velocity.y = Player.JUMP  # hop constantly, as a player trying to skip the debris
 		var local := p.global_basis.inverse() * to.normalized()
 		p.move_input = Vector2(local.x, local.z)
 		Input.action_release("jump")
@@ -182,5 +194,7 @@ func _stairs_test(game: Game) -> void:
 		print("[stairs] touching %s normal=%s at y=%.2f (feet %.2f)" % [col.get_collider().get_parent().name, col.get_normal().snapped(Vector3(0.01, 0.01, 0.01)), col.get_position().y, p.global_position.y])
 	print("[stairs] next waypoint ", path[min(i, path.size() - 1)], " pos ", p.global_position)
 	var ok := p.global_position.y > target.y - 0.3  # reached the upstairs floor
+	if jumping:
+		ok = not ok  # with the debris in place, getting upstairs is the bug
 	print("[stairs] %s: end y=%.2f dist=%.2f time=%.1fs" % ["OK" if ok else "FAIL", p.global_position.y, p.global_position.distance_to(target), t])
 	get_tree().quit()

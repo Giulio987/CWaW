@@ -69,6 +69,20 @@ WEAPONS = ["colt45", "kar98", "carbine", "thompson", "mp40", "stg44", "trenchgun
            "flamethrower", "wunderwaffe", "grenade", "molotov", "betty", "knife"]
 
 
+def colliders(b):
+    """CIwColliderSpec + CIwVolumeAABox: 4 zero bytes, then s32 min[3], max[3] in entity units."""
+    out = []
+    key = struct.pack("<II", iw_hash("CIwColliderSpec"), iw_hash("CIwVolumeAABox"))
+    i = b.find(key)
+    while i >= 0:
+        lo = struct.unpack_from("<iii", b, i + 12)
+        hi = struct.unpack_from("<iii", b, i + 24)
+        if all(h >= l for l, h in zip(lo, hi)):
+            out.append({"min": list(lo), "max": list(hi), "offset": i})
+        i = b.find(key, i + 1)
+    return out
+
+
 def action_params(b, comps_hashes):
     """Cost fields of the buy actions: class hash, u32 cost, u32 0, u32 weapon, u32 ammoCost."""
     out = {}
@@ -109,7 +123,7 @@ def main(out_path, group_path, *model_groups):
         ents.append({"name": d.get(r.name_hash, f"{r.name_hash:08x}"), "hash": f"{r.name_hash:08x}",
                      "components": comps, "models": [f"{h:08x}" for h in refs],
                      "transform": xf[-1] if xf else None, "children": xf[:-1], "size": len(b),
-                     "params": action_params(b, comps)})
+                     "params": action_params(b, comps), "colliders": colliders(b)})
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as f:
         json.dump(ents, f, indent=1)

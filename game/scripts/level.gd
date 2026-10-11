@@ -108,6 +108,8 @@ func _prepare_meshes(root: Node) -> void:
 						mat.albedo_color = Color(1, 1, 1, 0.45)
 			if not effect:
 				faces.append_array(_surface_faces(mi.mesh, s))
+			else:
+				_maybe_light_cone(mi, s)
 		# collision from the solid surfaces only (a floor with a blood decal must stay solid)
 		if not faces.is_empty():
 			var shape := ConcavePolygonShape3D.new()
@@ -118,6 +120,28 @@ func _prepare_meshes(root: Node) -> void:
 			cs.shape = shape
 			body.add_child(cs)
 			mi.add_child(body)
+
+
+# Lamp shafts and glows are flat additive cards (CIwAmbientFader entities) that
+# the original turns towards the camera: tall ones around the vertical axis,
+# square glows fully.
+func _maybe_light_cone(mi: MeshInstance3D, surface: int) -> void:
+	var mat := mi.mesh.surface_get_material(surface) as StandardMaterial3D
+	if mat == null or mat.blend_mode != BaseMaterial3D.BLEND_MODE_ADD:
+		return
+	var verts: PackedVector3Array = _surface_faces(mi.mesh, surface)
+	if verts.is_empty():
+		return
+	var lo := verts[0]
+	var hi := verts[0]
+	for v in verts:
+		lo = lo.min(v)
+		hi = hi.max(v)
+	var size := hi - lo
+	if minf(size.x, size.z) > 0.05 or (lo + hi).length() / 2 > 3.0:
+		return  # not a flat card centred on its entity
+	mat.billboard_keep_scale = true
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y if size.y > 1.2 * maxf(size.x, size.z) * 0.5 and size.y > 1.0 else BaseMaterial3D.BILLBOARD_ENABLED
 
 
 static func _surface_faces(mesh: Mesh, surface: int) -> PackedVector3Array:

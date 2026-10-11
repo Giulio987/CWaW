@@ -85,7 +85,7 @@ func _back_to_idle(action: String) -> void:
 		_play("idle", true)
 
 
-var knife_swing := "d9b67069"   # arms animation of the knife slash (identified visually)
+var knife_swing := "28d07a6d"   # arms animation of the horizontal knife slash (largest sideways hand sweep)
 const KNIFE_MODEL := "78d2d941"   # knife_lod1 in the player group
 var _knife: Node3D
 
