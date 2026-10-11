@@ -16,6 +16,8 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	if args.has("--gib-test"):
 		_gib_test.call_deferred()
+	elif args.has("--crawl-test"):
+		_crawl_test.call_deferred()
 	elif args.has("--powerup-test"):
 		_powerup_test.call_deferred()
 	var dir := ProjectSettings.globalize_path("res://../analysis/autotest")
@@ -23,7 +25,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if OS.get_cmdline_user_args().has("--gib-test") or OS.get_cmdline_user_args().has("--powerup-test"):
+	if OS.get_cmdline_user_args().has("--gib-test") or OS.get_cmdline_user_args().has("--powerup-test") or OS.get_cmdline_user_args().has("--crawl-test"):
 		return
 	_t += delta
 	if game.player == null:
@@ -147,4 +149,35 @@ func _powerup_test() -> void:
 				info = "zombies dead=%d/3 points +%d" % [zs.filter(func(z): return not is_instance_valid(z) or z.state == Zombie.State.DEAD).size(), p.points - before_pts]
 			"carpenter": info = "boards=%s" % [game.level.windows.map(func(w): return w.boards)]
 		print("[powerup] %s picked=%s %s" % [kind, not is_instance_valid(pu), info])
+	get_tree().quit()
+
+
+# A zombie loses its legs, crawls to the player and attacks: -- nacht --autotest 60 --crawl-test
+func _crawl_test() -> void:
+	await game.level.navigation_ready
+	game.set_process(false)
+	var p := game.player
+	p.health = 1e9
+	var fwd := -p.global_basis.z
+	var z := Zombie.new()
+	z.setup(p.global_position + fwd * 5.0, game.level.windows[0], p, 1e6, false)
+	game.add_child(z)
+	z.state = Zombie.State.CHASE
+	await get_tree().create_timer(0.3).timeout
+	z.become_crawler()
+	await get_tree().create_timer(0.5).timeout
+	await _snap("crawl_0")
+	var t := 0.0
+	var attacked := false
+	while t < 20.0:
+		await get_tree().create_timer(0.5).timeout
+		t += 0.5
+		if z.state == Zombie.State.ATTACK:
+			attacked = true
+			await _snap("crawl_attack")
+			break
+	print("[crawl] crawler=%s reached and attacked=%s in %.1fs anim=%s" % [z.crawler, attacked, t, z._anim.current_animation])
+	z.take_damage(1e7, false, p)
+	await get_tree().create_timer(2.5).timeout
+	await _snap("crawl_dead")
 	get_tree().quit()

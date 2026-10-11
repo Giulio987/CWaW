@@ -8,6 +8,8 @@ extends Node3D
 const DIR := "res://assets/characters/ingame/player/"
 
 static var _pairs: Dictionary
+const ARM_DONOR := {"ppsh": "thompson", "type100": "thompson", "fg42": "bar", "raygun": "colt45",
+	"flamethrower": "bar", "wunderwaffe": "mg42"}
 
 var _arms: Node3D
 var _arms_anim: AnimationPlayer
@@ -59,7 +61,15 @@ func set_weapon(name: String) -> void:
 	_no_shadows(_weapon)
 	var wap := _weapon.find_children("*", "AnimationPlayer")
 	_weapon_anim = wap[0] if wap.size() > 0 else null
-	_anims = info.get("anims", {})
+	_anims = info.get("anims", {}).duplicate(true)
+	# weapons whose arms animations could not be paired reliably borrow the arms of a
+	# similar weapon (their own weapon animations are kept)
+	var donor: String = ARM_DONOR.get(name, "")
+	if donor != "":
+		var d: Dictionary = pairs()["weapons"][donor]["anims"]
+		for act in d:
+			var own: String = _anims[act][0] if _anims.has(act) else ""
+			_anims[act] = [own, d[act][1]]
 	_play("idle", true)
 
 
@@ -69,6 +79,11 @@ func _no_shadows(n: Node) -> void:
 
 
 func _play(action: String, loop := false) -> float:
+	# The idle arms poses were paired by timing alone and some are wrong (FG42, PPSh):
+	# hold the first frame of the shoot animation instead, which always starts in the grip pose.
+	if action == "idle" and _anims.has("shoot"):
+		_hold_first_frame("shoot")
+		return 0.0
 	if not _anims.has(action):
 		return 0.0
 	var pair: Array = _anims[action]
@@ -86,8 +101,19 @@ func _play(action: String, loop := false) -> float:
 	return length
 
 
+func _hold_first_frame(action: String) -> void:
+	var pair: Array = _anims[action]
+	for p in [[_weapon_anim, pair[0]], [_arms_anim, pair[1]]]:
+		var ap: AnimationPlayer = p[0]
+		if ap and ap.has_animation(p[1]):
+			ap.stop()
+			ap.play(p[1])
+			ap.seek(0.0, true)
+			ap.pause()
+
+
 func _back_to_idle(action: String) -> void:
-	if _arms_anim.current_animation == "" or _arms_anim.current_animation == _anims.get(action, ["", ""])[1]:
+	if not _arms_anim.is_playing() or _arms_anim.current_animation == "" or _arms_anim.current_animation == _anims.get(action, ["", ""])[1]:
 		_play("idle", true)
 
 

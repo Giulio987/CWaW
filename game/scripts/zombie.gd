@@ -16,6 +16,15 @@ const RUNS := {"c9903fc0": 3.03, "842441ac": 3.61, "842441ab": 3.49, "c349cc28":
 const IDLE := "c98b07c8"
 const ATTACKS := ["fab4136a", "fb0fe592"]
 const DEATHS := ["20b0e521", "371f7199", "f037474d"]
+# crawlers ("zombies with half a body", CrawlingZombieMaxHealth in the original): legs
+# blown off, they drag themselves along with these animations
+const CRAWL := "4b64cfc6"         # root-motion partner a429672c: 0.52 m/s
+const CRAWL_SPEED := 0.52
+const CRAWL_ATTACK := "dddede7a"  # zombie_crawl_attack
+const CRAWL_DEATH := "bd4b9b0a"
+const CRAWL_CHANCE := 0.08
+var crawler := false
+var _shape: CollisionShape3D
 # window: swipe at the boards in place, then climb through (its root-motion partner
 # 4c478fd4 moves 1.34 m forward over the 4.07 s animation)
 const TEAR := "fb0fe592"
@@ -61,6 +70,7 @@ func _ready() -> void:
 	var cap := CapsuleShape3D.new()
 	cap.radius = 0.3
 	cap.height = 1.8
+	_shape = shape
 	shape.shape = cap
 	shape.position.y = 0.9
 	add_child(shape)
@@ -124,7 +134,7 @@ func _physics_process(delta: float) -> void:
 				state = State.ATTACK
 				_timer = 1.0
 				_hit_done = false
-				_play(ATTACKS.pick_random(), 0.1)
+				_play(CRAWL_ATTACK if crawler else ATTACKS.pick_random(), 0.1)
 				Sfx.instance.play_at("zombie_attack", global_position + Vector3.UP * 1.5)
 			else:
 				_repath -= delta
@@ -202,7 +212,10 @@ func take_damage(amount: float, headshot: bool, by: Player, knife := false) -> v
 	health -= amount
 	by.add_points(10 * (g.points_multiplier if g else 1))
 	# arms come off from heavy body hits (hit position is not passed yet: random side)
-	if not headshot and not knife and amount >= 40.0 and randf() < ARM_GIB_CHANCE:
+	if not crawler and health > 0.0 and not headshot and not knife and amount >= 50.0 \
+			and state in [State.CHASE, State.ATTACK] and randf() < CRAWL_CHANCE:
+		become_crawler()
+	elif not headshot and not knife and amount >= 40.0 and randf() < ARM_GIB_CHANCE:
 		lose_arm(["left", "right"].pick_random())
 	if health <= 0.0:
 		_die(headshot, knife)
@@ -293,6 +306,25 @@ func _spawn_gib(src: MeshInstance3D, where: MeshInstance3D) -> void:
 	get_tree().create_timer(8.0, false).timeout.connect(body.queue_free)
 
 
+func become_crawler() -> void:
+	crawler = true
+	var legs := _part("legs")
+	if legs and legs.visible:
+		legs.visible = false
+		_spawn_gib(legs, legs)
+	var cap := _part("acf2ab46_m1")  # bloody waist stump
+	if cap:
+		cap.visible = true
+	move_anim = CRAWL
+	speed = CRAWL_SPEED
+	_anim.get_animation(CRAWL).loop_mode = Animation.LOOP_LINEAR
+	_anim.get_animation(CRAWL_ATTACK).loop_mode = Animation.LOOP_NONE
+	(_shape.shape as CapsuleShape3D).height = 0.7
+	_shape.position.y = 0.35
+	if state == State.CHASE:
+		_play(CRAWL, 0.3)
+
+
 func nuke_kill() -> void:
 	if state == State.DEAD:
 		return
@@ -311,6 +343,8 @@ func _die(headshot: bool, knife := false) -> void:
 		window.occupied_by = null
 	collision_layer = 0
 	collision_mask = 1
-	_anim.play(DEATHS.pick_random(), 0.1)
+	var death: String = CRAWL_DEATH if crawler else DEATHS.pick_random()
+	_anim.get_animation(death).loop_mode = Animation.LOOP_NONE  # stay down
+	_anim.play(death, 0.1)
 	killed.emit(self, headshot, knife)
 	get_tree().create_timer(6.0).timeout.connect(queue_free)
