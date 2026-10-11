@@ -48,7 +48,7 @@ func _ready() -> void:
 	add_child(shape)
 	_camera = Camera3D.new()
 	_camera.position.y = 1.6
-	_camera.fov = 70
+	_camera.fov = Settings.fov()  # user setting (pause menu)
 	_camera.near = 0.05
 	_camera.far = 400
 	add_child(_camera)
@@ -56,13 +56,14 @@ func _ready() -> void:
 	_viewmodel = Viewmodel.new()
 	_camera.add_child(_viewmodel)
 	changed.connect(_sync_viewmodel)
+	add_child(GrenadeBelt.new())   # frag grenades (grenade_belt.gd)
 	give_weapon("colt45")
 
 
 func give_weapon(name: String) -> void:
 	for i in weapons.size():
 		if weapons[i]["name"] == name:
-			var s := Weapons.stats(name)
+			var s := Weapons.stats_of(weapons[i])   # a Pack-a-Punched gun refills to its upgraded size
 			weapons[i]["mag"] = s["mag"]
 			weapons[i]["reserve"] = s["reserve"]
 			current = i
@@ -87,16 +88,19 @@ var _shown_weapon := ""
 
 func _sync_viewmodel() -> void:
 	var n: String = weapon()["name"]
-	if n != _shown_weapon:
-		_shown_weapon = n
+	var key := n + ("+" if weapon().get("upgraded", false) else "")
+	if key != _shown_weapon:
+		_shown_weapon = key
 		_viewmodel.set_weapon(n)
+		if weapon().get("upgraded", false):
+			PackAPunch.decorate(_viewmodel)
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if dead:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		look(event.relative * MOUSE_SENS)
+		look(event.relative * MOUSE_SENS * Settings.mouse_sens())
 	elif event.is_action_pressed("switch_weapon"):
 		switch_weapon()
 	elif event.is_action_pressed("reload"):
@@ -107,7 +111,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func look(delta: Vector2) -> void:
 	rotate_y(-delta.x)
-	_camera.rotation.x = clamp(_camera.rotation.x - delta.y, -1.45, 1.45)
+	_camera.rotation.x = clamp(_camera.rotation.x - delta.y * (-1.0 if Settings.invert_y() else 1.0), -1.45, 1.45)
 
 
 const KNIFE_DAMAGE := 150.0
@@ -170,7 +174,7 @@ func switch_weapon() -> void:
 
 func reload() -> void:
 	var w := weapon()
-	var s := Weapons.stats(w["name"])
+	var s := Weapons.stats_of(w)
 	if _reloading > 0.0 or w["mag"] >= s["mag"] or w["reserve"] <= 0:
 		return
 	_reloading = s["reload"] * (Perks.SPEED_RELOAD if has_perk("speed") else 1.0)
@@ -209,7 +213,7 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 
 	var w := weapon()
-	var s := Weapons.stats(w["name"])
+	var s := Weapons.stats_of(w)
 	var wants_fire := fire_held
 	if s["auto"]:
 		wants_fire = wants_fire or Input.is_action_pressed("fire")
@@ -233,10 +237,13 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 	w["mag"] -= 1
 	_cooldown = s["rate"] * (Perks.DBTAP_RATE if has_perk("dbtap") else 1.0)
 	_viewmodel.kick()
-	Sfx.instance.weapon_fire(w["name"])
+	if w["name"] != "flamethrower":   # FlameJet plays its own fire loop
+		Sfx.instance.weapon_fire(w["name"])
 	_camera.rotation.x = min(_camera.rotation.x + 0.012, 1.45)
 	var space := get_world_3d().direct_space_state
-	for p in s["pellets"]:
+	# Ray Gun bolt / flamethrower cone (weapon_fx.gd) replace the hitscan
+	var pellets: int = 0 if WeaponFx.fire(self, w, s, _camera) else int(s["pellets"])
+	for p in pellets:
 		var spread := Vector3.ZERO
 		if s["pellets"] > 1:
 			spread = Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * 0.06
@@ -262,7 +269,7 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 
 func _finish_reload() -> void:
 	var w := weapon()
-	var s := Weapons.stats(w["name"])
+	var s := Weapons.stats_of(w)
 	var take: int = min(s["mag"] - w["mag"], w["reserve"])
 	w["mag"] += take
 	w["reserve"] -= take
@@ -330,7 +337,7 @@ func _update_prompt() -> void:
 	var t = _interaction_target()
 	if t == null:
 		return
-	if t is MysteryBox or t is PerkMachine:
+	if t is MysteryBox or t is PerkMachine or (t is Object and t in game.level.interactables):
 		prompt = t.prompt(self)
 	elif t is Barricade:
 		prompt = "Tieni premuto E per riparare la barricata"
@@ -358,6 +365,10 @@ func _interaction_target():
 	for d in game.level.debris:
 		if is_instance_valid(d) and d.global_position.distance_to(p) < INTERACT_RANGE + 1.0:
 			return d
+	# traps, teleporters, Pack-a-Punch (level.gd)
+	for o in game.level.interactables:
+		if o.usable_from(p) and o.prompt(self) != "":
+			return o
 	for b in game.wall_buys:
 		if (b["position"] as Vector3).distance_to(p) < INTERACT_RANGE:
 			return b
@@ -375,7 +386,7 @@ func interact() -> void:
 			Sfx.instance.play_at("window_repair", t.global_position)
 	elif not Input.is_action_just_pressed("interact"):
 		return
-	elif t is MysteryBox or t is PerkMachine:
+	elif t is MysteryBox or t is PerkMachine or (t is Object and t in game.level.interactables):
 		t.interact(self)
 	elif t is Debris:
 		if points >= t.cost:

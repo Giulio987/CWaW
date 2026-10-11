@@ -43,3 +43,56 @@ static func stats(name: String) -> Dictionary:
 
 static func display(name: String) -> String:
 	return DISPLAY.get(name, name.capitalize())
+
+
+# Pack-a-Punch (Der Riese). mag/reserve are the original "<weapon>_upgrade" CItemGun
+# values (player group); "mul" multiplies the damage above: the ratio of the upgraded
+# to the normal gun's damage field where the original raises it, otherwise x1.5
+# (World at War upgrades all do more damage). Names are the World at War ones.
+const UPGRADES := {
+	"colt45":       {"mag": 6,   "reserve": 40,  "mul": 5.0, "name": "Mustang & Sally"},
+	"kar98":        {"mag": 8,   "reserve": 60,  "mul": 2.0, "name": "Armageddon"},
+	"arisaka":      {"mag": 5,   "reserve": 50,  "mul": 1.5, "name": "Arisaka (potenziato)"},
+	"springfield":  {"mag": 5,   "reserve": 50,  "mul": 1.5, "name": "Springfield (potenziato)"},
+	"carbine":      {"mag": 15,  "reserve": 150, "mul": 1.5, "name": "Widdershins RC-1"},
+	"garand":       {"mag": 12,  "reserve": 150, "mul": 1.5, "name": "M1000"},
+	"g43":          {"mag": 12,  "reserve": 170, "mul": 1.5, "name": "G115 Compressor"},
+	"thompson":     {"mag": 40,  "reserve": 300, "mul": 1.5, "name": "Gibs-O-Matic"},
+	"mp40":         {"mag": 64,  "reserve": 192, "mul": 1.5, "name": "The Afterburner"},
+	"type100":      {"mag": 60,  "reserve": 220, "mul": 1.5, "name": "1001 Samurais"},
+	"stg44":        {"mag": 60,  "reserve": 300, "mul": 1.5, "name": "Spatz-447 +"},
+	"ppsh":         {"mag": 115, "reserve": 700, "mul": 1.5, "name": "The Reaper"},
+	"bar":          {"mag": 30,  "reserve": 180, "mul": 1.5, "name": "The Widow Maker"},
+	"fg42":         {"mag": 64,  "reserve": 400, "mul": 1.5, "name": "Bauer Rifle"},
+	"mg42":         {"mag": 125, "reserve": 750, "mul": 1.5, "name": "Barracuda FU-A11"},
+	"browning":     {"mag": 125, "reserve": 750, "mul": 1.5, "name": "B115 Accelerator"},
+	"shotgun":      {"mag": 2,   "reserve": 60,  "mul": 1.5, "name": "24 Bore Long Range"},
+	"sawnoff":      {"mag": 2,   "reserve": 60,  "mul": 1.5, "name": "The Snuff Box"},
+	"trenchgun":    {"mag": 6,   "reserve": 60,  "mul": 1.5, "name": "Gut Shot"},
+	"ptrs":         {"mag": 8,   "reserve": 55,  "mul": 1.5, "name": "The Penetrator"},
+	"flamethrower": {"mag": 100, "reserve": 300, "mul": 1.5, "name": "Dante's Inferno"},
+	"raygun":       {"mag": 40,  "reserve": 200, "mul": 1.5, "name": "Porter's X2 Ray Gun"},
+}
+
+
+static func can_upgrade(name: String) -> bool:
+	return UPGRADES.has(name)
+
+
+# Stats of a held weapon ({name, mag, reserve, upgraded?}).
+static func stats_of(w: Dictionary) -> Dictionary:
+	var s := stats(w["name"])
+	if not w.get("upgraded", false) or not UPGRADES.has(w["name"]):
+		return s
+	var u: Dictionary = UPGRADES[w["name"]]
+	s = s.duplicate()
+	s["damage"] = s["damage"] * u["mul"]
+	s["mag"] = u["mag"]
+	s["reserve"] = u["reserve"]
+	return s
+
+
+static func display_of(w: Dictionary) -> String:
+	if w.get("upgraded", false) and UPGRADES.has(w["name"]):
+		return UPGRADES[w["name"]]["name"]
+	return display(w["name"])

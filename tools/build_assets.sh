@@ -24,8 +24,10 @@ for l in nacht verruckt shinonuma derriese; do
   lua tools/lua/dump_waves.lua "$A/lua/levels/$l/${l}_full.lua" 0 40 > "$A/levels/$l/waves.json"
   lua tools/lua/dump_level.lua "$A/lua/ingame/scripts" "$A/lua/levels/$l/$l.lua" > "$A/levels/$l/level.json"
 done
+$PY -I tools/resolve_names.py
 $PY -I tools/export_gltf.py "$A/models" $G
 $PY -I tools/export_characters.py "$A/characters" $G > /dev/null
 $PY -I tools/pair_arms.py > /dev/null
 $PY -I tools/sound_index.py "$A/sounds/index.json"
+$PY -I tools/fonts.py extracted/main/fixed/fixed.group.bin "$A/fonts"
 echo "assets rebuilt"

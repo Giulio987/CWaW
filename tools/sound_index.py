@@ -10,6 +10,11 @@
               count x {u32 command class, u32 0, u32 value}; Delay = ms, PlayAsync = spec
 - guns:       weapon -> fire sound (CItemGun named iw_hash(weapon) references it)
 - ambience:   CAmbienceChannel hash -> [sounds]
+- levels:     level -> {spec hash: path} for specs whose data differs per level group
+              (e.g. gameover_intro); "sounds" keeps one of them
+Music/jingles: begin_wave/start_game/end_wave come from waves.lua, the perk jingles are
+referenced by the BuyPerk* entities (perkjingle<perk>), the box sounds by the box
+CIsAnimStateMachine (350fb630); ALIAS gives them friendly names (round_start, jingle_jugga...).
 """
 import glob
 import itertools
@@ -40,11 +45,30 @@ VOCAB_X = ["zombie_0%d" % i for i in range(1, 10)] + [
     "teddyland", "perk_random", "achievement", "dooropen", "barrel_explosion", "thunder", "thunder2",
     "ambthunder", "ambthunder2", "wind1", "wind2", "wind3", "wind_1", "wind_2", "wind_3", "Static1", "Static2",
     "radio_start1", "radio_start2", "radio_start3", "pa_level_start", "pa_power_on", "dog_spawn", "dog_attack",
-    "dog_death1", "dog_death2", "dog_end_music", "dog_start_vox", "dog_fog"]
+    "dog_death1", "dog_death2", "dog_end_music", "dog_start_vox", "dog_fog",
+    # music & jingles (waves.lua, BuyPerk* entities, mystery box state machine)
+    "begin_wave", "start_game", "music_box_play", "teddypoof", "perkjinglejugga", "perkjinglespeed",
+    "perkjingledouble", "perkjinglerevive", "perkpoweron", "perkhumloop", "pack_buy", "pack_tick",
+    "countdown_tick", "PowerStart1", "PowerStart2", "menu_press", "mx_frontend"]
+# friendly name -> recovered name or spec hash (hashes: identified from where they are used)
+ALIAS = {
+    "round_start": "begin_wave",         # waves.lua StartWave, rounds > 1 (the "round change" chant)
+    "game_start": "start_game",          # waves.lua StartWave, round 1 (not on Der Riese: NoStartLaugh)
+    "round_end": "end_wave",             # waves.lua waveEnd
+    "game_over": "gameover_intro",       # per level (see "levels")
+    "box_music": "music_box_play",       # box state machine, weapons cycling
+    "box_flyaway": "fc5a4b57",           # box state machine, teddy state: box rises and shakes
+    "box_fall": "3b5fcb97",              # box state machine, activateMysteryBoxFalling (then teddyland)
+    "jingle_jugga": "perkjinglejugga",   # BuyPerkJugga entity
+    "jingle_speed": "perkjinglespeed",   # BuyPerkSpeed
+    "jingle_dbtap": "perkjingledouble",  # BuyPerkDbTap
+    "jingle_revive": "perkjinglerevive",  # BuyPerkRevive
+    "perk_hum": "perkhumloop",           # SoundPerkHum* emitters
+}
 
 
 def main(out):
-    sounds, seqs, guns_raw, amb = {}, {}, {}, {}
+    sounds, seqs, guns_raw, amb, per_group = {}, {}, {}, {}, {}
     for p in glob.glob(os.path.join(ROOT, "extracted/**/*.group.bin"), recursive=True):
         gd = group_dir(p)
         for r in Group(p).resources:
@@ -53,6 +77,8 @@ def main(out):
                 sh = struct.unpack_from("<I", b, 0)[0]
                 dh = struct.unpack_from("<I", b, len(b) - 4)[0]
                 sounds[sh] = f"res://assets/sounds/{gd}/{dh:08x}.wav"
+                if gd.startswith("levels/"):
+                    per_group.setdefault(sh, {})[gd.split("/")[1]] = sounds[sh]
             elif r.cls == iw_hash("CSoundSequence"):
                 (n,) = struct.unpack_from("<I", b, 1)
                 steps, delay = [], 0
@@ -76,6 +102,10 @@ def main(out):
     for s in VOCAB_X:
         if iw_hash(s) in known:
             names[s] = f"{iw_hash(s):08x}"
+    for k, v in ALIAS.items():
+        h = names.get(v, v)
+        if h in names.values() or int(h, 16) in known:
+            names[k] = h
     for k, hs in ZOMBIE.items():
         names[k] = [f"{h:08x}" for h in hs if h in known]
     guns = {}
@@ -92,8 +122,15 @@ def main(out):
     for k, b in amb.items():
         ambience[k] = sorted({f"{h:08x}" for i in range(len(b) - 3)
                               for h in [struct.unpack_from("<I", b, i)[0]] if h in known})
+    levels = {}
+    for h, by_level in per_group.items():
+        # different data per level (same data name can still hold different sounds, e.g. the radios)
+        if len({open(os.path.join(ROOT, "game", p[6:]), "rb").read() if os.path.exists(os.path.join(ROOT, "game", p[6:]))
+                else p for p in by_level.values()}) > 1:
+            for lv, p in by_level.items():
+                levels.setdefault(lv, {})[f"{h:08x}"] = p
     index = {"sounds": {f"{h:08x}": p for h, p in sounds.items()}, "names": names, "sequences": seqs,
-             "guns": guns, "ambience": ambience}
+             "guns": guns, "ambience": ambience, "levels": levels}
     os.makedirs(os.path.dirname(out), exist_ok=True)
     json.dump(index, open(out, "w"), indent=1)
     print(out, len(sounds), "sounds,", len(names), "names,", len(seqs), "sequences,", len(guns), "guns,",

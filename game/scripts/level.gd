@@ -19,6 +19,10 @@ var boxes := []             # MysteryBox nodes
 var perk_machines := []     # PerkMachine nodes (the power switch included)
 var power_on := true        # false until the GeneratorSwitch is used on maps that have one
 var player_spawn := Transform3D.IDENTITY
+var traps := []             # Trap nodes (CActionBuyTrapSpec)
+var interactables := []     # nodes with usable_from(pos) / prompt(player) / interact(player): traps, teleporters, Pack-a-Punch
+var teleporters: TeleporterNetwork   # Der Riese
+var pack_a_punch: PackAPunch         # Der Riese
 var nav_region: NavigationRegion3D
 var static_root: Node3D
 
@@ -26,7 +30,14 @@ var static_root: Node3D
 func load_level(name: String) -> void:
 	level_name = name
 	var base := "res://assets/levels/%s/" % name
+	# names entities.json only knows by hash, recovered by tools/resolve_names.py
+	var aliases := {}
+	if FileAccess.file_exists(base + "names.json"):
+		aliases = JSON.parse_string(FileAccess.get_file_as_string(base + "names.json"))
 	for e in JSON.parse_string(FileAccess.get_file_as_string(base + "entities.json")):
+		e["glb_name"] = e["name"]   # environment.glb nodes keep the original "ent_<name>"
+		if aliases.has(e["name"]):
+			e["name"] = aliases[e["name"]]
 		entities[e["name"]] = e
 		_by_lower[String(e["name"]).to_lower()] = e
 
@@ -55,6 +66,20 @@ func load_level(name: String) -> void:
 	_build_wall_buys()
 	_build_boxes()
 	_build_perks()
+	_build_traps()
+	_build_power_doors()
+	if has_entity("TeleporterMainFrame"):
+		teleporters = TeleporterNetwork.new()
+		teleporters.name = "Teleporters"
+		nav_region.add_child(teleporters)
+		teleporters.setup(self)
+	if has_entity("packapunch"):
+		pack_a_punch = PackAPunch.new()
+		pack_a_punch.name = "PackAPunch"
+		nav_region.add_child(pack_a_punch)
+		pack_a_punch.setup(self, entity("packapunch")["name"])
+		interactables.append(pack_a_punch)
+	_release_dynamics()
 
 
 func bake_navigation() -> void:
@@ -92,6 +117,42 @@ static func _to_transform(xf: Dictionary) -> Transform3D:
 		Vector3(p[0], p[1], p[2]) * UNITS)
 
 
+func has_entity(name: String) -> bool:
+	return entities.has(name) or _by_lower.has(name.to_lower())
+
+
+func entity(name: String) -> Dictionary:
+	return entities.get(name, _by_lower.get(name.to_lower(), {}))
+
+
+# A static (unrigged) model by hash from the level's dynamics.glb, or a rigged one
+# from characters/levels/<level>/dynamics; null when neither exists.
+var _dyn_scene: Node
+
+
+func dynamics_model(h: String) -> Node3D:
+	var rigged := "res://assets/characters/levels/%s/dynamics/%s.glb" % [level_name, h]
+	if ResourceLoader.exists(rigged):
+		return (load(rigged) as PackedScene).instantiate()
+	if _dyn_scene == null:
+		var path := "res://assets/models/levels/%s/dynamics.glb" % level_name
+		if not ResourceLoader.exists(path):
+			return null
+		_dyn_scene = (load(path) as PackedScene).instantiate()
+	var n := _dyn_scene.find_child(h, true, false) as Node3D
+	if n == null:
+		return null
+	var copy := n.duplicate() as Node3D
+	copy.transform = Transform3D.IDENTITY
+	return copy
+
+
+func _release_dynamics() -> void:
+	if _dyn_scene:
+		_dyn_scene.free()
+		_dyn_scene = null
+
+
 func entities_matching(prefix: String) -> Array:
 	var out := []
 	for n in entities:
@@ -123,7 +184,7 @@ func _setup_lods(base: String) -> void:
 		var lod = entities[n].get("lod")
 		if lod == null:
 			continue
-		var holder := static_root.find_child("ent_" + n, true, false)
+		var holder := static_root.find_child("ent_" + String(entities[n].get("glb_name", n)), true, false)
 		if holder == null:
 			continue
 		var nodes := []
@@ -317,14 +378,15 @@ func _build_debris() -> void:
 
 
 func _build_boxes() -> void:
-	# one active box per map, like the original (the teddy-bear move is not implemented)
-	var names := entities.keys().filter(func(n): return "CMysteryBoxSpec" in entities[n]["components"])
-	if names.size() > 1:
-		names = [names.pick_random()]
+	# one active box per map, like the original; the teddy bear moves it to the
+	# other locations (mystery_box.gd)
+	var all := entities.keys().filter(func(n): return "CMysteryBoxSpec" in entities[n]["components"])
+	var names := [all.pick_random()] if all.size() > 1 else all
 	for n in names:
 		if true:
 			var b := MysteryBox.new()
-			b.name = "Box_" + n
+			b.name = "Box"
+			b.locations = all
 			nav_region.add_child(b)
 			b.setup(self, n)
 			boxes.append(b)
@@ -368,6 +430,42 @@ func _add_perk_machine(entity: String, kind: String) -> void:
 	nav_region.add_child(m)
 	m.setup(self, entity, kind)
 	perk_machines.append(m)
+
+
+# Doors the generator opens (TurnOnGenerator "genTurnOn"): Verrückt's StartDoorLink
+# keeps the German and American halves apart until the power is on. Built as a
+# Debris that is not for sale (its collider blocks, power plays the opening).
+const POWER_DOORS := ["StartDoorLink"]
+
+
+func _build_power_doors() -> void:
+	if power_on:
+		return
+	for n in POWER_DOORS:
+		if not has_entity(n):
+			continue
+		var d := Debris.new()
+		d.name = "PowerDoor_" + n
+		nav_region.add_child(d)
+		d.setup(self, entity(n)["name"])
+		power_changed.connect(func(on: bool):
+			if on and is_instance_valid(d):
+				d.open()
+				await get_tree().physics_frame
+				await get_tree().physics_frame
+				bake_navigation())
+
+
+func _build_traps() -> void:
+	for n in entities:
+		var comps: Array = entities[n]["components"]
+		if "CActionBuyTrapSpec" in comps and not "CZiplineSpec" in comps:
+			var t := Trap.new()
+			t.name = "Trap_" + n
+			nav_region.add_child(t)
+			t.setup(self, n)
+			traps.append(t)
+			interactables.append(t)
 
 
 func turn_on_power() -> void:

@@ -105,12 +105,37 @@ func _pick_animations() -> void:
 
 
 func _on_power(on: bool, instant := false) -> void:
+	if on and kind != "power":
+		_hum.call_deferred()
 	if _anim == null or _anim_on == "":
 		return
 	_anim.play(_anim_on)
 	if instant or not on:
 		_anim.seek(_anim.get_animation(_anim_on).length if on else 0.0, true)
 		_anim.pause()
+
+
+# SoundPerkHum* emitters (perkhumloop), enabled with the power
+var _hum_player: AudioStreamPlayer3D
+
+func _hum() -> void:
+	if _hum_player or Sfx.instance == null or not is_inside_tree():
+		return
+	var s = Sfx.instance._stream("perk_hum")
+	if not (s is AudioStreamWAV):
+		return
+	var loop := (s as AudioStreamWAV).duplicate() as AudioStreamWAV
+	loop.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	loop.loop_begin = 0
+	loop.loop_end = int(loop.get_length() * loop.mix_rate)
+	_hum_player = AudioStreamPlayer3D.new()
+	_hum_player.stream = loop
+	_hum_player.volume_db = -10.0
+	_hum_player.unit_size = 2.0
+	_hum_player.max_distance = 12.0
+	add_child(_hum_player)
+	_hum_player.global_position = _centre + Vector3.UP
+	_hum_player.play()
 
 
 func usable_from(p: Vector3) -> bool:
@@ -140,4 +165,15 @@ func interact(player: Player) -> void:
 		return
 	player.add_points(-cost)
 	Sfx.instance.play("buy_success")
+	# the BuyPerk* entity's use sound is the perk's jingle (perkjingle<perk>)
+	Sfx.instance.play_at("jingle_" + kind, _centre + Vector3.UP, -2.0)
 	player.give_perk(kind)
+	drink(player)
+
+
+# First-person drink (viewmodel.gd); no firing until the weapon is back.
+static func drink(player: Player) -> void:
+	var vm = player.get("_viewmodel")
+	if vm is Viewmodel:
+		var t: float = vm.drink()
+		player.set("_cooldown", maxf(float(player.get("_cooldown")), t + 0.2))

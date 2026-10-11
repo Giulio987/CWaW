@@ -59,6 +59,7 @@ func set_weapon(name: String) -> void:
 	_weapon = (load(DIR + model + ".glb") as PackedScene).instantiate()
 	_attach.add_child(_weapon)
 	_no_shadows(_weapon)
+	_weapon.visible = not drinking
 	var wap := _weapon.find_children("*", "AnimationPlayer")
 	_weapon_anim = wap[0] if wap.size() > 0 else null
 	_anims = info.get("anims", {}).duplicate(true)
@@ -70,7 +71,8 @@ func set_weapon(name: String) -> void:
 		for act in d:
 			var own: String = _anims[act][0] if _anims.has(act) else ""
 			_anims[act] = [own, d[act][1]]
-	_play("idle", true)
+	if not drinking:
+		_play("idle", true)
 
 
 func _no_shadows(n: Node) -> void:
@@ -79,6 +81,8 @@ func _no_shadows(n: Node) -> void:
 
 
 func _play(action: String, loop := false) -> float:
+	if drinking:
+		return 0.0
 	# The idle arms poses were paired by timing alone and some are wrong (FG42, PPSh):
 	# hold the first frame of the shoot animation instead, which always starts in the grip pose.
 	if action == "idle" and _anims.has("shoot"):
@@ -113,6 +117,8 @@ func _hold_first_frame(action: String) -> void:
 
 
 func _back_to_idle(action: String) -> void:
+	if drinking:
+		return
 	if not _arms_anim.is_playing() or _arms_anim.current_animation == "" or _arms_anim.current_animation == _anims.get(action, ["", ""])[1]:
 		_play("idle", true)
 
@@ -134,7 +140,7 @@ var _knife_set := false
 
 
 func melee() -> void:
-	if _slash >= 0.0:
+	if _slash >= 0.0 or drinking:
 		return
 	if _knife == null:
 		_hand = BoneAttachment3D.new()
@@ -187,6 +193,69 @@ func _orient_knife() -> void:
 	_knife.global_transform = Transform3D(b, palm - b.x * KNIFE_GRIP)
 	_knife.visible = true
 	_knife_set = true
+
+
+# Perk-a-Cola: the weapon goes away, the arms drink from the bottle (the bottle
+# model and both animations are from the player group: the weapon state machines'
+# drinkPerkCola state plays them with the perk_drink sound sequence), then the
+# weapon comes back. The bottle hangs from the weapon tag bone like a weapon; the
+# original has one bottle model for every perk.
+const BOTTLE_MODEL := "fbd2a17d"
+const BOTTLE_ANIM := "a0ab314d"
+const DRINK_ARMS := "a239daae"   # 2.54 s like the bottle animation (d926090d, same timing, lights the molotov)
+var drinking := false
+var _bottle: Node3D
+var _bottle_anim: AnimationPlayer
+var _drink_id := 0
+
+
+func drink() -> float:
+	if _bottle == null:
+		if not ResourceLoader.exists(DIR + BOTTLE_MODEL + ".glb"):
+			return 0.0
+		_bottle = (load(DIR + BOTTLE_MODEL + ".glb") as PackedScene).instantiate()
+		_attach.add_child(_bottle)
+		_no_shadows(_bottle)
+		var aps := _bottle.find_children("*", "AnimationPlayer")
+		_bottle_anim = aps[0] if aps.size() > 0 else null
+	_slash = -1.0
+	if _skel:
+		_skel.set_bone_pose_scale(HIDE_BONE, Vector3.ONE)
+	if _knife:
+		_knife.visible = false
+	drinking = true
+	if _weapon:
+		_weapon.visible = false
+	_bottle.visible = true
+	var arms := DRINK_ARMS
+	var ai := OS.get_cmdline_user_args().find("--drink-arms")
+	if ai >= 0:
+		arms = OS.get_cmdline_user_args()[ai + 1]
+	var length := 2.5
+	for p in [[_arms_anim, arms], [_bottle_anim, BOTTLE_ANIM]]:
+		var ap: AnimationPlayer = p[0]
+		if ap and ap.has_animation(p[1]):
+			ap.get_animation(p[1]).loop_mode = Animation.LOOP_NONE
+			ap.stop()
+			ap.play(p[1])
+			length = ap.get_animation(p[1]).length
+	Sfx.instance.sequence("perk_drink")
+	_drink_id += 1
+	var id := _drink_id
+	get_tree().create_timer(length, false).timeout.connect(func():
+		if id == _drink_id:
+			_end_drink())
+	return length
+
+
+func _end_drink() -> void:
+	drinking = false
+	if _bottle:
+		_bottle.visible = false
+	if _weapon:
+		_weapon.visible = true
+	_kick = -0.6  # weapon comes up from below
+	_play("idle", true)
 
 
 func kick() -> void:

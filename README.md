@@ -58,13 +58,17 @@ Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `
 | Tabelle ondate | ✅ | `tools/lua/dump_waves.lua` → `waves.json` (eseguite dagli script Lua originali) |
 | Collisioni / navmesh | ✅ | generate in Godot dalla geometria (non usano ancora `CIwNavMesh` originale) |
 | Gameplay Nacht | 🔶 | round, spawn, finestre, scavalcamento, inseguimento, attacco, armi a muro, macerie, coltello, punti, lightmap |
-| Altre mappe | 🔶 | versione base: aree/collegamenti dagli script Lua (`level.json`), niente cani/trappole |
+| Altre mappe | 🔶 | aree/collegamenti dagli script Lua (`level.json`); spawn come in `AvailableSpawns` (spawn *n* → finestra *n*, finestre del cortile di Verrückt, zombie della palude senza finestra su Shi No Numa, spawn locale vicino al giocatore su Shi No Numa); aree aperte da trigger Lua con link "NA" (Der Riese, Shi No Numa) e dal generatore; nomi delle entità note solo per hash recuperati da `tools/resolve_names.py` → `names.json`; test `--reach-test [--from Entità] [--probe x1,z1,x2,z2]` |
+| Cani (hellhound) | ✅ | Shi No Numa e Der Riese, da `waves.lua`: round dei cani dopo più di 2 round (1 su 3, sempre dopo 4), 6/12/16… cani (difficoltà), 300 hp × n° round cani, al massimo 2 vivi, spawn con fulmine nell'area del giocatore, nebbia, Max Ammo dall'ultimo; `scripts/dog.gd`, test `--dog-test`, `--dog-look` |
+| Trappole | ✅ | elettriche (Verrückt, Der Riese, capanne di Shi No Numa) e flogger: 30 s attive, uccidono zombie/cani (senza punti) e feriscono il giocatore, poi ricarica; serve la corrente dove c'è il generatore; volume dalle entità `<trappola>Effect<n>`, su Verrückt dalla geometria; `scripts/trap.gd`, test `--trap-test` (`--trap-debug`) |
+| Teletrasporti / Pack-a-Punch | ✅ | Der Riese: con la corrente si attiva un pad e lo si collega al mainframe; ogni collegamento apre la porta del mainframe, al terzo si apre il Pack-a-Punch (5000: caricatore/riserva dei `*_upgrade` originali, danno ×1.5, nomi WaW); teletrasporto 1500 con ricarica, power-up o cani all'arrivo; `scripts/teleporter.gd`, `scripts/pack_a_punch.gd`, test `--tele-test`, `--pap-test` |
+| Verrückt | ✅ | partenza divisa: a caso metà tedesca o americana (`--start german|american`), la porta `StartDoorLink` si apre con la corrente |
 | Orientamento barricate/macerie | 🔶 | le entità non hanno rotazione: direzione dal muro, interno/esterno dai settori (`tools/wall_yaw.py`) |
 | Settori e LOD | ✅ | `CIwSGSectorBuilder` → `sectors.json`; `CIwLODControllerCameraVolume` mostra la variante del settore della telecamera |
 | Mystery box | ✅ | 950 punti, coperchio animato originale, armi che girano, offerta 12 s; test `--box-test` |
 | Perk-a-Cola | ✅ | Juggernog (250 hp), Speed Cola (ricarica ×0.5), Double Tap (cadenza ×0.75), Quick Revive (solo: si rialza una volta, perde i perk); corrente dal `GeneratorSwitch` su Der Riese/Verrückt (`--power` la accende subito), Shi No Numa un perk casuale per postazione; icone originali nell'HUD; `scripts/perk_machine.gd`, `scripts/perks.gd`, test `--perk-test` |
 | Suoni in gioco | ✅ | `tools/sound_index.py`: nomi ricostruiti, sequenze di ricarica originali, sparo da `CItemGun`, canali ambientali; `scripts/sfx.gd` |
-| Mancano | ⏳ | cani, smembramento, power-up, musica, build iOS |
+| Mancano | ⏳ | spostamento della mystery box (orsacchiotto), zipline e flytrap/radio, ponte di Der Riese, musica, build iOS |
 
 ## Formati – appunti
 - Risorsa nel gruppo: `u32 size, u32 nameHash, body`. Le classi polimorfiche (es. `CIwSoundData`) hanno invece `u32 subclassHash` al posto del nome, e il nome è il primo u32 del body.

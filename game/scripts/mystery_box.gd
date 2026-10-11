@@ -1,6 +1,10 @@
 # Mystery box (CMysteryBoxSpec entity). The box logic lived in the engine, not in
 # Lua, so it follows World at War: 950 points, the lid opens, weapons cycle above
-# the box for ~4 s, the result floats for 12 s and sinks back if not taken.
+# the box for ~5 s, the result floats for 12 s and sinks back if not taken.
+# Teddy bear (World at War; box state machine 350fb630 + WarpMysteryBox in the
+# level Lua): on maps with several MysteryBox locations, after a few uses the box
+# can give the teddy instead: it laughs, the 950 points are refunded, the box rises
+# and vanishes (teddypoof), then falls at another location (not one of the last two).
 class_name MysteryBox
 extends Node3D
 
@@ -11,13 +15,24 @@ var ANIM_OPEN := "d8283c46"
 var ANIM_CLOSE := "dc54990a"
 var ANIM_IDLE_OPEN := "ef143ac4"
 var ANIM_IDLE_CLOSED := "b4bcad2c"
-const CYCLE_TIME := 4.2
+const CYCLE_TIME := 5.0     # box_music is loud for ~5.5 s
+const TEDDY_MODEL := "6e3f6288"   # second model of the CMysteryBoxSpec entities (ingame dynamics)
+const TEDDY_YAW := PI / 2           # faces the front of the box
+const TEDDY_MIN_USES := 4
+const TEDDY_CHANCE := 1.0 / 3.0
+const TEDDY_LAUGH := 2.0     # teddy floats and laughs
+const RISE_TIME := 4.5       # box rises and shakes (box_flyaway)
+const GONE_TIME := 2.0
+const FALL_TIME := 1.6       # falls at the new location (box_fall, then teddyland)
+const MEMORY := 2            # Script.Level.MysteryBoxMemorySize
 const OFFER_TIME := 12.0
 # weapons the box can give (models and stats exist for all of them)
 const POOL := ["raygun", "mg42", "browning", "bar", "ptrs", "stg44", "ppsh", "mp40", "type100", "thompson",
 	"garand", "g43", "trenchgun", "shotgun", "sawnoff", "springfield", "flamethrower", "fg42", "arisaka"]
 
-enum State { CLOSED, CYCLING, OFFERED, CLOSING }
+signal moved(entity: String)
+
+enum State { CLOSED, CYCLING, OFFERED, CLOSING, TEDDY, LEAVING, GONE, ARRIVING }
 
 var state := State.CLOSED
 var offered := ""
@@ -27,22 +42,48 @@ var _timer := 0.0
 var _swap := 0.0
 var _buyer: Player
 var _cache := {}
+var level: Level
+var entity := ""
+var locations := []       # every MysteryBox entity of the map (set by level.gd)
+var uses := 0             # purchases at this location
+var _memory := []         # last locations (WarpMysteryBox does not go back to them)
+var _model: Node3D
+var _body: StaticBody3D
+var _teddy_next := false  # tests: --teddy forces the bear on the next use
+static var _teddy_scene: PackedScene
 
 
-func setup(level: Level, entity: String) -> void:
-	var e: Dictionary = level.entities[entity]
-	global_transform = level.entity_transform(entity, true)
+func setup(level_: Level, entity_: String) -> void:
+	level = level_
+	var e: Dictionary = level.entities[entity_]
 	var model_hash: String = e["models"][0] if not e["models"].is_empty() else "ecee0a62"
 	var path := "res://assets/characters/levels/%s/dynamics/%s.glb" % [level.level_name, model_hash]
 	if ResourceLoader.exists(path):
-		var model: Node3D = (load(path) as PackedScene).instantiate()
-		add_child(model)
-		_anim = model.find_children("*", "AnimationPlayer")[0]
+		_model = (load(path) as PackedScene).instantiate()
+		add_child(_model)
+		_anim = _model.find_children("*", "AnimationPlayer")[0]
 		if not _anim.has_animation(ANIM_OPEN):
 			_pick_animations()
 		_pose(ANIM_IDLE_CLOSED)
+	_place(entity_)
+	if locations.is_empty():
+		locations = [entity_]
+
+
+# Put the box at a MysteryBox entity: transform and its solid volume.
+func _place(entity_: String) -> void:
+	entity = entity_
+	_memory.append(entity)
+	while _memory.size() > MEMORY:
+		_memory.pop_front()
+	uses = 0
+	var e: Dictionary = level.entities[entity]
+	global_transform = level.entity_transform(entity, true)
+	if _body:
+		_body.free()
 	# solid box from the entity collider (world aligned, like the debris)
 	var body := StaticBody3D.new()
+	_body = body
 	add_child(body)
 	for c in e.get("colliders", []):
 		var lo := Vector3(c["min"][0], c["min"][1], c["min"][2]) * Level.UNITS
@@ -120,6 +161,7 @@ func interact(player: Player) -> void:
 				return
 			player.add_points(-COST)
 			_buyer = player
+			uses += 1
 			_open()
 		State.OFFERED:
 			if player == _buyer:
@@ -131,6 +173,7 @@ func _open() -> void:
 	state = State.CYCLING
 	_timer = CYCLE_TIME
 	Sfx.instance.play_at("music_box_open", global_position + Vector3.UP)
+	Sfx.instance.play_at("box_music", global_position + Vector3.UP)
 	if _anim:
 		_anim.play(ANIM_OPEN)
 	_show_weapon(POOL.pick_random())
@@ -159,6 +202,9 @@ func _process(delta: float) -> void:
 			if _weapon:
 				_weapon.position = Vector3(0, 0.25 + 0.45 * p, 0)
 			if _timer <= 0.0:
+				if _teddy_roll():
+					_teddy()
+					return
 				offered = _pick()
 				_show_weapon(offered)
 				state = State.OFFERED
@@ -174,6 +220,105 @@ func _process(delta: float) -> void:
 				_weapon.position = Vector3(0, 0.7 - 0.45 * sink + sin(_timer * 3.0) * 0.02, 0)
 			if _timer <= 0.0:
 				_close()
+		State.LEAVING:
+			_timer -= delta
+			_fly(1.0 - _timer / RISE_TIME)
+			if _timer <= 0.0:
+				_vanish()
+		State.ARRIVING:
+			_timer -= delta
+			var k := clampf(1.0 - _timer / FALL_TIME, 0.0, 1.0)
+			if _model:
+				_model.position = Vector3(0, 6.0 * (1.0 - k * k), 0)
+				_model.rotation = Vector3.ZERO
+			if _timer <= 0.0:
+				if _model:
+					_model.position = Vector3.ZERO
+				Sfx.instance.play_at("teddyland", global_position + Vector3.UP)
+				state = State.CLOSED
+
+
+# ------------------------------------------------------------------ teddy bear
+
+func _teddy_roll() -> bool:
+	if locations.size() < 2:
+		return false  # Nacht: one location, the box never moves
+	if _teddy_next or OS.get_cmdline_user_args().has("--teddy"):
+		_teddy_next = false
+		return true
+	return uses >= TEDDY_MIN_USES and randf() < TEDDY_CHANCE
+
+
+func _teddy() -> void:
+	state = State.TEDDY
+	offered = ""
+	_show_model(_teddy_model())
+	if _weapon:
+		_weapon.position = Vector3(0, 0.8, 0)
+	Sfx.instance.play_at("teddylaugh", global_position + Vector3.UP)
+	if _buyer:
+		_buyer.add_points(COST)  # refunded
+	get_tree().create_timer(TEDDY_LAUGH, false).timeout.connect(_leave)
+
+
+func _teddy_model() -> Node3D:
+	var path := "res://assets/models/ingame/dynamics.glb"
+	if _teddy_scene == null and ResourceLoader.exists(path):
+		_teddy_scene = load(path)
+	if _teddy_scene == null:
+		return null
+	var all := _teddy_scene.instantiate()
+	var bear := all.find_child(TEDDY_MODEL, true, false) as Node3D
+	if bear:
+		bear.get_parent().remove_child(bear)
+		bear.transform = Transform3D(Basis(Vector3.UP, TEDDY_YAW), Vector3.ZERO)
+	all.free()
+	return bear
+
+
+func _leave() -> void:
+	state = State.LEAVING
+	_timer = RISE_TIME
+	if _weapon:
+		_weapon.queue_free()
+		_weapon = null
+	Sfx.instance.play_at("box_flyaway", global_position + Vector3.UP)
+
+
+# rises slowly, shaking more and more, then shoots up
+func _fly(k: float) -> void:
+	if _model == null:
+		return
+	var shake := k * 0.12
+	var t := Time.get_ticks_msec() / 1000.0
+	_model.position = Vector3(sin(t * 31.0) * shake * 0.3, 1.2 * k * k + 3.0 * maxf(k - 0.85, 0.0) / 0.15, cos(t * 27.0) * shake * 0.3)
+	_model.rotation = Vector3(sin(t * 23.0) * shake, sin(t * 17.0) * shake * 0.5, cos(t * 29.0) * shake)
+
+
+func _vanish() -> void:
+	state = State.GONE
+	Sfx.instance.play_at("teddypoof", global_position + Vector3.UP * 2.5)
+	if _model:
+		_model.visible = false
+	if _body:
+		_body.process_mode = Node.PROCESS_MODE_DISABLED
+	get_tree().create_timer(GONE_TIME, false).timeout.connect(_warp)
+
+
+# WarpMysteryBox: a random location that is not one of the last MEMORY ones
+func _warp() -> void:
+	var choices := locations.filter(func(n): return not n in _memory)
+	if choices.is_empty():
+		choices = locations.filter(func(n): return n != entity)
+	_place(choices.pick_random() if not choices.is_empty() else entity)
+	_pose(ANIM_IDLE_CLOSED)
+	if _model:
+		_model.visible = true
+		_model.position = Vector3(0, 6.0, 0)
+	state = State.ARRIVING
+	_timer = FALL_TIME
+	Sfx.instance.play_at("box_fall", global_position + Vector3.UP * 3.0)
+	moved.emit(entity)
 
 
 func _pick() -> String:
@@ -195,15 +340,27 @@ func _show_weapon(name: String) -> void:
 		return
 	if not _cache.has(path):
 		_cache[path] = load(path)
+	var model: Node3D = (_cache[path] as PackedScene).instantiate()
+	model.rotation.y = PI / 2  # lie along the box
+	_show_model(model)
+
+
+func _show_model(model: Node3D) -> void:
+	if _weapon:
+		_weapon.queue_free()
+		_weapon = null
+	if model == null:
+		return
 	# holder floats; the model inside is centred on its bounds (origins vary per model)
 	_weapon = Node3D.new()
 	add_child(_weapon)
-	var model: Node3D = (_cache[path] as PackedScene).instantiate()
 	_weapon.add_child(model)
-	model.rotation.y = PI / 2  # lie along the box
 	var bounds := AABB()
 	var first := true
-	for mi in model.find_children("*", "MeshInstance3D"):
+	var meshes := model.find_children("*", "MeshInstance3D")
+	if model is MeshInstance3D:
+		meshes.append(model)
+	for mi in meshes:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		# static display: unbind the skin so the mesh shows as modelled, matching its bounds
 		mi.skin = null

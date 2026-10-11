@@ -22,11 +22,23 @@ func _ready() -> void:
 		_crawl_test.call_deferred()
 	elif args.has("--powerup-test"):
 		_powerup_test.call_deferred()
+	elif args.has("--hud-test"):
+		_hud_test.call_deferred()
+	elif args.has("--weapon-test"):   # grenade | raygun | flame | buy (weapon_tests.gd)
+		(func(): WeaponTests.run(self)).call_deferred()
+	elif args.has("--drink-test") or args.has("--teddy-test") or args.has("--music-test"):   # extra_tests.gd
+		(func(): ExtraTests.run(self)).call_deferred()
 	var dir := ProjectSettings.globalize_path("res://../analysis/autotest")
 	DirAccess.make_dir_recursive_absolute(dir)
 
 
 func _process(delta: float) -> void:
+	if OS.get_cmdline_user_args().has("--hud-test"):
+		return
+	if OS.get_cmdline_user_args().has("--weapon-test"):
+		return
+	if OS.get_cmdline_user_args().has("--drink-test") or OS.get_cmdline_user_args().has("--teddy-test") or OS.get_cmdline_user_args().has("--music-test"):
+		return
 	if OS.get_cmdline_user_args().has("--gib-test") or OS.get_cmdline_user_args().has("--powerup-test") or OS.get_cmdline_user_args().has("--crawl-test") or OS.get_cmdline_user_args().has("--knife-live"):
 		return
 	_t += delta
@@ -228,3 +240,66 @@ func _knife_live() -> void:
 			break
 	print("[knife-live] %s hits=%d" % ["OK" if z.state == Zombie.State.DEAD else "FAIL", hits])
 	get_tree().quit()
+
+
+# HUD (ui agent): points popups, WaW round counter, pause menu + settings:
+#   -- nacht --autotest 120 --hud-test   (screenshots in analysis/preview/hud_*.png)
+func _hud_test() -> void:
+	await game.level.navigation_ready
+	var p := game.player
+	p.health = 1e9
+	var hud := game.hud
+	await get_tree().create_timer(3.5).timeout
+	await _snap("hud_round1")
+	for n in [10, 60, 100, 10]:
+		p.add_points(n)
+		await get_tree().create_timer(0.08).timeout
+	await get_tree().create_timer(0.15).timeout
+	await _snap("hud_points_gain")
+	await get_tree().create_timer(1.2).timeout
+	p.add_points(-500)
+	await get_tree().create_timer(0.3).timeout
+	await _snap("hud_points_spent")
+	for r in [2, 5, 6, 12]:
+		hud.round_changed(r)
+		await get_tree().create_timer(0.3).timeout
+		if r == 2:
+			await _snap("hud_round_flash")
+		await get_tree().create_timer(4.5).timeout
+		await _snap("hud_round%d" % r)
+	# pause menu
+	var before := Settings.values.duplicate()
+	hud.open_pause()
+	await get_tree().create_timer(0.3).timeout
+	print("[hud-test] paused=%s menu=%s" % [get_tree().paused, hud._pause.is_open()])
+	await _snap("hud_pause")
+	hud._pause._show("settings")
+	Settings.set_value("fov", 90.0)
+	Settings.set_value("effects_volume", 0.5)
+	await get_tree().create_timer(0.3).timeout
+	await _snap("hud_settings")
+	var cam := get_viewport().get_camera_3d()
+	print("[hud-test] fov=%.0f effects_bus_db=%.1f buses=%s" % [cam.fov, AudioServer.get_bus_volume_db(AudioServer.get_bus_index(Settings.BUS_EFFECTS)), range(AudioServer.bus_count).map(func(i): return AudioServer.get_bus_name(i))])
+	var tagged := 0
+	for n in get_tree().root.find_children("*", "AudioStreamPlayer3D", true, false) + get_tree().root.find_children("*", "AudioStreamPlayer", true, false):
+		tagged += int(n.bus == Settings.BUS_EFFECTS)
+	print("[hud-test] audio players on Effects bus: %d" % tagged)
+	hud._pause._show("confirm")
+	await get_tree().create_timer(0.2).timeout
+	await _snap("hud_confirm")
+	hud._pause.close()
+	var cfg := ConfigFile.new()
+	cfg.load(Settings.PATH)
+	print("[hud-test] saved fov=%s paused=%s" % [cfg.get_value("settings", "fov"), get_tree().paused])
+	Settings.values = before
+	Settings.save()
+	Settings.set_value("fov", before["fov"])
+	hud.open_pause()
+	hud._pause._to_main_menu()
+	await get_tree().create_timer(1.0).timeout
+	var menus := get_tree().current_scene.get_children().filter(func(n): return n is Menu)
+	print("[hud-test] back to menu: menu=%d game alive=%s paused=%s" % [menus.size(), is_instance_valid(game), get_tree().paused])
+	await _snap("hud_back_menu")
+	print("[hud-test] OK")
+	get_tree().quit()
+

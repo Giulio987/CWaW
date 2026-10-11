@@ -50,6 +50,18 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_window_shot_test(game)
 	if args.has("--spin"):
 		_spin_shots(game)
+	if args.has("--reach-test"):
+		_reach_test(game)
+	if args.has("--dog-look"):
+		_dog_look(game)
+	if args.has("--dog-test"):
+		_dog_test(game)
+	if args.has("--trap-test"):
+		_trap_test(game)
+	if args.has("--tele-test"):
+		_tele_test(game)
+	if args.has("--pap-test"):
+		_pap_test(game)
 	var shots := args.find("--shots")
 	if shots >= 0:
 		_weapon_shots(game, args[shots + 1].split(","))
@@ -489,4 +501,339 @@ func _perk_test(game: Game) -> void:
 		p.take_hit(10000.0)
 		check.call(p.dead, "second down is death")
 	print("[perk] %s (%d failures)" % ["OK" if fails[0] == 0 else "FAIL", fails[0]])
+	get_tree().quit()
+
+
+# Open every debris (and turn the power on with --power), then report which
+# areas the navmesh connects to the player spawn: -- derriese --reach-test [--power]
+func _reach_test(game: Game) -> void:
+	await game.level.navigation_ready
+	game.set_process(false)
+	var lv := game.level
+	if OS.get_cmdline_user_args().has("--power"):
+		lv.turn_on_power()
+	for d in lv.debris.duplicate():
+		d.open()
+	await get_tree().create_timer(1.0).timeout
+	while lv.nav_region.is_baking() or lv.nav_region.bake_finished.get_connections().size() > 0:
+		await get_tree().create_timer(0.5).timeout
+	await get_tree().create_timer(1.0).timeout
+	var nmap := game.player.get_world_3d().navigation_map
+	var pi := OS.get_cmdline_user_args().find("--probe")
+	if pi >= 0:
+		# floor heights (and nearest navmesh point) along a line: --probe x1,z1,x2,z2
+		var c := OS.get_cmdline_user_args()[pi + 1].split(",")
+		var a := Vector3(float(c[0]), 0, float(c[1]))
+		var b := Vector3(float(c[2]), 0, float(c[3]))
+		var space := game.player.get_world_3d().direct_space_state
+		for k in int(a.distance_to(b) / 0.1) + 1:
+			var p: Vector3 = a.lerp(b, k * 0.1 / a.distance_to(b))
+			var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 8.0, p + Vector3.DOWN * 8.0, 1)
+			var hit := space.intersect_ray(q)
+			var fy: float = hit["position"].y if not hit.is_empty() else NAN
+			var np := NavigationServer3D.map_get_closest_point(nmap, Vector3(p.x, fy, p.z))
+			print("[probe] %s floor %.2f nav %s (%.2f)" % [p.snapped(Vector3(0.01, 0.01, 0.01)), fy, np.snapped(Vector3(0.1, 0.1, 0.1)), np.distance_to(Vector3(p.x, fy, p.z))])
+	var from := lv.player_spawn.origin
+	var fi := OS.get_cmdline_user_args().find("--from")
+	if fi >= 0:
+		from = lv.entity_transform(OS.get_cmdline_user_args()[fi + 1]).origin
+	var points := {}   # label -> position
+	for w in lv.windows:
+		points["win " + String(w.name)] = w.inside
+	for m in lv.perk_machines:
+		points["perk " + m.entity] = m._centre
+	for n in lv.entities:
+		if n.to_lower().contains("dogspawn") and n.ends_with("1"):
+			points["dog " + n] = lv.entity_transform(n).origin
+	var fails := 0
+	var keys := points.keys()
+	keys.sort()
+	for k in keys:
+		var to: Vector3 = points[k]
+		var path := NavigationServer3D.map_get_path(nmap, from, to, true)
+		var gap := to.distance_to(path[-1]) if path.size() > 0 else INF
+		var ok := gap < 2.0
+		fails += int(not ok)
+		print("[reach] %s %s (end %.1f m away at %s)" % ["OK  " if ok else "FAIL", k, gap, (path[-1] if path.size() > 0 else Vector3.ZERO).snapped(Vector3(0.1, 0.1, 0.1))])
+	print("[reach] %s (%d unreachable)" % ["OK" if fails == 0 else "FAIL", fails])
+	get_tree().quit()
+
+
+func _shot(name: String) -> void:
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/%s.png" % name))
+
+
+func _face(p: Player, at: Vector3) -> void:
+	var to := at - p.global_position
+	p.rotation.y = atan2(-to.x, -to.z)
+	var cam := p.get_viewport().get_camera_3d()
+	cam.rotation.x = atan2(to.y - 1.6, Vector2(to.x, to.z).length())
+
+
+# Round 1 is cleared at once, a dog round follows (--dogs-next is implied): dogs
+# must spawn, reach and bite the player, die, and the last one must drop a Max
+# Ammo before round 3 starts: -- derriese --dog-test
+func _dog_test(game: Game) -> void:
+	var fails := [0]
+	var check := func(ok: bool, what: String) -> void:
+		print("[dog] %s: %s" % ["OK" if ok else "FAIL", what])
+		fails[0] += int(not ok)
+	await game.level.navigation_ready
+	var p := game.player
+	p.health = 1e6
+	p.max_health = 1e6
+	while game.round_number < 1:
+		await get_tree().create_timer(0.5).timeout
+	game.waves_since_dog = 5   # force the dog round
+	game._to_spawn = 0
+	game._spawned = 0
+	for z in get_tree().get_nodes_in_group("zombies"):
+		game.kill_without_points(z)
+	var t := 0.0
+	while not game.dog_round and t < 15.0:
+		await get_tree().create_timer(0.5).timeout
+		t += 0.5
+	check.call(game.dog_round and game.round_number == 2, "dog round started (round %d, %d dogs, %.0f hp)" % [game.round_number, game._dogs_total, game._dog_health])
+	game._dogs_total = 4
+	var killed := 0
+	var reached := 0
+	var shot_done := false
+	var hp0 := p.health
+	t = 0.0
+	while game.dog_round and t < 90.0:
+		await get_tree().create_timer(0.25).timeout
+		t += 0.25
+		p.health = maxf(p.health, 1e5)
+		for d in get_tree().get_nodes_in_group("zombies"):
+			if d is Dog and d.state != Zombie.State.DEAD:
+				var dist: float = d.global_position.distance_to(p.global_position)
+				if dist < 4.0 and not shot_done:
+					shot_done = true
+					_face(p, d.global_position + Vector3.UP * 0.5)
+					await _shot("dog_close")
+				if dist < 2.0 and d.get_meta("bit_time", 0.0) == 0.0:
+					d.set_meta("bit_time", t)
+					reached += 1
+				if d.get_meta("bit_time", 0.0) > 0.0 and t - float(d.get_meta("bit_time")) > 2.5:
+					d.take_damage(1e6, false, p)
+					killed += 1
+		if int(t * 4) % 20 == 0:
+			var ds := get_tree().get_nodes_in_group("zombies").filter(func(x): return x is Dog and x.state != Zombie.State.DEAD)
+			print("[dog] t=%.0f alive=%d spawned=%d/%d dists=%s" % [t, ds.size(), game._dogs_spawned, game._dogs_total, ds.map(func(x): return snappedf(x.global_position.distance_to(p.global_position), 0.1))])
+	check.call(reached == 4, "%d/4 dogs reached the player" % reached)
+	check.call(p.health < 1e5 or hp0 > p.health, "player was bitten")
+	check.call(killed == 4 and not game.dog_round, "%d dogs killed, round over" % killed)
+	var drop := get_tree().get_nodes_in_group("zombies").size() >= 0 and game.get_children().any(func(n): return n is Powerup and n.kind == "maxammo")
+	check.call(drop, "max ammo dropped")
+	t = 0.0
+	while game.round_number < 3 and t < 15.0:
+		await get_tree().create_timer(0.5).timeout
+		t += 0.5
+	check.call(game.round_number == 3 and not game.dog_round, "round 3 (zombies) started")
+	print("[dog] %s (%d failures)" % ["OK" if fails[0] == 0 else "FAIL", fails[0]])
+	get_tree().quit()
+
+
+# Every trap: power on, buy it at its switch, a zombie standing in it must die,
+# without kill points; screenshots of the arcs: -- verruckt --trap-test
+func _trap_test(game: Game) -> void:
+	var fails := [0]
+	var check := func(ok: bool, what: String) -> void:
+		print("[trap] %s: %s" % ["OK" if ok else "FAIL", what])
+		fails[0] += int(not ok)
+	await game.level.navigation_ready
+	game.set_process(false)
+	var lv := game.level
+	var p := game.player
+	p.health = 1e6
+	await get_tree().create_timer(0.5).timeout
+	check.call(not lv.traps.is_empty(), "%d traps" % lv.traps.size())
+	if not lv.power_on:
+		lv.turn_on_power()
+	for tr: Trap in lv.traps:
+		check.call(tr.kind == "flogger" or not tr.volumes.is_empty(), "%s %s volumes %s" % [tr.entity, tr.kind, tr.volumes])
+		p.global_position = tr.use_point + Vector3.DOWN * 0.3
+		p.velocity = Vector3.ZERO
+		_face(p, tr.use_point + Vector3.UP)
+		p.points = 10000
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		var target = p._interaction_target()
+		# a closed door right next to the switch takes precedence (Der Riese lab): fine once bought
+		check.call(target == tr or target is Debris, "%s is the interaction target (prompt '%s'%s)" % [tr.entity, tr.prompt(p), "" if target == tr else ", a door in front"])
+		tr.interact(p)
+		check.call(tr.state == Trap.State.ACTIVE and p.points == 10000 - tr.cost, "%s bought for %d" % [tr.entity, tr.cost])
+		var at: Vector3 = tr.pivot + Vector3(1.5, 0, 0) if tr.kind == "flogger" else (tr.volumes[0] as AABB).get_center()
+		at.y = (tr.pivot.y - 0.5) if tr.kind == "flogger" else (tr.volumes[0] as AABB).position.y + 0.35
+		var z := Zombie.new()
+		z.setup(at, lv.windows[0], p, 1e6, false)
+		game.add_child(z)
+		z.state = Zombie.State.CHASE
+		z.set_physics_process(false)
+		var pts := p.points
+		for i in 6:
+			await get_tree().physics_frame
+		check.call(z.state == Zombie.State.DEAD and p.points == pts, "%s kills a zombie in it (no points: %d)" % [tr.entity, p.points - pts])
+		# a view of the trap from 3 m beside it
+		var c: Vector3 = at
+		var side := Vector3(3.0, 0, 0) if tr.kind == "flogger" or (tr.volumes[0] as AABB).size.z > (tr.volumes[0] as AABB).size.x else Vector3(0, 0, 3.0)
+		for sgn in [1.0, -1.0]:
+			var from: Vector3 = c + side * sgn
+			var q := PhysicsRayQueryParameters3D.create(c + Vector3.UP, from + Vector3.UP, 1)
+			if get_viewport().get_world_3d().direct_space_state.intersect_ray(q).is_empty():
+				p.global_position = Vector3(from.x, c.y - 0.3, from.z)
+				break
+		_face(p, c + Vector3.UP * 1.0)
+		for i in 4:
+			await get_tree().process_frame
+		await _shot("trap_" + tr.entity)
+		tr._stop()
+		check.call(tr.state == Trap.State.COOLDOWN and tr.prompt(p) == "Trappola in ricarica", "%s cools down" % tr.entity)
+	print("[trap] %s (%d failures)" % ["OK" if fails[0] == 0 else "FAIL", fails[0]])
+	get_tree().quit()
+
+
+# Der Riese teleporters: power, link the three pads at the mainframe (the door
+# opens step by step), then teleport from pad A to the mainframe: -- derriese --tele-test
+func _tele_test(game: Game) -> void:
+	var fails := [0]
+	var check := func(ok: bool, what: String) -> void:
+		print("[tele] %s: %s" % ["OK" if ok else "FAIL", what])
+		fails[0] += int(not ok)
+	await game.level.navigation_ready
+	game.set_process(false)
+	var lv := game.level
+	var net := lv.teleporters
+	var p := game.player
+	p.health = 1e6
+	p.points = 100000
+	check.call(net != null and net.pads.size() == 3, "3 teleporter pads")
+	var go := func(pad) -> void:
+		p.global_position = pad.centre + Vector3.UP * 0.2
+		p.velocity = Vector3.ZERO
+	go.call(net.pads[0])
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	check.call(net.pads[0].prompt(p) == "Serve la corrente", "pad needs power: '%s'" % net.pads[0].prompt(p))
+	await _shot("tele_padA")
+	p.global_position = net.mainframe.centre + Vector3(0, 0.2, 0)
+	_face(p, lv.pack_a_punch.global_position + Vector3.UP)
+	await get_tree().create_timer(0.3).timeout
+	await _shot("tele_door_closed")
+	lv.turn_on_power()
+	for pad in net.pads:
+		go.call(pad)
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		var t = p._interaction_target()
+		check.call(t == pad, "%s target: '%s'" % [pad.entity, pad.prompt(p)])
+		pad.interact(p)
+		check.call(pad.state == "linking", "%s activated" % pad.entity)
+		go.call(net.mainframe)
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		t = p._interaction_target()
+		check.call(t == net.mainframe, "mainframe target: '%s'" % net.mainframe.prompt(p))
+		net.mainframe.interact(p)
+		check.call(pad.state == "linked", "%s linked (%d)" % [pad.entity, net.linked_count()])
+		await get_tree().create_timer(2.2).timeout
+	check.call("packapunch" in game.open_areas and net._door_body == null, "third link opens the mainframe door and the Pack-a-Punch area")
+	p.global_position = net.mainframe.centre + Vector3(0, 0.2, 0)
+	_face(p, lv.pack_a_punch.global_position + Vector3.UP)
+	await get_tree().create_timer(0.3).timeout
+	await _shot("tele_door_open")
+	go.call(net.pads[0])
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var before := p.points
+	check.call(net.pads[0].prompt(p).begins_with("Premi E per teletrasportarti"), "teleport prompt '%s'" % net.pads[0].prompt(p))
+	net.pads[0].interact(p)
+	await get_tree().create_timer(0.4).timeout
+	await _shot("tele_flash")
+	await get_tree().create_timer(1.0).timeout
+	check.call(p.global_position.distance_to(net.mainframe.centre) < 1.5 and before - p.points == TeleporterNetwork.COST, "teleported to the mainframe for %d (at %s)" % [before - p.points, p.global_position])
+	go.call(net.pads[1])
+	await get_tree().physics_frame
+	check.call(net.pads[1].prompt(p) == "Il teletrasporto si sta ricaricando", "cooldown: '%s'" % net.pads[1].prompt(p))
+	await get_tree().create_timer(8.0).timeout
+	var pick := game.get_children().any(func(n): return n is Powerup) or get_tree().get_nodes_in_group("zombies").any(func(n): return n is Dog)
+	check.call(pick, "power-up or dogs after the teleport")
+	print("[tele] %s (%d failures)" % ["OK" if fails[0] == 0 else "FAIL", fails[0]])
+	get_tree().quit()
+
+
+# Pack-a-Punch: off before power/links, upgrades the Thompson for 5000 once
+# working: -- derriese --pap-test
+func _pap_test(game: Game) -> void:
+	var fails := [0]
+	var check := func(ok: bool, what: String) -> void:
+		print("[pap] %s: %s" % ["OK" if ok else "FAIL", what])
+		fails[0] += int(not ok)
+	await game.level.navigation_ready
+	game.set_process(false)
+	var lv := game.level
+	var pap := lv.pack_a_punch
+	var p := game.player
+	p.health = 1e6
+	p.points = 20000
+	p.give_weapon("thompson")
+	check.call(pap != null, "Pack-a-Punch built")
+	p.global_position = pap._centre + Vector3.UP * 0.2
+	_face(p, pap.global_position + Vector3.UP * 1.2)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	check.call(pap.prompt(p) == "Serve la corrente", "off without power: '%s'" % pap.prompt(p))
+	lv.turn_on_power()
+	check.call(pap.prompt(p) == "Collega i teletrasporti al mainframe", "needs links: '%s'" % pap.prompt(p))
+	for pad in lv.teleporters.pads:
+		pad.state = "linked"
+	lv.teleporters._update_door()
+	pap._refresh()
+	await get_tree().create_timer(2.5).timeout
+	var t = p._interaction_target()
+	check.call(t == pap, "PaP target: '%s'" % pap.prompt(p))
+	await _shot("pap_machine")
+	var base: float = Weapons.stats("thompson")["damage"]
+	pap.interact(p)
+	check.call(pap.state == PackAPunch.State.WORKING and p.points == 15000, "paid 5000")
+	await get_tree().create_timer(PackAPunch.WORK_TIME + 0.5).timeout
+	check.call(pap.prompt(p).begins_with("Premi E per prendere"), "ready: '%s'" % pap.prompt(p))
+	pap.interact(p)
+	var w := p.weapon()
+	var s := Weapons.stats_of(w)
+	check.call(w.get("upgraded", false) and w["mag"] == 40 and s["damage"] > base, "%s: mag %d reserve %d damage %.0f (base %.0f)" % [Weapons.display_of(w), w["mag"], w["reserve"], s["damage"], base])
+	check.call(pap.prompt(p) == "Arma già potenziata", "no second upgrade: '%s'" % pap.prompt(p))
+	for i in 10:
+		await get_tree().process_frame
+	await _shot("pap_weapon")
+	print("[pap] %s (%d failures)" % ["OK" if fails[0] == 0 else "FAIL", fails[0]])
+	get_tree().quit()
+
+
+# A dog standing 3 m in front of the player, seen from the front and the side: -- derriese --dog-look
+func _dog_look(game: Game) -> void:
+	await game.level.navigation_ready
+	game.set_process(false)
+	var p := game.player
+	var fwd := -p.global_basis.z
+	var d := Dog.new()
+	d.setup_dog(p.global_position + fwd * 3.0, p, 1e6, game.level.windows[0])
+	game.add_child(d)
+	await get_tree().physics_frame
+	d.set_physics_process(false)
+	for mi in d.find_children("*", "MeshInstance3D", true, false):
+		print("[doglook] mesh %s visible=%s aabb %s" % [mi.name, mi.visible, (mi as MeshInstance3D).global_transform * (mi as MeshInstance3D).get_aabb()])
+	print("[doglook] dog at %s player %s" % [d.global_position, p.global_position])
+	var sk: Skeleton3D = d.find_children("*", "Skeleton3D", true, false)[0]
+	print("[doglook] skel %s scale %s bone0 %s bone5 %s anim %s" % [sk.global_position, sk.global_transform.basis.get_scale(), sk.global_transform * sk.get_bone_global_pose(0).origin, sk.global_transform * sk.get_bone_global_pose(5).origin, d._d_anim.current_animation])
+	for mi in d.find_children("*", "MeshInstance3D", true, false):
+		print("[doglook] %s skin=%s skeleton=%s layers=%d" % [mi.name, mi.skin, mi.skeleton, mi.layers])
+	_face(p, d.global_position + Vector3.UP * 0.4)
+	await get_tree().create_timer(0.2).timeout
+	await _shot("dog_front")
+	p.global_position = d.global_position + fwd.cross(Vector3.UP) * 2.5
+	_face(p, d.global_position + Vector3.UP * 0.4)
+	await get_tree().create_timer(0.2).timeout
+	await _shot("dog_side")
 	get_tree().quit()

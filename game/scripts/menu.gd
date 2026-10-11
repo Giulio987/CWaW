@@ -57,7 +57,8 @@ func _ready() -> void:
 
 	var play_btn := Button.new()
 	play_btn.text = "GIOCA"
-	play_btn.add_theme_font_size_override("font_size", 40)
+	play_btn.add_theme_font_override("font", UiArt.font())
+	play_btn.add_theme_font_size_override("font_size", 56)
 	play_btn.add_theme_color_override("font_color", RED)
 	play_btn.add_theme_color_override("font_hover_color", Color(1, 0.2, 0.1))
 	play_btn.flat = true
@@ -106,7 +107,8 @@ func _card(m: Dictionary, i: int) -> Control:
 	var name := Label.new()
 	name.text = m["name"]
 	name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	name.add_theme_font_size_override("font_size", 24)
+	name.add_theme_font_override("font", UiArt.font())
+	name.add_theme_font_size_override("font_size", 30)
 	box.add_child(name)
 	var note := Label.new()
 	note.text = m["note"]
