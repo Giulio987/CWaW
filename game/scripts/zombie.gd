@@ -196,14 +196,116 @@ func _start_climb() -> void:
 func take_damage(amount: float, headshot: bool, by: Player, knife := false) -> void:
 	if state == State.DEAD:
 		return
+	var g := get_parent() as Game
+	if g and g.insta_kill:
+		amount = health
 	health -= amount
-	by.add_points(10)
+	by.add_points(10 * (g.points_multiplier if g else 1))
+	# arms come off from heavy body hits (hit position is not passed yet: random side)
+	if not headshot and not knife and amount >= 40.0 and randf() < ARM_GIB_CHANCE:
+		lose_arm(["left", "right"].pick_random())
 	if health <= 0.0:
 		_die(headshot, knife)
 
 
+# ------------------------------------------------------------------ gibs
+# Parts of the zombie model (named in tools/export_characters.py): "neck" is the
+# attached head, "headb" the loose head, "sleevel/sleever" + "leftelbow/rightelbow"
+# the forearms, "e1f1c9f3"/"75a47286" the left/right arm stumps; "*_m1" are the
+# bloody stump caps (hidden while the part is attached).
+const ARM_GIB_CHANCE := 0.15
+const ARMS := {
+	"left": {"remove": ["sleevel", "leftelbow"], "show": ["e1f1c9f3_m1"]},
+	"right": {"remove": ["sleever", "rightelbow"], "show": ["75a47286_m1"]},
+}
+var _arms_lost := {}
+
+
+func _part(n: String) -> MeshInstance3D:
+	return _model.find_child(n, true, false) as MeshInstance3D
+
+
+func lose_head() -> void:
+	var head := _part("neck")
+	if head == null or not head.visible:
+		return
+	head.visible = false
+	for n in ["neck_m1", "25d19111_m1"]:
+		var m := _part(n)
+		if m:
+			m.visible = true
+	_spawn_gib(_part("headb"), head)
+
+
+func lose_arm(side: String) -> void:
+	if _arms_lost.has(side):
+		return
+	_arms_lost[side] = true
+	var first: MeshInstance3D = null
+	for n in ARMS[side]["remove"]:
+		var m := _part(n)
+		if m and m.visible:
+			m.visible = false
+			first = m if first == null else first
+	for n in ARMS[side]["show"]:
+		var m := _part(n)
+		if m:
+			m.visible = true
+	if first:
+		_spawn_gib(first, first)
+
+
+# A physics copy of a part flying off. The mesh is static (unskinned) so it is
+# placed where the attached part currently is (its skinned bounds).
+func _spawn_gib(src: MeshInstance3D, where: MeshInstance3D) -> void:
+	if src == null:
+		return
+	var body := RigidBody3D.new()
+	body.collision_layer = 0
+	body.collision_mask = 1
+	var mi := MeshInstance3D.new()
+	mi.mesh = src.mesh
+	var bounds := src.mesh.get_aabb()
+	mi.position = -bounds.get_center()
+	body.add_child(mi)
+	var cs := CollisionShape3D.new()
+	var sph := SphereShape3D.new()
+	sph.radius = clampf(bounds.size.length() * 0.25, 0.06, 0.18)
+	cs.shape = sph
+	body.add_child(cs)
+	get_parent().add_child(body)
+	var at := global_position + Vector3.UP * 1.6
+	var skel: Skeleton3D = _model.find_children("*", "Skeleton3D")[0] if _model.find_children("*", "Skeleton3D").size() > 0 else null
+	if where != null and skel != null:
+		# centre of the attached part, via the nearest bone to its bind-pose centre
+		at = where.global_transform * where.mesh.get_aabb().get_center()
+		var best := INF
+		var c := where.mesh.get_aabb().get_center()
+		for b in skel.get_bone_count():
+			var rest := skel.get_bone_global_rest(b).origin
+			if rest.distance_to(c) < best:
+				best = rest.distance_to(c)
+				at = skel.global_transform * skel.get_bone_global_pose(b) * (skel.get_bone_global_rest(b).affine_inverse() * c)
+	body.global_position = at
+	body.global_rotation = global_rotation
+	body.apply_central_impulse(Vector3(randf_range(-1, 1), 2.5, randf_range(-1, 1)) * body.mass)
+	body.angular_velocity = Vector3(randf_range(-8, 8), randf_range(-8, 8), randf_range(-8, 8))
+	get_tree().create_timer(8.0, false).timeout.connect(body.queue_free)
+
+
+func nuke_kill() -> void:
+	if state == State.DEAD:
+		return
+	health = 0.0
+	if randf() < 0.5:
+		lose_head()
+	_die(false, false)
+
+
 func _die(headshot: bool, knife := false) -> void:
 	Sfx.instance.play_at("zombie_death", global_position + Vector3.UP * 1.5)
+	if headshot:
+		lose_head()
 	state = State.DEAD
 	if window.occupied_by == self:
 		window.occupied_by = null

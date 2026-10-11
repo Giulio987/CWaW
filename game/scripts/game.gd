@@ -27,6 +27,16 @@ var _hp := Vector2(40, 80)
 var _between_rounds := true
 var _links := {}   # debris entity -> area it opens
 
+# power-ups (World at War): random drops from kills, at most MAX_DROPS per round
+const DROP_CHANCE := 0.03
+const MAX_DROPS := 4
+const TIMED := 30.0
+var points_multiplier := 1
+var insta_kill := false
+var _drops_this_round := 0
+var _timers := {}          # "instakill"/"doublepoints" -> seconds left
+var _pu_label: Label
+
 
 func start(level_name_: String) -> void:
 	_setup_input()
@@ -126,6 +136,7 @@ func _setup_environment(_level: String) -> void:
 # ------------------------------------------------------------------ rounds
 
 func _next_round() -> void:
+	_drops_this_round = 0
 	round_number += 1
 	var w: Dictionary = waves[min(round_number, waves.size()) - 1]
 	var counts: Array = w["Zombies"][DIFFICULTY - 1]
@@ -143,6 +154,7 @@ func _next_round() -> void:
 
 
 func _process(delta: float) -> void:
+	_update_powerups(delta)
 	if _between_rounds or player == null or player.dead:
 		return
 	_spawn_timer -= delta
@@ -181,10 +193,94 @@ func _spawn_zombie() -> void:
 	_alive += 1
 
 
-func _on_zombie_killed(_z: Zombie, headshot: bool, knife: bool) -> void:
+func _on_zombie_killed(z: Zombie, headshot: bool, knife: bool) -> void:
 	_alive -= 1
 	# World at War: 130 knife kill, 100 headshot, 60 other (plus 10 per hit)
-	player.add_points(120 if knife else (90 if headshot else 50))
+	player.add_points((120 if knife else (90 if headshot else 50)) * points_multiplier)
+	if _drops_this_round < MAX_DROPS and randf() < DROP_CHANCE and not _nuking:
+		spawn_powerup(Powerup.KINDS.keys().pick_random(), z.global_position)
+
+
+func spawn_powerup(kind: String, at: Vector3) -> void:
+	_drops_this_round += 1
+	var pu := Powerup.new()
+	pu.setup(self, kind, at)
+	add_child(pu)
+
+
+var _nuking := false
+
+
+func apply_powerup(kind: String) -> void:
+	Sfx.instance.play("14c4f851")  # pickup sting, then the announcer (as in the original sequences)
+	get_tree().create_timer(0.3, false).timeout.connect(Sfx.instance.play.bind(kind))
+	_show_powerup(Powerup.KINDS[kind]["label"])
+	match kind:
+		"maxammo":
+			for w in player.weapons:
+				w["reserve"] = Weapons.stats(w["name"])["reserve"]
+			player.changed.emit()
+		"instakill":
+			insta_kill = true
+			_timers["instakill"] = TIMED
+		"doublepoints":
+			points_multiplier = 2
+			_timers["doublepoints"] = TIMED
+		"nuke":
+			_nuking = true
+			player.add_points(400 * points_multiplier)
+			var zs := get_children().filter(func(n): return n is Zombie and n.state != Zombie.State.DEAD)
+			for i in zs.size():
+				var z: Zombie = zs[i]
+				get_tree().create_timer(0.1 + 0.08 * i, false).timeout.connect(func():
+					if is_instance_valid(z) and z.state != Zombie.State.DEAD:
+						z.nuke_kill())
+			get_tree().create_timer(0.2 + 0.08 * zs.size(), false).timeout.connect(func(): _nuking = false)
+		"carpenter":
+			for w in level.windows:
+				while w.repair_board():
+					pass
+			player.add_points(200 * points_multiplier)
+
+
+func _show_powerup(text: String) -> void:
+	if _pu_label == null:
+		_pu_label = Label.new()
+		_pu_label.add_theme_font_size_override("font_size", 26)
+		_pu_label.add_theme_color_override("font_color", Color(0.5, 1.0, 0.4))
+		_pu_label.add_theme_color_override("font_outline_color", Color.BLACK)
+		_pu_label.add_theme_constant_override("outline_size", 4)
+		_pu_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+		_pu_label.offset_top = 40
+		_pu_label.offset_left = -200
+		_pu_label.offset_right = 200
+		_pu_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		var layer := CanvasLayer.new()
+		layer.layer = 2
+		add_child(layer)
+		layer.add_child(_pu_label)
+	_pu_label.text = text
+	_pu_label.set_meta("flash", 3.0)
+
+
+func _update_powerups(delta: float) -> void:
+	for k in _timers.keys():
+		_timers[k] -= delta
+		if _timers[k] <= 0.0:
+			_timers.erase(k)
+			if k == "instakill":
+				insta_kill = false
+			elif k == "doublepoints":
+				points_multiplier = 1
+	if _pu_label:
+		var flash: float = _pu_label.get_meta("flash", 0.0) - delta
+		_pu_label.set_meta("flash", flash)
+		var parts := []
+		if flash > 0.0:
+			parts.append(_pu_label.text.split("\n")[0])
+		for k in _timers:
+			parts.append("%s %d" % [Powerup.KINDS[k]["label"], ceili(_timers[k])])
+		_pu_label.text = "\n".join(parts) if not parts.is_empty() else ""
 
 
 func _on_debris_opened(d: Debris) -> void:

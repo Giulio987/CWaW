@@ -13,11 +13,18 @@ var _kills := 0
 
 
 func _ready() -> void:
+	var args := OS.get_cmdline_user_args()
+	if args.has("--gib-test"):
+		_gib_test.call_deferred()
+	elif args.has("--powerup-test"):
+		_powerup_test.call_deferred()
 	var dir := ProjectSettings.globalize_path("res://../analysis/autotest")
 	DirAccess.make_dir_recursive_absolute(dir)
 
 
 func _process(delta: float) -> void:
+	if OS.get_cmdline_user_args().has("--gib-test") or OS.get_cmdline_user_args().has("--powerup-test"):
+		return
 	_t += delta
 	if game.player == null:
 		return
@@ -64,3 +71,80 @@ func _process(delta: float) -> void:
 	if _t >= duration:
 		get_tree().quit()
 
+
+
+func _snap(name: String) -> void:
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/%s.png" % name))
+
+
+# Zombie in front of the player loses an arm, then its head: -- nacht --autotest 60 --gib-test
+func _gib_test() -> void:
+	await game.level.navigation_ready
+	game.set_process(false)
+	var p := game.player
+	var z := Zombie.new()
+	var fwd := -p.global_basis.z
+	z.setup(p.global_position + fwd * 3.0, game.level.windows[0], p, 1e6, false)
+	game.add_child(z)
+	z.state = Zombie.State.ATTACK
+	z.set_physics_process(false)
+	z.look_at(p.global_position, Vector3.UP, true)
+	await get_tree().create_timer(0.5).timeout
+	await _snap("gib_0")
+	z.lose_arm("left")
+	await get_tree().create_timer(0.15).timeout
+	await _snap("gib_1_arm")
+	z.lose_head()
+	await get_tree().create_timer(0.15).timeout
+	await _snap("gib_2_head")
+	await get_tree().create_timer(1.2).timeout
+	await _snap("gib_3_later")
+	get_tree().quit()
+
+
+# Drop every power-up, screenshot them, then pick each and print the effect.
+func _powerup_test() -> void:
+	await game.level.navigation_ready
+	game.set_process(false)
+	var p := game.player
+	var fwd := -p.global_basis.z
+	var kinds: Array = Powerup.KINDS.keys()
+	for i in kinds.size():
+		game.spawn_powerup(kinds[i], p.global_position + fwd * 3.0 + p.global_basis.x * (i - 2) * 0.9)
+	await get_tree().create_timer(0.6).timeout
+	await _snap("powerups")
+	# set up state to observe the effects
+	p.weapons[0]["reserve"] = 0
+	for w in game.level.windows:
+		w.boards = 0
+	var zs := []
+	for i in 3:
+		var z := Zombie.new()
+		z.setup(p.global_position + fwd * 8.0 + Vector3(i, 0, 0), game.level.windows[0], p, 1e6, false)
+		game.add_child(z)
+		z.set_physics_process(false)
+		zs.append(z)
+	game.set_process(true)  # power-up timers
+	var drops := game.get_children().filter(func(n): return n is Powerup)
+	var spots := {}
+	for pu in drops:
+		spots[pu.kind] = pu.global_position
+		pu.position.y -= 50.0  # out of reach until its turn
+	for kind in spots:
+		var pu: Powerup = drops.filter(func(n): return is_instance_valid(n) and n.kind == kind)[0]
+		pu.global_position = spots[kind]
+		var before_pts := p.points
+		p.global_position = pu.global_position - Vector3.UP * 0.6
+		await get_tree().create_timer(0.3).timeout
+		var info := ""
+		match kind:
+			"maxammo": info = "reserve=%d" % p.weapons[0]["reserve"]
+			"instakill": info = "insta_kill=%s" % game.insta_kill
+			"doublepoints": info = "multiplier=%d" % game.points_multiplier
+			"nuke":
+				await get_tree().create_timer(1.0).timeout
+				info = "zombies dead=%d/3 points +%d" % [zs.filter(func(z): return not is_instance_valid(z) or z.state == Zombie.State.DEAD).size(), p.points - before_pts]
+			"carpenter": info = "boards=%s" % [game.level.windows.map(func(w): return w.boards)]
+		print("[powerup] %s picked=%s %s" % [kind, not is_instance_valid(pu), info])
+	get_tree().quit()
