@@ -1,13 +1,12 @@
 # Debris/door bought with points to open the way to another area.
 # The model is shown in its "closed" one-keyframe pose and plays the opening
-# animation when bought. Entities carry no rotation, so the model is turned by
-# the measured wall direction relative to the 90 deg the models are authored at.
+# animation when bought. Entities carry no rotation, so the model is turned to
+# the wall-aligned yaw that best fits the entity's own collider box.
 class_name Debris
 extends Node3D
 
 signal opened(debris: Debris)
 
-const AUTHORED_YAW := PI / 2
 const JUMP_GUARD := 2.5  # metres added above the original volume
 
 var cost := 1000
@@ -22,8 +21,11 @@ func setup(level: Level, name_: String) -> void:
 	entity = name_
 	var e: Dictionary = level.entities[name_]
 	cost = int(e["params"].get("cost", 1000))
-	# debris lying on stairs has a slope-matched yaw (tools/wall_yaw.py); doors use the wall
-	var yaw: float = e.get("debris_yaw", e.get("wall_yaw", AUTHORED_YAW) - AUTHORED_YAW)
+	# rotation fitted to the entity's collider box (tools/wall_yaw.py), else the wall direction
+	var yaw: float = e.get("debris_yaw", e.get("wall_yaw", 0.0))
+	var extra := OS.get_cmdline_user_args().find("--debris-yaw-add")
+	if extra >= 0:
+		yaw += deg_to_rad(float(OS.get_cmdline_user_args()[extra + 1]))
 	var root := level.entity_transform(name_)
 	global_transform = Transform3D(Basis(Vector3.UP, yaw), root.origin)
 	_body = StaticBody3D.new()

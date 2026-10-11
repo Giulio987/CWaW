@@ -73,7 +73,8 @@ def uphill(points):
 
 
 def debris_yaw(entities_path, group_path, dynamics_path):
-    """Yaw for debris lying on stairs: align the closed pose's slope with the stairs' slope."""
+    """Debris rotation: of the four wall-aligned yaws, the one whose closed-pose model
+    best fills the entity's own collider box (CIwColliderSpec, world aligned)."""
     import struct
     from anim import Anim, Skeleton, Skin
     from pair_arms import skinned
@@ -82,50 +83,37 @@ def debris_yaw(entities_path, group_path, dynamics_path):
     dyn = Group(dynamics_path)
     res = {(r.cls, r.name_hash): r.body for r in dyn.resources}
     skels = {r.name_hash: Skeleton(r.body) for r in dyn.resources if r.cls == iw_hash("CIwAnimSkel")}
-    g = Group(group_path)
-    floor = []
-    for r in g.resources:
-        if r.cls != iw_hash("CIwModel"):
-            continue
-        m = Model(r.body)
-        if m.verts is None:
-            continue
-        for _, _, idx in m.trilists:
-            t = m.verts[idx[: len(idx) // 3 * 3].reshape(-1, 3)].astype(float)
-            n = np.cross(t[:, 1] - t[:, 0], t[:, 2] - t[:, 0])
-            up = np.abs(n[:, 1]) / (np.linalg.norm(n, axis=1) + 1e-9) > 0.9
-            floor.append(t[up].mean(1))
-    floor = np.concatenate(floor)
     for e in ents:
-        if "CActionBuySpec" not in e["components"] or not e["models"]:
+        if "CActionBuySpec" not in e["components"] or not e["models"] or not e.get("colliders"):
             continue
         h = int(e["models"][0], 16)
         skin_body = res.get((iw_hash("CIwAnimSkin"), h))
         if skin_body is None:
             continue
         skel = skels[Skin(skin_body).skel]
-        closed = [Anim(b, iw_hash("CIwAnimKeyFrame"), skel.scale) for (c, n), b in res.items()
-                  if c == iw_hash("CIwAnim") and struct.unpack_from("<I", b, 0)[0] == Skin(skin_body).skel]
-        closed = [a for a in closed if len(a.times) == 1]
-        if not closed:
+        poses = [Anim(b, iw_hash("CIwAnimKeyFrame"), skel.scale) for (c, _n), b in res.items()
+                 if c == iw_hash("CIwAnim") and struct.unpack_from("<I", b, 0)[0] == Skin(skin_body).skel]
+        poses = [a for a in poses if len(a.times) == 1]
+        if not poses:
             continue
-        verts = skinned(skin_body, skel, closed[0], 0)
-        span = verts.max(0) - verts.min(0)
-        if span[1] > 0.6 * max(span[0], span[2]):
-            continue  # upright (a door): the wall direction is enough
-        model_up, model_slope = uphill(verts)
-        p = np.array(e["transform"]["pos"], float)
-        near = floor[np.linalg.norm((floor - p)[:, [0, 2]], axis=1) < 500]
-        if model_slope < 0.15 or len(near) < 6:
-            continue  # not lying on a slope (e.g. a door): keep the wall direction
-        stairs_up, _ = uphill(near)
-        # yaw rotating model_up onto stairs_up (Godot: Basis(UP, yaw) maps +Z towards +X for yaw > 0)
-        est = math.atan2(stairs_up[0], stairs_up[1]) - math.atan2(model_up[0], model_up[1])
-        # the slope estimate is noisy: pick whichever wall-aligned candidate is closest
-        base = e.get("wall_yaw", math.pi / 2) - math.pi / 2
-        diff = lambda a: abs((a - est + math.pi) % (2 * math.pi) - math.pi)
-        e["debris_yaw"] = float(min((base, base + math.pi), key=diff))
-        print(e["name"], "debris_yaw", round(math.degrees(e["debris_yaw"])))
+        verts = skinned(skin_body, skel, poses[0], 0)
+        child = np.array(e["children"][-1]["pos"], float) if e["children"] else np.zeros(3)
+        box = e["colliders"][0]
+        lo, hi = np.array(box["min"], float), np.array(box["max"], float)
+        base = e.get("wall_yaw", 0.0)
+        best = None
+        for k in range(4):
+            yaw = base + k * math.pi / 2
+            c, s_ = math.cos(yaw), math.sin(yaw)
+            # Godot Basis(UP, yaw): x' = x cos + z sin, z' = -x sin + z cos
+            v = verts + child
+            rx = v[:, 0] * c + v[:, 2] * s_
+            rz = -v[:, 0] * s_ + v[:, 2] * c
+            inside = ((rx >= lo[0]) & (rx <= hi[0]) & (rz >= lo[2]) & (rz <= hi[2])).mean()
+            if best is None or inside > best[0]:
+                best = (inside, yaw)
+        e["debris_yaw"] = float(best[1])
+        print(e["name"], "debris_yaw", round(math.degrees(best[1])), "fit", round(best[0], 2))
     json.dump(ents, open(entities_path, "w"), indent=1)
 
 
