@@ -13,6 +13,7 @@ var entities := {}          # name -> entity dictionary from entities.json
 var windows := []           # Barricade nodes
 var debris := []            # Debris nodes (bought to open areas)
 var wall_buys := []         # {name, position, weapon, cost}
+var boxes := []             # MysteryBox nodes
 var player_spawn := Transform3D.IDENTITY
 var nav_region: NavigationRegion3D
 var static_root: Node3D
@@ -46,6 +47,7 @@ func load_level(name: String) -> void:
 	_build_windows()
 	_build_debris()
 	_build_wall_buys()
+	_build_boxes()
 
 
 func bake_navigation() -> void:
@@ -193,6 +195,16 @@ func _build_debris() -> void:
 			nav_region.add_child(d)
 			d.setup(self, n)
 			debris.append(d)
+
+
+func _build_boxes() -> void:
+	for n in entities:
+		if "CMysteryBoxSpec" in entities[n]["components"]:
+			var b := MysteryBox.new()
+			b.name = "Box_" + n
+			nav_region.add_child(b)
+			b.setup(self, n)
+			boxes.append(b)
 
 
 func _build_wall_buys() -> void:

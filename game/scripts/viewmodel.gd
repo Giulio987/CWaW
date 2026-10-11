@@ -26,9 +26,14 @@ static func iw_hash(s: String) -> int:
 	return h
 
 
-func _ready() -> void:
+static func pairs() -> Dictionary:
 	if _pairs.is_empty():
 		_pairs = JSON.parse_string(FileAccess.get_file_as_string(DIR + "arms_pairs.json"))
+	return _pairs
+
+
+func _ready() -> void:
+	pairs()
 	rotation.y = PI
 	_arms = (load(DIR + _pairs["arms_model"] + ".glb") as PackedScene).instantiate()
 	add_child(_arms)

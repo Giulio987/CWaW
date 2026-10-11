@@ -27,6 +27,10 @@ TAG_WEAPON = 22  # arms bone the weapon root hangs from (found by hand/grip cont
 WEAPONS = ["colt45", "kar98", "carbine", "thompson", "mp40", "stg44", "trenchgun", "shotgun", "bar", "garand", "g43",
            "ppsh", "type100", "mg42", "raygun", "ptrs", "fg42", "sawnoff", "springfield", "arisaka", "browning",
            "flamethrower", "wunderwaffe"]
+# the sawed-off shares the double-barrel's skeleton and animations; its model is the
+# other model family on that skeleton (50f... contains shotgun_lod1, b5c... is the sawed-off)
+ANIM_ALIAS = {"sawnoff": "shotgun"}
+MODEL_OVERRIDE = {"sawnoff": 0xB5C21000}
 ACTIONS = ["idle", "shoot", "reload", "rechamber", "putaway", "pullout", "raise", "sprint", "melee"]
 
 
@@ -96,15 +100,29 @@ def main():
     arms_skel = skels[Skin(arms_skin).skel]
     arms_anims = anims[Skin(arms_skin).skel]
     out = {}
+    skins_by_skel = {}
+    for (cls, h), body in res.items():
+        if cls == iw_hash("CIwAnimSkin"):
+            skins_by_skel.setdefault(Skin(body).skel, []).append(h)
+    verts = {h: struct.unpack_from("<H", body, 4)[0] for (cls, h), body in res.items() if cls == iw_hash("CIwModel")}
     for w in WEAPONS:
-        model = next((iw_hash(n) for n in (w, w + "_lod1") if (iw_hash("CIwAnimSkin"), iw_hash(n)) in res), None)
-        if model is None:
+        anim_name = ANIM_ALIAS.get(w, w)
+        idle = res.get((iw_hash("CIwAnim"), iw_hash(f"{anim_name}_idle")))
+        if idle is None:
+            continue
+        # the first-person model is the most detailed skin on the weapon's own skeleton
+        cands = skins_by_skel.get(struct.unpack_from("<I", idle, 0)[0], [])
+        if w in MODEL_OVERRIDE:
+            model = MODEL_OVERRIDE[w]
+        elif cands:
+            model = max(cands, key=lambda h: verts.get(h, 0))
+        else:
             continue
         wskin = res[(iw_hash("CIwAnimSkin"), model)]
         wskel = skels[Skin(wskin).skel]
         entry = {"model": f"{model:08x}", "anims": {}}
         for act in ACTIONS:
-            h = iw_hash(f"{w}_{act}")
+            h = iw_hash(f"{anim_name}_{act}")
             a = anims.get(Skin(wskin).skel, {}).get(h)
             if a is None:
                 continue
@@ -124,7 +142,7 @@ def main():
         # idle poses are ambiguous by timing (dozens of 1-key candidates): take the one
         # closest to where the shoot/reload animation starts
         ref = next((entry["anims"][k][1] for k in ("shoot", "reload") if k in entry["anims"]), None)
-        h = iw_hash(f"{w}_idle")
+        h = iw_hash(f"{anim_name}_idle")
         if ref is not None and h in anims.get(Skin(wskin).skel, {}):
             ref_pose = np.array([t for _, t in pose(arms_skel, arms_anims[int(ref, 16)], 0)])
             idle = anims[Skin(wskin).skel][h]

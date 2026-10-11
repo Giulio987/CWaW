@@ -263,7 +263,9 @@ func _update_prompt() -> void:
 	var t = _interaction_target()
 	if t == null:
 		return
-	if t is Barricade:
+	if t is MysteryBox:
+		prompt = t.prompt(self)
+	elif t is Barricade:
 		prompt = "Tieni premuto E per riparare la barricata"
 	elif t is Debris:
 		prompt = "Premi E per sgombrare [%d]" % t.cost
@@ -280,6 +282,9 @@ func _interaction_target():
 	for w in game.level.windows:
 		if w.inside.distance_to(p) < INTERACT_RANGE and w.boards < Barricade.MAX_BOARDS and w.occupied_by == null:
 			return w
+	for b in game.level.boxes:
+		if b.global_position.distance_to(p) < INTERACT_RANGE + 0.6 and b.prompt(self) != "":
+			return b
 	for d in game.level.debris:
 		if is_instance_valid(d) and d.global_position.distance_to(p) < INTERACT_RANGE + 1.0:
 			return d
@@ -299,6 +304,8 @@ func interact() -> void:
 			add_points(10)
 	elif not Input.is_action_just_pressed("interact"):
 		return
+	elif t is MysteryBox:
+		t.interact(self)
 	elif t is Debris:
 		if points >= t.cost:
 			add_points(-t.cost)

@@ -60,7 +60,8 @@ Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `
 | Gameplay Nacht | 🔶 | round, spawn, finestre, scavalcamento, inseguimento, attacco, armi a muro, macerie, coltello, punti, lightmap |
 | Altre mappe | 🔶 | versione base: aree/collegamenti dagli script Lua (`level.json`), niente cani/perk/trappole |
 | Orientamento barricate/macerie | 🔶 | le entità non hanno rotazione: direzione dal muro (`tools/wall_yaw.py`) |
-| Mancano | ⏳ | suoni in gioco, mystery box, cani, perk, smembramento, build iOS |
+| Mystery box | ✅ | 950 punti, coperchio animato originale, armi che girano, offerta 12 s; test `--box-test` |
+| Mancano | ⏳ | suoni in gioco, cani, perk, smembramento, power-up, build iOS |
 
 ## Formati – appunti
 - Risorsa nel gruppo: `u32 size, u32 nameHash, body`. Le classi polimorfiche (es. `CIwSoundData`) hanno invece `u32 subclassHash` al posto del nome, e il nome è il primo u32 del body.

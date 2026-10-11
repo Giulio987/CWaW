@@ -38,6 +38,8 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_look_shots(game, args[look + 1].split(","))
 	if args.has("--stairs-test"):
 		_stairs_test(game)
+	if args.has("--box-test"):
+		_box_test(game)
 	if args.has("--spin"):
 		_spin_shots(game)
 	var shots := args.find("--shots")
@@ -197,4 +199,46 @@ func _stairs_test(game: Game) -> void:
 	if jumping:
 		ok = not ok  # with the debris in place, getting upstairs is the bug
 	print("[stairs] %s: end y=%.2f dist=%.2f time=%.1fs" % ["OK" if ok else "FAIL", p.global_position.y, p.global_position.distance_to(target), t])
+	get_tree().quit()
+
+
+# Buy from the mystery box and take the weapon: -- nacht --box-test
+func _box_test(game: Game) -> void:
+	await game.level.navigation_ready
+	var box: MysteryBox = game.level.boxes[0]
+	var p := game.player
+	p.points = 5000
+	# stand 1.6 m in front of the box (its local +Z), looking at it
+	var front := box.global_transform * Vector3(0, 0, 1.6)
+	var probe := box.global_transform * Vector3(0, 0, -1.6)
+	var space := p.get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(box.global_position + Vector3.UP, front + Vector3.UP)
+	if not space.intersect_ray(q).is_empty():
+		front = probe  # the other side is the open one
+	p.global_position = front
+	var to := box.global_position - front
+	p.rotation.y = atan2(-to.x, -to.z)
+	var cam := p.get_viewport().get_camera_3d()
+	cam.rotation.x = -0.35
+	var shots := {"closed": 0.5, "cycling1": 1.5, "cycling3": 2.5, "offered": 2.0}
+	for k in ["closed", "cycling1", "cycling3", "offered"]:
+		if k == "cycling1":
+			print("[box] prompt before: ", box.prompt(p))
+			box.interact(p)
+		await get_tree().create_timer(shots[k]).timeout
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/box_%s.png" % k))
+		print("[box] %s state=%s offered=%s" % [k, MysteryBox.State.keys()[box.state], box.offered])
+	print("[box] prompt offered: ", box.prompt(p))
+	box.interact(p)
+	await get_tree().create_timer(1.0).timeout
+	print("[box] %s: weapon in hand=%s points=%d state=%s" % ["OK" if p.weapon()["name"] == box.offered else "FAIL", p.weapon()["name"], p.points, MysteryBox.State.keys()[box.state]])
+	for o in [40, -40]:
+		p.global_position = box.global_position + (front - box.global_position).rotated(Vector3.UP, deg_to_rad(o))
+		to = box.global_position - p.global_position
+		p.rotation.y = atan2(-to.x, -to.z)
+		for i in 6:
+			await get_tree().process_frame
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/box_side%d.png" % o))
 	get_tree().quit()
