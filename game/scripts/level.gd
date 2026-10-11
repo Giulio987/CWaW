@@ -171,6 +171,11 @@ var _lod_groups := []      # [{sectors: {hash: lod}, nodes: [Node3D per lod]}]
 var _no_collision := {}    # MeshInstance3D -> true for variants that must not collide
 var _lod_timer := 0.0
 var _current_sector := ""
+# Sky dome (Der Riese, Shi No Numa): a 6 m dome at the origin (entity 1bf48c85) the
+# original draws around the camera. No collision, scaled up and kept on the camera.
+const SKY_ENTITY := "ent_1bf48c85"
+const SKY_SCALE := 60.0
+var _sky: Node3D
 
 
 func _setup_lods(base: String) -> void:
@@ -212,11 +217,13 @@ func _setup_lods(base: String) -> void:
 
 
 func _process(delta: float) -> void:
+	var cam := get_viewport().get_camera_3d()
+	if _sky and cam:
+		_sky.global_transform = Transform3D(Basis.from_scale(Vector3.ONE * SKY_SCALE), cam.global_position + Vector3.DOWN * 0.5 * SKY_SCALE)
 	_lod_timer -= delta
 	if _lod_timer > 0.0 or _lod_groups.is_empty():
 		return
 	_lod_timer = 0.15
-	var cam := get_viewport().get_camera_3d()
 	if cam:
 		_update_lods(cam.global_position)
 
@@ -266,6 +273,17 @@ func _update_lods(at: Vector3) -> void:
 
 
 func _prepare_meshes(root: Node) -> void:
+	var sky := root.find_child(SKY_ENTITY, true, false) as Node3D
+	if sky:
+		_sky = sky
+		for mi in sky.find_children("*", "MeshInstance3D", true, false) + ([sky] if sky is MeshInstance3D else []):
+			_no_collision[mi] = true
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			for s in mi.mesh.get_surface_count():
+				var mat := mi.mesh.surface_get_material(s) as StandardMaterial3D
+				if mat:
+					mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+					mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	for mi in root.find_children("*", "MeshInstance3D", true, false):
 		var faces := PackedVector3Array()
 		for s in mi.mesh.get_surface_count():

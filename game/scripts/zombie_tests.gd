@@ -28,6 +28,10 @@ static func run(at: Node) -> void:
 			await _spawns(at, game)
 		"trace":
 			await _trace(at, game)
+		"drop":
+			await _drop(at, game)
+		"speedup":
+			await _speedup(at, game)
 	at.get_tree().quit()
 
 
@@ -249,6 +253,58 @@ static func _trace(at: Node, game: Game) -> void:
 			cam.clear_current()
 
 
+# Jump down: a zombie at the end of a raised walkway whose (fake) window is on the
+# ground below: -- shinonuma --zombie-test drop
+static func _drop(at: Node, game: Game) -> void:
+	var p := game.player
+	p.health = 1e9
+	var win: Barricade = game.level.windows[0]
+	var keep := win.outside
+	win.outside = Vector3(31.5, -0.2, 7.3)
+	var z := Zombie.new()
+	z.setup(Vector3(36.6, 5.0, 6.1), win, p, 1e6, false, 5)
+	game.add_child(z)
+	var cam := Camera3D.new()
+	game.add_child(cam)
+	cam.global_position = Vector3(33.0, 3.0, 12.0)
+	cam.look_at(Vector3(35.0, 2.5, 6.0), Vector3.UP)
+	cam.make_current()
+	var shots := 0
+	var was := false
+	for i in 80:
+		await _wait(at, 0.1)
+		if z._dropping and shots < 4:
+			await _snap(at, "drop_%d" % shots)
+			shots += 1
+		if was and not z._dropping:
+			await _snap(at, "drop_landed")
+		was = z._dropping
+		if i % 10 == 0:
+			print("[ztest] drop t=%.1f %s pos=%s dropping=%s anim=%s" % [z.life, Zombie.State.keys()[z.state], z.global_position.snapped(Vector3(0.01, 0.01, 0.01)), z._dropping, z._anim.current_animation])
+	print("[ztest] drop %s (y=%.2f)" % ["OK" if z.global_position.y < 1.0 else "FAIL", z.global_position.y])
+	win.outside = keep
+
+
+# ZombieSpeedUp: wave > 4 fully spawned, a zombie alive 180 s steps up 5 -> 8 -> 12 -> 14.
+static func _speedup(at: Node, game: Game) -> void:
+	var p := game.player
+	p.health = 1e9
+	game.round_number = 5
+	game._between_rounds = false
+	game._to_spawn = 10
+	game._spawned = 10
+	var z := Zombie.new()
+	z.setup(p.global_position - p.global_basis.z * 30.0, game.level.windows[0], p, 1e6, false, 2)
+	z.state = Zombie.State.CHASE
+	game.add_child(z)
+	var seen := [z.speed_index]
+	for i in 4:
+		z._speed_up_t = Zombie.SPEED_UP_TIME - 0.05
+		await _wait(at, 0.2)
+		seen.append(z.speed_index)
+	print("[ztest] speedup indices %s anim=%s speed=%.2f %s" % [seen, z.move_anim, z.speed, "OK" if seen == [2, 5, 8, 12, 14] else "FAIL"])
+
+
 # Every zombie spawn of the map: on the navmesh? path length to its window / the player.
 static func _spawns(at: Node, game: Game) -> void:
 	await _no_sky(game)
@@ -264,7 +320,7 @@ static func _spawns(at: Node, game: Game) -> void:
 		var info := "window=%s" % ("-" if win == null else win.name)
 		if win:
 			var path := NavigationServer3D.map_get_path(map, c, win.outside, true)
-			info += " path=%.1fm end_off=%.1f" % [_plen(path), path[-1].distance_to(win.outside) if path.size() > 0 else -1.0]
+			info += " path=%.1fm end_off=%.1f dy=%.1f" % [_plen(path), path[-1].distance_to(win.outside) if path.size() > 0 else -1.0, win.outside.y - o.y]
 		var pp := NavigationServer3D.map_get_path(map, c, game.player.global_position, true)
 		print("[ztest] spawn %s at %s nav_off=%.2f %s to_player=%.1fm end_off=%.1f" % [n, o.snapped(Vector3(0.1, 0.1, 0.1)), c.distance_to(o), info, _plen(pp),
 			pp[-1].distance_to(game.player.global_position) if pp.size() > 0 else -1.0])

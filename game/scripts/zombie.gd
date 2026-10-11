@@ -233,6 +233,7 @@ func _physics_process(delta: float) -> void:
 		State.TO_WINDOW:
 			var d := global_position.distance_to(window.outside)
 			# progress watchdog: a zombie that stops getting closer is put at the window
+			# (out of the player's sight; after 20 s anyway)
 			if d < _best_dist - 0.2:
 				_best_dist = d
 				_stall = 0.0
@@ -245,7 +246,7 @@ func _physics_process(delta: float) -> void:
 				_start_tearing()
 			elif (_agent.is_navigation_finished() or _stall > 2.0) and _try_drop():
 				pass  # jumping down from a roof / ledge towards a lower window
-			elif _stall > 6.0 or (_agent.is_navigation_finished() and _stall > 0.5 and not _seen()):
+			elif _stall > 20.0 or ((_stall > 6.0 or (_agent.is_navigation_finished() and _stall > 0.5)) and not _seen()):
 				# the navmesh does not reach the window (or the zombie is stuck): put it
 				# there, at once when the player cannot see the jump
 				global_position = window.outside
