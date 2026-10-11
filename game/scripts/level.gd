@@ -31,12 +31,12 @@ func load_level(name: String) -> void:
 	nav_region.name = "Navigation"
 	var nm := NavigationMesh.new()
 	nm.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
-	nm.agent_radius = 0.35
+	nm.agent_radius = 0.25
 	nm.agent_height = 1.7
 	nm.agent_max_climb = 0.45
 	nm.agent_max_slope = 50.0
-	nm.cell_size = 0.25
-	nm.cell_height = 0.25
+	nm.cell_size = 0.1
+	nm.cell_height = 0.1
 	nav_region.navigation_mesh = nm
 	add_child(nav_region)
 
@@ -58,7 +58,11 @@ func bake_navigation() -> void:
 		# a bake is running: bake again once it finishes so the latest geometry is used
 		nav_region.bake_finished.connect(bake_navigation, CONNECT_ONE_SHOT)
 		return
-	nav_region.bake_finished.connect(func(): navigation_ready.emit(), CONNECT_ONE_SHOT)
+	var t0 := Time.get_ticks_msec()
+	nav_region.bake_finished.connect(func():
+		if OS.get_cmdline_user_args().has("--nav-time"):
+			print("[nav] bake %d ms" % (Time.get_ticks_msec() - t0))
+		navigation_ready.emit(), CONNECT_ONE_SHOT)
 	nav_region.bake_navigation_mesh(true)
 
 

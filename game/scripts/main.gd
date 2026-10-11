@@ -42,6 +42,10 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_box_test(game)
 	if args.has("--knife-test"):
 		_knife_test(game)
+	if args.has("--door-test"):
+		_door_test(game)
+	if args.has("--window-shot-test"):
+		_window_shot_test(game)
 	if args.has("--spin"):
 		_spin_shots(game)
 	var shots := args.find("--shots")
@@ -283,4 +287,101 @@ func _knife_test(game: Game) -> void:
 			await get_tree().create_timer(0.1).timeout
 	for r in results:
 		print("[knife] ", r)
+	get_tree().quit()
+
+
+# Open the HELP door, put zombies in the box room chasing the player in the start
+# room and check they come through: -- nacht --door-test
+func _door_test(game: Game) -> void:
+	await game.level.navigation_ready
+	game.set_process(false)
+	var p := game.player
+	p.health = 1e9
+	for d in game.level.debris.duplicate():
+		if d.entity.to_lower() == "doortrigger":
+			d.open()
+	await game.level.navigation_ready
+	await get_tree().create_timer(2.0).timeout
+	var spawn := game.level.entity_transform("DoorTrigger").origin
+	var box_side: Vector3 = game.level.boxes[0].global_position
+	var start := spawn + (box_side - spawn).normalized() * 3.0  # inside the box room, near the door
+	var zs := []
+	for i in 4:
+		var z := Zombie.new()
+		z.setup(start + Vector3(randf_range(-0.5, 0.5), 0.2, randf_range(-0.5, 0.5)), game.level.windows[0], p, 1e9, false)
+		game.add_child(z)
+		z.state = Zombie.State.CHASE
+		zs.append(z)
+	var t := 0.0
+	while t < 25.0:
+		await get_tree().create_timer(1.0).timeout
+		t += 1.0
+		var d := zs.map(func(z): return snappedf(z.global_position.distance_to(p.global_position), 0.1))
+		print("[door] t=%.0f distances %s" % [t, d])
+		if d.all(func(x): return x < 2.0):
+			break
+	var ok := zs.all(func(z): return z.global_position.distance_to(p.global_position) < 2.0)
+	if not ok:
+		await RenderingServer.frame_post_draw
+		var stuck: Zombie = zs[0]
+		print("[door] stuck at ", stuck.global_position, " next ", stuck._agent.get_next_path_position(), " finished ", stuck._agent.is_navigation_finished(), " reachable ", stuck._agent.is_target_reachable())
+	var c := game.level.entity_transform("DoorTrigger").origin
+	var nmap := p.get_world_3d().navigation_map
+	for off in [-1.5, -0.75, 0.0, 0.75, 1.5]:
+		var probe_at: Vector3 = c + Vector3(off, 0.3, 0)
+		var cp := NavigationServer3D.map_get_closest_point(nmap, probe_at)
+		print("[door] nav near x%+.2f: closest %s (dist %.2f)" % [off, cp.snapped(Vector3(0.01, 0.01, 0.01)), cp.distance_to(probe_at)])
+	for off in [-0.6, -0.3, -0.1, 0.0, 0.1, 0.3, 0.6]:
+		var fq := PhysicsRayQueryParameters3D.create(c + Vector3(off, 1.0, 0), c + Vector3(off, -1.0, 0), 1)
+		var fh := p.get_world_3d().direct_space_state.intersect_ray(fq)
+		print("[door] floor x%+.1f: %s" % [off, "HOLE" if fh.is_empty() else "y=%.2f n=%s by %s" % [fh["position"].y, fh["normal"].snapped(Vector3(0.01, 0.01, 0.01)), fh["collider"].get_parent().name]])
+	var up := PhysicsRayQueryParameters3D.create(c + Vector3.UP * 0.2, c + Vector3.UP * 4.0, 1)
+	var uh := p.get_world_3d().direct_space_state.intersect_ray(up)
+	print("[door] ceiling at ", "none" if uh.is_empty() else str(snappedf((uh["position"] - c).y, 0.01)), " by ", "" if uh.is_empty() else uh["collider"].get_parent().name)
+	# doorway width: cast sideways from the door centre at knee and chest height
+	var space := p.get_world_3d().direct_space_state
+	for h in [0.4, 1.2]:
+		for axis in [Vector3.RIGHT, Vector3.BACK]:
+			var w := 0.0
+			for sgn in [1.0, -1.0]:
+				var q := PhysicsRayQueryParameters3D.create(c + Vector3.UP * h, c + Vector3.UP * h + axis * sgn * 3.0, 1)
+				var hit := space.intersect_ray(q)
+				w += 3.0 if hit.is_empty() else (hit["position"] - q.from).length()
+				print("[door]   h=%.1f axis %s side %+.0f hit %s" % [h, axis, sgn, "none" if hit.is_empty() else "%s at %.2f" % [hit["collider"].get_parent().name, (hit["position"] - q.from).length()]])
+			print("[door] h=%.1f axis %s free width %.2f" % [h, axis, w])
+	print("[door] %s" % ("OK" if ok else "FAIL"))
+	get_tree().quit()
+
+
+# Shoot from inside at a zombie standing outside each window: -- nacht --window-shot-test
+func _window_shot_test(game: Game) -> void:
+	await game.level.navigation_ready
+	game.set_process(false)
+	var p := game.player
+	var ok := 0
+	for w in game.level.windows:
+		var z := Zombie.new()
+		z.setup(w.outside, w, p, 1e6, false)
+		game.add_child(z)
+		z.set_physics_process(false)
+		p.global_position = w.inside + (w.inside - w.global_position).normalized() * 0.8
+		await get_tree().physics_frame
+		var to: Vector3 = z.global_position + Vector3.UP * 1.0 - (p.global_position + Vector3.UP * 1.6)
+		p.rotation.y = atan2(-to.x, -to.z)
+		p.get_viewport().get_camera_3d().rotation.x = atan2(to.y, Vector2(to.x, to.z).length())
+		await get_tree().physics_frame
+		var before := z.health
+		p.weapon()["mag"] = 8
+		p._cooldown = 0.0
+		p._fire(p.weapon(), Weapons.stats(p.weapon()["name"]))
+		await get_tree().physics_frame
+		var hit := z.health < before
+		ok += int(hit)
+		var cam := p.get_viewport().get_camera_3d()
+		var rq := PhysicsRayQueryParameters3D.create(cam.global_position, cam.global_position - cam.global_basis.z * 20.0, 1 | 2)
+		rq.exclude = [p.get_rid()]
+		var rh := p.get_world_3d().direct_space_state.intersect_ray(rq)
+		print("[shot] %s: %s (ray hits %s at %.2f m, zombie at %.2f m)" % [w.name, "hit" if hit else "MISS", "none" if rh.is_empty() else String(rh["collider"].get_parent().name) + "/" + String(rh["collider"].name), -1.0 if rh.is_empty() else cam.global_position.distance_to(rh["position"]), cam.global_position.distance_to(z.global_position)])
+		z.queue_free()
+	print("[shot] %d/%d windows" % [ok, game.level.windows.size()])
 	get_tree().quit()

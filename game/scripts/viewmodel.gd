@@ -95,8 +95,9 @@ func _back_to_idle(action: String) -> void:
 # procedural. The knife is a rigid child of the right hand, set at the start of the
 # slash so its tip points to the left of the screen; the arms then sweep left -> right.
 const KNIFE_MODEL := "78d2d941"   # knife_lod1 in the player group
-const GRIP_BONE := 6              # right hand (chain 3-4-5-6, fingers 7-12; 15 is the left hand)
-const PALM := Vector3(0.0, 0.0, 0.062)  # palm centre measured from the skin (raised into the fist)
+const GRIP_BONE := 15             # left hand (chain 13-14-15, fingers 16-21); the knife uses the left arm only
+const PALM := Vector3(0.011, 0.005, 0.036)  # palm centre measured from the skin
+const HIDE_BONE := 4              # right upper arm: collapsed while knifing
 const KNIFE_GRIP := 0.06          # metres from the model origin (pommel end) to mid-handle
 const SLASH_TIME := 0.42
 var _knife: Node3D
@@ -126,12 +127,14 @@ func melee() -> void:
 	if _knife:
 		_knife.visible = false  # shown once oriented on the first slash frame
 	_play("idle", true)
+	_skel.set_bone_pose_scale(HIDE_BONE, Vector3.ZERO)  # right arm out of view
 	_slash = 0.0
 	_knife_set = false
 
 
 func _end_melee() -> void:
 	_slash = -1.0
+	_skel.set_bone_pose_scale(HIDE_BONE, Vector3.ONE)
 	if _knife:
 		_knife.visible = false
 	if _weapon:

@@ -34,7 +34,7 @@ var _repair_cooldown := 0.0
 
 
 func _ready() -> void:
-	collision_mask = 1 | 2  # world and zombies
+	collision_mask = 1 | 2 | 4  # world, zombies, window blockers
 	floor_snap_length = 0.5   # stick to stairs when walking down
 	floor_max_angle = deg_to_rad(50)
 	var shape := CollisionShape3D.new()
@@ -220,7 +220,7 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 			spread = Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * 0.06
 		var from := _camera.global_position
 		var dir := (-_camera.global_basis.z + _camera.global_basis * spread).normalized()
-		var q := PhysicsRayQueryParameters3D.create(from, from + dir * s["range"])
+		var q := PhysicsRayQueryParameters3D.create(from, from + dir * s["range"], 1 | 2)  # bullets ignore window blockers
 		q.exclude = [get_rid()]
 		var hit := space.intersect_ray(q)
 		if hit.is_empty():

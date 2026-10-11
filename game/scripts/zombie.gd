@@ -54,7 +54,7 @@ func setup(spawn: Vector3, win: Barricade, player: Player, hp: float, runner: bo
 
 func _ready() -> void:
 	collision_layer = 2
-	collision_mask = 1
+	collision_mask = 1 | 4
 	floor_snap_length = 0.5
 	floor_max_angle = deg_to_rad(50)
 	var shape := CollisionShape3D.new()
@@ -186,7 +186,7 @@ func _start_climb() -> void:
 	var tw := create_tween()
 	tw.tween_property(self, "global_position", window.inside, _anim.get_animation(CLIMB).length)
 	tw.finished.connect(func():
-		collision_mask = 1
+		collision_mask = 1 | 4
 		window.occupied_by = null
 		state = State.CHASE
 		_play(move_anim))

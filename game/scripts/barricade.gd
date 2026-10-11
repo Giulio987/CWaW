@@ -61,6 +61,8 @@ func finalize(level, room_hint: Vector3) -> void:
 	global_transform = Transform3D(Basis(Vector3.UP, atan2(normal.x, normal.z)), global_position)
 	# invisible blocker in the opening: keeps the player in and splits the navmesh
 	_blocker = StaticBody3D.new()
+	_blocker.collision_layer = 4  # blocks bodies (player, zombies) but not bullets or the navmesh-free sight lines
+	_blocker.collision_mask = 0
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = Vector3(1.4, 2.6, 0.3)
