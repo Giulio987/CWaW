@@ -30,6 +30,8 @@ func _ready() -> void:
 		(func(): ExtraTests.run(self)).call_deferred()
 	elif args.has("--zombie-test"):   # rise | arm | speed (zombie_tests.gd)
 		(func(): ZombieTests.run(self)).call_deferred()
+	elif args.has("--swamp-test"):   # map | rise | zipline (swamp_tests.gd, Shi No Numa)
+		(func(): load("res://scripts/swamp_tests.gd").run(self)).call_deferred()
 	if args.has("--zombie-watch"):   # alongside the bot: zombies slow to reach windows
 		(func(): ZombieTests.watch(self)).call_deferred()
 	var dir := ProjectSettings.globalize_path("res://../analysis/autotest")
@@ -39,7 +41,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if OS.get_cmdline_user_args().has("--hud-test"):
 		return
-	if OS.get_cmdline_user_args().has("--weapon-test") or OS.get_cmdline_user_args().has("--zombie-test"):
+	if OS.get_cmdline_user_args().has("--weapon-test") or OS.get_cmdline_user_args().has("--zombie-test") or OS.get_cmdline_user_args().has("--swamp-test"):
 		return
 	if OS.get_cmdline_user_args().has("--drink-test") or OS.get_cmdline_user_args().has("--teddy-test") or OS.get_cmdline_user_args().has("--music-test") or OS.get_cmdline_user_args().has("--egg-test") or OS.get_cmdline_user_args().has("--monkey-test"):
 		return
@@ -222,6 +224,7 @@ func _knife_live() -> void:
 	if OS.get_cmdline_user_args().has("--crawler"):
 		await get_tree().create_timer(0.2).timeout
 		z.become_crawler()
+		print("[knife-live] crawler health %.0f (max %.0f, %s)" % [z.health, z.max_health, game.level_name])
 	var hits := 0
 	for i in 24:
 		await get_tree().create_timer(1.0).timeout

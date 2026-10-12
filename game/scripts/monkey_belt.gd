@@ -58,29 +58,51 @@ func _ready() -> void:
 	_refresh()
 
 
+# One press plays the whole Throwingmonkeybomb state (viewmodel.gd): the arms bring the
+# monkey up, wind it and throw it at MONKEY_RELEASE; releasing the button changes nothing.
 func set_held(down: bool) -> void:
-	if down and not holding:
-		if count <= 0 or _cooldown > 0.0 or player.dead:
-			return
-		holding = true
-		count -= 1
-		_refresh()
-		_in_hand = MonkeyBomb.model()
-		player.get_viewport().get_camera_3d().add_child(_in_hand)
-		_in_hand.rotation = Vector3(0.2, 0.5, 0)
-		_in_hand.scale = Vector3.ONE * 0.75
-		_in_hand.position = HOLD_POS + Vector3(0, -0.15, 0.1)
-		_in_hand.create_tween().tween_property(_in_hand, "position", HOLD_POS, 0.15)
-	elif not down and holding:
-		_throw()
+	if not down or holding:
+		return
+	if count <= 0 or _cooldown > 0.0 or player.dead:
+		return
+	var vm := player.get("_viewmodel") as Viewmodel
+	if vm and vm.drinking:
+		return
+	holding = true
+	count -= 1
+	_refresh()
+	if vm:
+		vm.hold_item(MonkeyBomb.model(), Viewmodel.MONKEY_ARMS, Viewmodel.MONKEY_ANIM)
+		var t := vm.throw_item("", Viewmodel.MONKEY_RELEASE)
+		player.set("_cooldown", maxf(float(player.get("_cooldown")), t + 0.3))
+		get_tree().create_timer(Viewmodel.MONKEY_RELEASE, false).timeout.connect(_throw)
+		return
+	_in_hand = MonkeyBomb.model()
+	player.get_viewport().get_camera_3d().add_child(_in_hand)
+	_in_hand.rotation = Vector3(0.2, 0.5, 0)
+	_in_hand.scale = Vector3.ONE * 0.75
+	_in_hand.position = HOLD_POS
+	get_tree().create_timer(0.4, false).timeout.connect(_throw)
 
 
 func _throw() -> void:
+	if not holding:
+		return
 	holding = false
 	_cooldown = COOLDOWN
+	if _in_hand:
+		_in_hand.queue_free()
+		_in_hand = null
+	_refresh()
+	if player.dead or player.game == null:
+		return
 	var cam := player.get_viewport().get_camera_3d()
 	var fwd := -cam.global_basis.z
 	var from := cam.global_position + fwd * 0.45 + cam.global_basis.x * 0.12
+	var vm := player.get("_viewmodel") as Viewmodel
+	var hand: Variant = vm.item_position() if vm else null
+	if hand != null and (hand as Vector3).distance_to(cam.global_position) < 1.2:
+		from = hand   # from the hand of the throw animation
 	var q := PhysicsRayQueryParameters3D.create(cam.global_position, from, 1)
 	var hit := player.get_world_3d().direct_space_state.intersect_ray(q)
 	if not hit.is_empty():
@@ -89,23 +111,18 @@ func _throw() -> void:
 	var b := MonkeyBomb.spawn(player.game, from, vel, player)
 	b.rotation.y = player.rotation.y
 	Sfx.instance.play("knife_slash", -10.0, 0.7)   # whoosh
-	if _in_hand:
-		_in_hand.queue_free()
-		_in_hand = null
-	_refresh()
 
 
 func _physics_process(delta: float) -> void:
 	_cooldown -= delta
-	if holding:
-		var vm = player.get("_viewmodel")
-		if vm != null and "_kick" in vm:
-			vm.set("_kick", minf(float(vm.get("_kick")), -0.6))
-		if player.dead:
-			holding = false
-			if _in_hand:
-				_in_hand.queue_free()
-				_in_hand = null
+	if holding and player.dead:
+		holding = false
+		var vm := player.get("_viewmodel") as Viewmodel
+		if vm:
+			vm.end_item()
+		if _in_hand:
+			_in_hand.queue_free()
+			_in_hand = null
 
 
 # HUD: replaces the frag icons while monkeys are in the slot

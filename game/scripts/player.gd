@@ -121,7 +121,7 @@ var _melee_cooldown := 0.0
 
 # Knife: short-range hit available with any weapon, as in the original.
 func melee() -> void:
-	if dead or _melee_cooldown > 0.0:
+	if dead or _melee_cooldown > 0.0 or _viewmodel.throwing():
 		return
 	_melee_cooldown = 0.9
 	_viewmodel.melee()
@@ -201,6 +201,8 @@ func _physics_process(delta: float) -> void:
 	input = input.limit_length(1.0)
 	var dir := (transform.basis * Vector3(input.x, 0, input.y))
 	var speed := SPRINT if Input.is_action_pressed("sprint") else SPEED
+	if game and game.level and game.level.in_water(global_position):
+		speed *= Level.WATER_MOVE_SPEED   # wading in the swamp (level.gd)
 	velocity.x = dir.x * speed
 	velocity.z = dir.z * speed
 	if is_on_floor():

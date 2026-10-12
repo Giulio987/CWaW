@@ -84,15 +84,26 @@ func _unhandled_input(event: InputEvent) -> void:
 func _start_cook() -> void:
 	if cooking or count <= 0 or _cooldown > 0.0 or player.dead:
 		return
+	var vm := _vm()
+	if vm and vm.drinking:
+		return
 	cooking = true
 	cook_time = 0.0
 	set_count(count - 1)
+	# the arms pull the pin with the grenade in hand (viewmodel.gd, state Priminggrenade)
+	if vm:
+		vm.hold_item(Grenade.model(), Viewmodel.GRENADE_PRIME)
+		return
 	_in_hand = Grenade.model()
 	var cam := player.get_viewport().get_camera_3d()
 	cam.add_child(_in_hand)
 	_in_hand.rotation = Vector3(deg_to_rad(-35), deg_to_rad(20), deg_to_rad(-15))
 	_in_hand.position = HOLD_POS + Vector3(0, -0.15, 0.1)
 	_in_hand.create_tween().tween_property(_in_hand, "position", HOLD_POS, 0.15)
+
+
+func _vm() -> Viewmodel:
+	return player.get("_viewmodel") as Viewmodel
 
 
 func _physics_process(delta: float) -> void:
@@ -103,7 +114,10 @@ func _physics_process(delta: float) -> void:
 	if not cooking:
 		return
 	cook_time += delta
-	_dip_weapon()
+	if _vm() and _vm().throwing():
+		_hold_fire(0.3)
+	else:
+		_dip_weapon()
 	if player.dead:
 		_drop_in_hand()
 		cooking = false
@@ -121,16 +135,14 @@ func _physics_process(delta: float) -> void:
 func _throw() -> void:
 	cooking = false
 	_cooldown = COOLDOWN
-	var cam := player.get_viewport().get_camera_3d()
-	var fwd := -cam.global_basis.z
-	var from := cam.global_position + fwd * 0.45 + cam.global_basis.x * 0.12
-	# don't spawn it inside a wall right in front of the player
-	var q := PhysicsRayQueryParameters3D.create(cam.global_position, from, 1)
-	var hit := player.get_world_3d().direct_space_state.intersect_ray(q)
-	if not hit.is_empty():
-		from = (hit["position"] as Vector3) - fwd * 0.1
-	var vel := fwd * THROW_SPEED + Vector3.UP * THROW_UP + Vector3(player.velocity.x, 0.0, player.velocity.z)
-	Grenade.spawn(player.game, from, vel, Grenade.FUSE - cook_time, player)
+	var vm := _vm()
+	if vm and vm.throwing():
+		# Throwinggrenade: the grenade leaves the hand at the throwGrenade call (99 ms)
+		var t := vm.throw_item(Viewmodel.GRENADE_THROW, Viewmodel.GRENADE_RELEASE)
+		_hold_fire(t + 0.3)
+		get_tree().create_timer(Viewmodel.GRENADE_RELEASE, false).timeout.connect(_release.bind(Grenade.FUSE - cook_time - Viewmodel.GRENADE_RELEASE))
+	else:
+		_release(Grenade.FUSE - cook_time)
 	Sfx.instance.play("knife_slash", -10.0, 0.7)   # whoosh
 	if _in_hand:
 		var h := _in_hand
@@ -140,7 +152,34 @@ func _throw() -> void:
 		tw.tween_callback(h.queue_free)
 
 
+func _release(fuse_left: float) -> void:
+	if player.dead or player.game == null:
+		return
+	var cam := player.get_viewport().get_camera_3d()
+	var fwd := -cam.global_basis.z
+	var from := cam.global_position + fwd * 0.45 + cam.global_basis.x * 0.12
+	var vm := player.get("_viewmodel") as Viewmodel
+	var hand: Variant = vm.item_position() if vm else null
+	if hand != null and (hand as Vector3).distance_to(cam.global_position) < 1.2:
+		from = hand   # from the hand of the throw animation
+	# don't spawn it inside a wall right in front of the player
+	var q := PhysicsRayQueryParameters3D.create(cam.global_position, from, 1)
+	var hit := player.get_world_3d().direct_space_state.intersect_ray(q)
+	if not hit.is_empty():
+		from = (hit["position"] as Vector3) - fwd * 0.1
+	var vel := fwd * THROW_SPEED + Vector3.UP * THROW_UP + Vector3(player.velocity.x, 0.0, player.velocity.z)
+	Grenade.spawn(player.game, from, vel, maxf(fuse_left, 0.05), player)
+
+
+# no shooting while the hand holds the grenade
+func _hold_fire(t: float) -> void:
+	player.set("_cooldown", maxf(float(player.get("_cooldown")), t))
+
+
 func _drop_in_hand() -> void:
+	var vm := _vm()
+	if vm:
+		vm.end_item()
 	if _in_hand:
 		_in_hand.queue_free()
 		_in_hand = null

@@ -66,6 +66,8 @@ var speed := 1.0
 var move_rate := 1.0     # playback rate of move_anim (SPEED_STATES)
 var speed_index := 0     # original speed 1..14, 0 = picked from WALKS/RUNS
 var rise := false        # set before add_child: climb out of the ground first
+var water := false       # "_water" template (Shi No Numa swamp spawns): rises out of the water
+var entry := Vector3.INF # set before add_child: walk straight in from a spawn off the navmesh
 var _after_rise: State = State.TO_WINDOW
 var _speed_up_t := 0.0
 var life := 0.0             # seconds since spawn
@@ -121,7 +123,7 @@ func _ready() -> void:
 		health = round_health(g.round_number)
 		max_health = health
 	collision_layer = 2
-	collision_mask = 1 | 4
+	collision_mask = 1 | 4 | Level.NAV_FLOOR_LAYER
 	floor_snap_length = 0.5
 	floor_max_angle = deg_to_rad(50)
 	var shape := CollisionShape3D.new()
@@ -151,6 +153,24 @@ func _ready() -> void:
 		_start_rise()
 	else:
 		_play(move_anim)
+		if entry != Vector3.INF:
+			_start_entry()
+
+
+# Spawns behind the jungle backdrop (game.gd _spawn_entry): straight in to the navmesh.
+func _start_entry() -> void:
+	_unsticking = true
+	collision_mask = 0
+	var d := entry - global_position
+	rotation.y = atan2(d.x, d.z)
+	_unstick_tw = create_tween()
+	_unstick_tw.tween_property(self, "global_position", entry + Vector3.UP * 0.05, d.length() / maxf(speed, 0.5))
+	_unstick_tw.finished.connect(func():
+		_end_unstick()
+		# the agent's path still starts behind the backdrop: path again from here
+		_best_dist = INF
+		_stall = 0.0
+		_agent.target_position = window.outside)
 
 
 func _play(a: String, blend := 0.2) -> void:
@@ -170,6 +190,10 @@ func _start_rise() -> void:
 	var tw := create_tween()
 	tw.tween_property(_shape, "position:y", 0.9, a.length * 0.9).set_trans(Tween.TRANS_SINE)
 	_spawn_dirt()
+	# the state machines differ only in these: f402afc2 (ground) plays sound 9a86b3fd and
+	# effect 4fb6c21f, d06d3216 (water) sound 9c17d777 and effect b898c591
+	if Sfx.instance:
+		Sfx.instance.play_at("9c17d777" if water else "9a86b3fd", global_position + Vector3.UP * 0.5)
 
 
 # "spawnEffect": clods of earth (or water) thrown up where the zombie breaks out.
@@ -187,20 +211,39 @@ func _spawn_dirt() -> void:
 	p.gravity = Vector3(0, -7.0, 0)
 	p.scale_amount_min = 0.04
 	p.scale_amount_max = 0.11
-	var mesh := BoxMesh.new()
-	mesh.size = Vector3.ONE
+	var mesh: PrimitiveMesh = BoxMesh.new()
+	(mesh as BoxMesh).size = Vector3.ONE
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.17, 0.13, 0.09)
 	mat.roughness = 1.0
+	if water:
+		# murky swamp water: drops and spray instead of clods
+		var sm := SphereMesh.new()
+		sm.radius = 0.5
+		sm.height = 1.0
+		sm.radial_segments = 6
+		sm.rings = 3
+		mesh = sm
+		mat.albedo_color = Color(0.22, 0.26, 0.2, 0.75)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.roughness = 0.2
+		mat.metallic_specular = 0.8
+		p.amount = 60
+		p.spread = 25.0
+		p.initial_velocity_max = 3.2
+		p.scale_amount_min = 0.03
+		p.scale_amount_max = 0.08
 	mesh.material = mat
 	p.mesh = mesh
 	p.position = Vector3(0, 0.05, 0.2)
 	add_child(p)
 	p.emitting = true
-	get_tree().create_timer(_timer * 0.8, false).timeout.connect(func():
-		if is_instance_valid(p):
-			p.emitting = false)
-	get_tree().create_timer(_timer + 2.0, false).timeout.connect(p.queue_free)
+	# timers owned by the particles: nothing left behind when the zombie dies mid-rise
+	var tw := p.create_tween()
+	tw.tween_interval(_timer * 0.8)
+	tw.tween_property(p, "emitting", false, 0.0)
+	tw.tween_interval(_timer * 0.2 + 2.0)
+	tw.tween_callback(p.queue_free)
 
 
 func _update_speed_up(delta: float) -> void:
@@ -368,7 +411,7 @@ func _try_drop() -> bool:
 	tw.finished.connect(func():
 		_dropping = false
 		if state == State.TO_WINDOW:
-			collision_mask = 1 | 4
+			collision_mask = 1 | 4 | Level.NAV_FLOOR_LAYER
 			_best_dist = INF
 			_stall = 0.0
 			_agent.target_position = window.outside
@@ -454,7 +497,7 @@ func _end_unstick() -> void:
 		_unsticking = false
 		_last_unstick = life
 		if state in [State.TO_WINDOW, State.CHASE, State.ATTACK, State.TEARING]:
-			collision_mask = 1 | 4
+			collision_mask = 1 | 4 | Level.NAV_FLOOR_LAYER
 
 
 func _face(p: Vector3) -> void:
@@ -485,7 +528,7 @@ func _start_climb() -> void:
 	var tw := create_tween()
 	tw.tween_property(self, "global_position", window.inside, _anim.get_animation(CLIMB).length)
 	tw.finished.connect(func():
-		collision_mask = 1 | 4
+		collision_mask = 1 | 4 | Level.NAV_FLOOR_LAYER
 		window.occupied_by = null
 		state = State.CHASE
 		_play(move_anim))
@@ -649,8 +692,25 @@ func _spawn_gib(src: MeshInstance3D, where: MeshInstance3D) -> void:
 	get_tree().create_timer(8.0, false).timeout.connect(body.queue_free)
 
 
+# Health of a zombie that has just lost its legs, from the executable's legless handler
+# (console vars CrawlingZombieMaxHealth "240" and CrawlingZombieProportionalMaxHealth
+# "0.4"): on maps that call Game.SetUsingDifficultyTweaks(true) (only Der Riese) it
+# keeps at most 0.4 x its full health, elsewhere at most 240. It never gains health.
+const CRAWLER_MAX_HEALTH := 240.0
+const CRAWLER_PROPORTIONAL := 0.4
+const DIFFICULTY_TWEAKS_LEVELS := ["derriese"]
+
+
+static func crawler_health(hp: float, full: float, level_name: String) -> float:
+	var cap := full * CRAWLER_PROPORTIONAL if level_name in DIFFICULTY_TWEAKS_LEVELS else CRAWLER_MAX_HEALTH
+	return minf(hp, cap)
+
+
 func become_crawler() -> void:
 	crawler = true
+	var g := get_parent() as Game
+	if max_health < 1e5:   # tests use huge health on purpose
+		health = crawler_health(health, max_health, g.level_name if g else "")
 	var legs := _part("legs")
 	if legs and legs.visible:
 		legs.visible = false

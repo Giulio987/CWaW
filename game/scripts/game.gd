@@ -126,6 +126,8 @@ func start(level_name_: String) -> void:
 	player.died.connect(_on_player_died)
 	sfx.listener = player
 	RadioEggs.create(self)   # shootable radios/phone easter eggs (radio_egg.gd)
+	Bridge.create(level)     # Der Riese drawbridge (bridge.gd)
+	FlyTrap.create(self)     # Der Riese fly trap easter egg (flytrap.gd)
 
 	hud = Hud.new()
 	add_child(hud)
@@ -281,6 +283,9 @@ const GROUND_SPAWNS := {"derriese": ["outerLabCourtyardZombieSpawn2", "powerCour
 	"garageZombieSpawn2", "labZombieSpawn3"]}   # Script.Level.DRSpecialGroundSpawns
 
 
+var last_spawn := ""   # spawn entity of the last zombie (tests)
+
+
 func _wave_speed() -> int:
 	if _spawned == 0 or _wave_speeds.size() != _to_spawn:
 		_wave_speeds.clear()
@@ -317,6 +322,18 @@ func _spawn_zombie() -> void:
 		origin = level.entity_transform("CourtyardZombieSpawn%d" % _courtyard_n).origin
 	else:
 		origin = level.entity_transform(c["spawn"]).origin
+	_make_zombie(c, origin)
+
+
+# Tests: a zombie from one named spawn (any area), as the spawner would make it.
+func spawn_zombie_at(spawn: String) -> Zombie:
+	for c in _spawn_candidates(_areas.keys()):
+		if String(c["spawn"]).to_lower() == spawn.to_lower():
+			return _make_zombie(c, level.entity_transform(c["spawn"]).origin)
+	return null
+
+
+func _make_zombie(c: Dictionary, origin: Vector3) -> Zombie:
 	var win: Barricade = _win_by_name.get(c["window"])
 	var direct := win == null
 	if win == null:
@@ -331,10 +348,38 @@ func _spawn_zombie() -> void:
 	# "_ground" / "_water" templates climb out of the ground first (waves.lua)
 	z.rise = c["spawn"] == "COURTYARD" or c["window"] == "" \
 		or String(c["spawn"]).to_lower() in GROUND_SPAWNS.get(level_name, []).map(func(x): return x.to_lower())
+	z.water = "zombieswampspawn" in String(c["spawn"]).to_lower()
+	if not z.rise and not direct and level_name in Level.NAV_FLOOR_LEVELS:
+		var e := _spawn_entry(origin, win.outside)
+		if e != origin:
+			z.entry = e
 	z.killed.connect(_on_zombie_killed)
 	add_child(z)
+	last_spawn = c["spawn"]
 	_spawned += 1
 	_alive += 1
+	return z
+
+
+# Spawns the original hides behind the jungle backdrop on Shi No Numa (its navmesh
+# runs on past the edge of the visible ground): when the navmesh from the spawn does
+# not reach the window, the zombie walks straight in to the first point that does.
+func _spawn_entry(origin: Vector3, target: Vector3) -> Vector3:
+	var map := get_world_3d().navigation_map
+	if OS.get_cmdline_user_args().has("--no-nav-floor") or _nav_reaches(map, origin, target):
+		return origin
+	var flat := Vector3(target.x - origin.x, 0.0, target.z - origin.z)
+	for i in range(1, int(minf(flat.length(), 15.0) / 0.5) + 1):
+		var p := origin + flat.normalized() * 0.5 * i
+		var c := NavigationServer3D.map_get_closest_point(map, p)
+		if Vector2(c.x - p.x, c.z - p.z).length() < 0.4 and absf(c.y - origin.y) < 2.5 and _nav_reaches(map, c, target):
+			return c
+	return origin
+
+
+func _nav_reaches(map: RID, from: Vector3, to: Vector3) -> bool:
+	var path := NavigationServer3D.map_get_path(map, from, to, true)
+	return path.size() > 0 and path[-1].distance_to(to) < 1.5
 
 
 func _cand_pos(c: Dictionary) -> Vector3:
@@ -486,6 +531,7 @@ func spawn_dog(untracked: bool) -> void:
 	await get_tree().create_timer(0.6, false).timeout
 	var d := Dog.new()
 	d.untracked = untracked
+	d.flame = Dog.roll_flame()   # "flame_dogSpawn" or "normal_dogSpawn"
 	d.setup_dog(at + Vector3.UP * 0.1, player, _dog_health if _dog_health > 0.0 else 300.0, level.windows[0])
 	d.killed.connect(_on_dog_killed)
 	add_child(d)

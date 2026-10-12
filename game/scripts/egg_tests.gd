@@ -191,11 +191,15 @@ static func monkey(at: Node, game: Game) -> void:
 	await _wait(at, 0.3)
 	var gb := GrenadeBelt.of(p)
 	gb.set_held(true)
-	await _wait(at, 0.2)
+	await _wait(at, 1.7)   # Throwingmonkeybomb: the arms wind the monkey, then throw it (viewmodel.gd)
 	await ExtraTests._snap(at, "monkey_hand")
 	gb.set_held(false)
-	await at.get_tree().physics_frame
-	var bombs := at.get_tree().get_nodes_in_group("monkey_bombs")
+	var bombs := []
+	for i in 40:
+		bombs = at.get_tree().get_nodes_in_group("monkey_bombs")
+		if not bombs.is_empty():
+			break
+		await _wait(at, 0.1)
 	_check(bombs.size() == 1 and belt.count == 2 and gb.count == frags, "G threw a monkey (monkeys %d, frags %d->%d)" % [belt.count, frags, gb.count])
 	if bombs.is_empty():
 		return

@@ -21,6 +21,7 @@ for l in nacht verruckt shinonuma derriese; do
   $PY -I tools/entities.py "$A/levels/$l/entities.json" $E/environment/environment.group.bin $D extracted/main/ingame/dynamics/dynamics.group.bin
   $PY -I tools/wall_yaw.py "$A/levels/$l/entities.json" $E/environment/environment.group.bin
   $PY -I tools/wall_yaw.py "$A/levels/$l/entities.json" $E/environment/environment.group.bin $D
+  $PY -I tools/navmesh.py "$A/levels/$l/navmesh.json" $E/environment/environment.group.bin
   lua tools/lua/dump_waves.lua "$A/lua/levels/$l/${l}_full.lua" 0 40 > "$A/levels/$l/waves.json"
   lua tools/lua/dump_level.lua "$A/lua/ingame/scripts" "$A/lua/levels/$l/$l.lua" > "$A/levels/$l/level.json"
 done

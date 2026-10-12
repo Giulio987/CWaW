@@ -60,6 +60,8 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_trap_test(game)
 	if args.has("--tele-test"):
 		_tele_test(game)
+	if args.has("--bridge-test") or args.has("--flytrap-test"):
+		DerrieseTests.start(self, game, args)   # derriese_tests.gd
 	if args.has("--pap-test"):
 		_pap_test(game)
 	var shots := args.find("--shots")
@@ -664,6 +666,11 @@ func _trap_test(game: Game) -> void:
 		check.call(target == tr or target is Debris, "%s is the interaction target (prompt '%s'%s)" % [tr.entity, tr.prompt(p), "" if target == tr else ", a door in front"])
 		tr.interact(p)
 		check.call(tr.state == Trap.State.ACTIVE and p.points == 10000 - tr.cost, "%s bought for %d" % [tr.entity, tr.cost])
+		# the switch animates first (ASM TurnOn + pull, 2.3 s): then the arcs come on
+		var t0 := Time.get_ticks_msec()
+		while not tr.armed and Time.get_ticks_msec() - t0 < 4000:
+			await get_tree().physics_frame
+		check.call(tr.armed and absf((Time.get_ticks_msec() - t0) / 1000.0 - (0.0 if tr.kind == "flogger" else 2.265)) < 0.3, "%s armed after %.2f s" % [tr.entity, (Time.get_ticks_msec() - t0) / 1000.0])
 		var at: Vector3 = tr.pivot + Vector3(1.5, 0, 0) if tr.kind == "flogger" else (tr.volumes[0] as AABB).get_center()
 		at.y = (tr.pivot.y - 0.5) if tr.kind == "flogger" else (tr.volumes[0] as AABB).position.y + 0.35
 		var z := Zombie.new()
@@ -690,6 +697,8 @@ func _trap_test(game: Game) -> void:
 		await _shot("trap_" + tr.entity)
 		tr._stop()
 		check.call(tr.state == Trap.State.COOLDOWN and tr.prompt(p) == "Trappola in ricarica", "%s cools down" % tr.entity)
+		var expect := (Trap.LEVER_BACK[1] + Trap.COOLDOWN + Trap.LEVER_TURN_OFF[1]) if tr.kind == "electric" else Trap.COOLDOWN + Trap.FLOGGER_TURN_OFF
+		check.call(absf(tr._timer - expect) < 0.05, "%s cooldown %.1f s (ASM: 30 s hold)" % [tr.entity, tr._timer])
 	print("[trap] %s (%d failures)" % ["OK" if fails[0] == 0 else "FAIL", fails[0]])
 	get_tree().quit()
 
@@ -777,7 +786,9 @@ func _pap_test(game: Game) -> void:
 	var p := game.player
 	p.health = 1e6
 	p.points = 20000
-	p.give_weapon("thompson")
+	var args := OS.get_cmdline_user_args()
+	var gun: String = args[args.find("--pap-weapon") + 1] if args.has("--pap-weapon") else "thompson"   # other guns: look only
+	p.give_weapon(gun)
 	check.call(pap != null, "Pack-a-Punch built")
 	p.global_position = pap._centre + Vector3.UP * 0.2
 	_face(p, pap.global_position + Vector3.UP * 1.2)
@@ -794,7 +805,7 @@ func _pap_test(game: Game) -> void:
 	var t = p._interaction_target()
 	check.call(t == pap, "PaP target: '%s'" % pap.prompt(p))
 	await _shot("pap_machine")
-	var base: float = Weapons.stats("thompson")["damage"]
+	var base: float = Weapons.stats(gun)["damage"]
 	pap.interact(p)
 	check.call(pap.state == PackAPunch.State.WORKING and p.points == 15000, "paid 5000")
 	await get_tree().create_timer(PackAPunch.WORK_TIME + 0.5).timeout
@@ -802,11 +813,11 @@ func _pap_test(game: Game) -> void:
 	pap.interact(p)
 	var w := p.weapon()
 	var s := Weapons.stats_of(w)
-	check.call(w.get("upgraded", false) and w["mag"] == 40 and s["damage"] > base, "%s: mag %d reserve %d damage %.0f (base %.0f)" % [Weapons.display_of(w), w["mag"], w["reserve"], s["damage"], base])
+	check.call(w.get("upgraded", false) and (gun != "thompson" or w["mag"] == 40) and s["damage"] > base, "%s: mag %d reserve %d damage %.0f (base %.0f)" % [Weapons.display_of(w), w["mag"], w["reserve"], s["damage"], base])
 	check.call(pap.prompt(p) == "Arma già potenziata", "no second upgrade: '%s'" % pap.prompt(p))
 	for i in 10:
 		await get_tree().process_frame
-	await _shot("pap_weapon")
+	await _shot("pap_weapon" if gun == "thompson" else "pap_weapon_" + gun)
 	print("[pap] %s (%d failures)" % ["OK" if fails[0] == 0 else "FAIL", fails[0]])
 	get_tree().quit()
 
@@ -818,6 +829,7 @@ func _dog_look(game: Game) -> void:
 	var p := game.player
 	var fwd := -p.global_basis.z
 	var d := Dog.new()
+	d.flame = OS.get_cmdline_user_args().has("--flame")   # --dog-look --flame: a flame dog, then its death burst
 	d.setup_dog(p.global_position + fwd * 3.0, p, 1e6, game.level.windows[0])
 	game.add_child(d)
 	await get_tree().physics_frame
@@ -836,4 +848,12 @@ func _dog_look(game: Game) -> void:
 	_face(p, d.global_position + Vector3.UP * 0.4)
 	await get_tree().create_timer(0.2).timeout
 	await _shot("dog_side")
+	if d.flame:
+		await get_tree().create_timer(0.8).timeout
+		await _shot("dog_flame_side")
+		d.nuke_kill()
+		await get_tree().create_timer(0.15).timeout
+		await _shot("dog_flame_burst")
+		await get_tree().create_timer(0.6).timeout
+		await _shot("dog_flame_burst2")
 	get_tree().quit()

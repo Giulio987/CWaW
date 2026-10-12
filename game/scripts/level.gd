@@ -8,6 +8,24 @@ signal navigation_ready
 signal power_changed(on: bool)
 
 const UNITS := 1.0 / 400.0
+# Floor rebuilt from the original navmesh (CIwNavMesh, tools/navmesh.py) where the
+# visible geometry has none: Shi No Numa spawns just past the shore and the plank
+# bridges to the balconies. Only zombies and dogs stand on it (and the navmesh bake).
+const NAV_FLOOR_LAYER := 64   # layer 7
+const NAV_FLOOR_LEVELS := ["shinonuma"]
+# Swamp water (Shi No Numa): flat planes at y = 0 with texture 72339cb6. In the original
+# the walking surface is the navmesh, which runs 0.3-1 m under the surface (flag 2 and
+# flag 0 triangles), so everybody wades: the planes are drawn but do not collide, the
+# original triangles under them become a world floor (layer 1: player, zombies, dogs,
+# grenades, bullets, navmesh bake). console.bin WaterMoveSpeedModifier = 2048/4096
+# (next to MaxWalkMoveSpeed & co, the player's movement settings): the player wades
+# at half speed.
+const WATER_TEXTURES := ["72339cb6"]
+const WATER_MOVE_SPEED := 0.5
+const WATER_CELL := 0.5
+var water_y := 0.0
+var _water_faces := PackedVector3Array()   # world-space triangles of the water planes
+var _water_cells := {}                     # Vector2i -> true, the planes' footprint
 
 var level_name := ""
 var entities := {}          # name -> entity dictionary from entities.json
@@ -23,6 +41,7 @@ var traps := []             # Trap nodes (CActionBuyTrapSpec)
 var interactables := []     # nodes with usable_from(pos) / prompt(player) / interact(player): traps, teleporters, Pack-a-Punch
 var teleporters: TeleporterNetwork   # Der Riese
 var pack_a_punch: PackAPunch         # Der Riese
+var zipline: Zipline                 # Shi No Numa
 var nav_region: NavigationRegion3D
 var nav_ready := false      # set once the first bake has finished
 var static_root: Node3D
@@ -74,6 +93,12 @@ func load_level(name: String) -> void:
 		teleporters.name = "Teleporters"
 		nav_region.add_child(teleporters)
 		teleporters.setup(self)
+	if has_entity("ZipLine") and has_entity("ZiplineDoctorSwitch"):
+		zipline = Zipline.new()
+		zipline.name = "Zipline"
+		add_child(zipline)   # outside the navmesh source: the car moves
+		zipline.setup(self)
+		interactables.append_array(zipline.interactables())
 	if has_entity("packapunch"):
 		pack_a_punch = PackAPunch.new()
 		pack_a_punch.name = "PackAPunch"
@@ -84,6 +109,9 @@ func load_level(name: String) -> void:
 
 
 func bake_navigation() -> void:
+	if not _nav_floor_done:
+		_nav_floor_done = true
+		_build_nav_floor()
 	if nav_region.is_baking():
 		# a bake is running: bake again once it finishes so the latest geometry is used
 		if not nav_region.bake_finished.is_connected(bake_navigation):
@@ -96,6 +124,157 @@ func bake_navigation() -> void:
 		nav_ready = true
 		navigation_ready.emit(), CONNECT_ONE_SHOT)
 	nav_region.bake_navigation_mesh(true)
+
+
+var _nav_floor_done := false
+
+
+func _is_water(mat: StandardMaterial3D) -> bool:
+	return level_name in NAV_FLOOR_LEVELS and mat != null \
+		and String(mat.get_meta("extras", {}).get("texture0", "")) in WATER_TEXTURES
+
+
+# the water planes' footprint on a 0.5 m grid
+func _build_water_cells() -> void:
+	for i in range(0, _water_faces.size() - 2, 3):
+		var a := Vector2(_water_faces[i].x, _water_faces[i].z)
+		var b := Vector2(_water_faces[i + 1].x, _water_faces[i + 1].z)
+		var c := Vector2(_water_faces[i + 2].x, _water_faces[i + 2].z)
+		water_y = _water_faces[i].y
+		var lo := (a.min(b).min(c) / WATER_CELL).floor()
+		var hi := (a.max(b).max(c) / WATER_CELL).ceil()
+		for x in range(int(lo.x), int(hi.x) + 1):
+			for z in range(int(lo.y), int(hi.y) + 1):
+				var pt := (Vector2(x, z) + Vector2(0.5, 0.5)) * WATER_CELL
+				if Geometry2D.point_is_inside_triangle(pt, a, b, c):
+					_water_cells[Vector2i(x, z)] = true
+
+
+# grid cells a triangle touches (centre inside, or a corner in the cell)
+static func _mark_cells(cells: Dictionary, a3: Vector3, b3: Vector3, c3: Vector3) -> void:
+	var a := Vector2(a3.x, a3.z)
+	var b := Vector2(b3.x, b3.z)
+	var c := Vector2(c3.x, c3.z)
+	for v in [a, b, c]:
+		cells[Vector2i(floori(v.x / WATER_CELL), floori(v.y / WATER_CELL))] = true
+	var lo := (a.min(b).min(c) / WATER_CELL).floor()
+	var hi := (a.max(b).max(c) / WATER_CELL).ceil()
+	for x in range(int(lo.x), int(hi.x) + 1):
+		for z in range(int(lo.y), int(hi.y) + 1):
+			if Geometry2D.point_is_inside_triangle((Vector2(x, z) + Vector2(0.5, 0.5)) * WATER_CELL, a, b, c):
+				cells[Vector2i(x, z)] = true
+
+
+func _water_cell(p: Vector3) -> Vector2i:
+	return Vector2i(floori(p.x / WATER_CELL), floori(p.z / WATER_CELL))
+
+
+# under the swamp water (the player wades at WATER_MOVE_SPEED)
+func in_water(p: Vector3) -> bool:
+	return not _water_cells.is_empty() and p.y < water_y - 0.05 and _water_cells.has(_water_cell(p))
+
+
+func _add_floor_body(name_: String, faces: PackedVector3Array, layer: int) -> void:
+	var shape := ConcavePolygonShape3D.new()
+	shape.backface_collision = true
+	shape.set_faces(faces)
+	var body := StaticBody3D.new()
+	body.name = name_
+	body.collision_layer = layer
+	body.collision_mask = 0
+	var cs := CollisionShape3D.new()
+	cs.shape = shape
+	body.add_child(cs)
+	nav_region.add_child(body)
+
+
+# Original navmesh triangles (split to <= 1.5 m) where the world has no surface within
+# 0.3 m of the original height (plank bridges and stairs drawn with blended materials,
+# which get no collision, ground past the edge of the visible terrain) become a
+# zombie-only floor 5 cm below the original height. Flags: 4 stairs and ramps, always
+# kept and lifted 15 cm (a smooth ramp over steps too tall for the bake), 2 under the
+# swamp water. Triangles under the water planes become the swamp bed instead (layer 1).
+# Needs the world colliders in the physics space (called on the first bake).
+func _build_nav_floor() -> void:
+	if not level_name in NAV_FLOOR_LEVELS:
+		return
+	var path := "res://assets/levels/%s/navmesh.json" % level_name
+	if not FileAccess.file_exists(path):
+		return
+	_build_water_cells()
+	var zombie_floor := not OS.get_cmdline_user_args().has("--no-nav-floor")
+	var tris: Array = JSON.parse_string(FileAccess.get_file_as_string(path))["tris"]
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.new()
+	q.collision_mask = 1
+	var faces := PackedVector3Array()
+	var bed := PackedVector3Array()
+	var bed_cells := {}
+	var stack: Array = []
+	for t in tris:
+		stack.append([Vector3(t[0], t[1], t[2]), Vector3(t[3], t[4], t[5]), Vector3(t[6], t[7], t[8]), int(t[9]) == 4, int(t[9]) == 2])
+	while not stack.is_empty():
+		var tri: Array = stack.pop_back()
+		var a: Vector3 = tri[0]
+		var b: Vector3 = tri[1]
+		var c: Vector3 = tri[2]
+		var ab := a.distance_to(b)
+		var bc := b.distance_to(c)
+		var ca := c.distance_to(a)
+		var longest := maxf(ab, maxf(bc, ca))
+		if longest > 1.5:
+			# split the longest edge
+			if longest == ab:
+				var m := (a + b) * 0.5
+				stack.append([a, m, c, tri[3], tri[4]]); stack.append([m, b, c, tri[3], tri[4]])
+			elif longest == bc:
+				var m := (b + c) * 0.5
+				stack.append([a, b, m, tri[3], tri[4]]); stack.append([a, m, c, tri[3], tri[4]])
+			else:
+				var m := (c + a) * 0.5
+				stack.append([a, b, m, tri[3], tri[4]]); stack.append([m, b, c, tri[3], tri[4]])
+			continue
+		var p := (a + b + c) / 3.0
+		if in_water(p):
+			# swamp bed: everybody's floor
+			for v in [a, b, c]:
+				bed.append(v)
+			_mark_cells(bed_cells, a, b, c)
+			continue
+		if tri[4] or not zombie_floor:
+			continue   # flag 2 outside the water footprint
+		q.from = p + Vector3.UP * 0.3
+		q.to = p - Vector3.UP * 0.3
+		if not tri[3] and not space.intersect_ray(q).is_empty():
+			continue
+		# stairs: the original ramp cuts the step nosings, lift it clear of them
+		for v in [a, b, c]:
+			faces.append(v + Vector3.UP * (0.15 if tri[3] else -0.05))
+	# water the original navmesh does not reach (behind fences, under huts): a floor at
+	# the usual wading depth where the world has nothing below either, so nobody falls
+	var holes := PackedVector3Array()
+	var deep := water_y - 0.6
+	for cell: Vector2i in _water_cells:
+		if bed_cells.has(cell):
+			continue
+		var c0 := Vector3(cell.x, 0, cell.y) * WATER_CELL
+		q.from = c0 + Vector3(WATER_CELL * 0.5, water_y + 0.5, WATER_CELL * 0.5)
+		q.to = q.from + Vector3.DOWN * 3.0
+		if not space.intersect_ray(q).is_empty():
+			continue
+		var c1 := c0 + Vector3(WATER_CELL, 0, 0)
+		var c2 := c0 + Vector3(WATER_CELL, 0, WATER_CELL)
+		var c3 := c0 + Vector3(0, 0, WATER_CELL)
+		for v in [c0, c1, c2, c0, c2, c3]:
+			holes.append(Vector3(v.x, deep, v.z))
+	if not bed.is_empty() or not holes.is_empty():
+		bed.append_array(holes)
+		_add_floor_body("SwampBed", bed, 1)
+		print("[level] swamp bed: %d triangles from the original navmesh, %d filler cells" % [(bed.size() - holes.size()) / 3, holes.size() / 6])
+	if faces.is_empty():
+		return
+	_add_floor_body("NavFloor", faces, NAV_FLOOR_LAYER)
+	print("[level] nav floor: %d triangles from the original navmesh" % (faces.size() / 3))
 
 
 # Await the first navmesh bake; returns at once if it already finished (a test that
@@ -315,7 +494,11 @@ func _prepare_meshes(root: Node) -> void:
 					# alpha-blended decals (bushes, fences, mist) stay lit like the walls around them
 			if effect and OS.get_cmdline_user_args().has("--hide-fx"):
 				mi.set_surface_override_material(s, _hidden_material())
-			if not effect:
+			if not effect and _is_water(mat):
+				var xf := mi.global_transform
+				for v in _surface_faces(mi.mesh, s):
+					_water_faces.append(xf * v)
+			elif not effect:
 				faces.append_array(_surface_faces(mi.mesh, s))
 			else:
 				_maybe_light_cone(mi, s)

@@ -59,7 +59,7 @@ func set_weapon(name: String) -> void:
 	_weapon = (load(DIR + model + ".glb") as PackedScene).instantiate()
 	_attach.add_child(_weapon)
 	_no_shadows(_weapon)
-	_weapon.visible = not drinking
+	_weapon.visible = not drinking and _item == null
 	var wap := _weapon.find_children("*", "AnimationPlayer")
 	_weapon_anim = wap[0] if wap.size() > 0 else null
 	_anims = info.get("anims", {}).duplicate(true)
@@ -71,7 +71,7 @@ func set_weapon(name: String) -> void:
 		for act in d:
 			var own: String = _anims[act][0] if _anims.has(act) else ""
 			_anims[act] = [own, d[act][1]]
-	if not drinking:
+	if not drinking and _item == null:
 		_play("idle", true)
 
 
@@ -81,7 +81,7 @@ func _no_shadows(n: Node) -> void:
 
 
 func _play(action: String, loop := false) -> float:
-	if drinking:
+	if drinking or _item != null:
 		return 0.0
 	# The idle arms poses were paired by timing alone and some are wrong (FG42, PPSh):
 	# hold the first frame of the shoot animation instead, which always starts in the grip pose.
@@ -117,7 +117,7 @@ func _hold_first_frame(action: String) -> void:
 
 
 func _back_to_idle(action: String) -> void:
-	if drinking:
+	if drinking or _item != null:
 		return
 	if not _arms_anim.is_playing() or _arms_anim.current_animation == "" or _arms_anim.current_animation == _anims.get(action, ["", ""])[1]:
 		_play("idle", true)
@@ -140,7 +140,7 @@ var _knife_set := false
 
 
 func melee() -> void:
-	if _slash >= 0.0 or drinking:
+	if _slash >= 0.0 or drinking or _item != null:
 		return
 	if _knife == null:
 		_hand = BoneAttachment3D.new()
@@ -218,6 +218,7 @@ func drink() -> float:
 		_no_shadows(_bottle)
 		var aps := _bottle.find_children("*", "AnimationPlayer")
 		_bottle_anim = aps[0] if aps.size() > 0 else null
+	_clear_item()
 	_slash = -1.0
 	if _skel:
 		_skel.set_bone_pose_scale(HIDE_BONE, Vector3.ONE)
@@ -285,3 +286,106 @@ func _process(delta: float) -> void:
 	transform = base
 	if _slash >= 0.0 and not _knife_set:
 		_orient_knife()
+
+
+# Grenades and monkey bombs, from the arms state machine "base_arms" (CIsAnimStateMachine
+# in the player group, state names recovered from their hashes):
+#   Priminggrenade      arms fdec0a8f (0.17 s), primeGrenade call; the pose is held while
+#                       the button is down (the grenade is cooking)
+#   Throwinggrenade     arms fe14380f (0.21 s), throwGrenade call at 99 ms; at 0.17 s the
+#                       tag bone jumps away (the grenade has left the hand)
+#   Throwingmonkeybomb  arms 5b46984c + monkey bb6812ab ("monkeybomb_throw", 3.4 s): the
+#                       monkey is brought up, wound (the key turns), then thrown at the end
+# then the state machine switches back to the gun. The item hangs from the weapon tag
+# bone like a weapon (grenade1 c53574cc is a static model, the monkey has its skeleton).
+const GRENADE_PRIME := "fdec0a8f"
+const GRENADE_THROW := "fe14380f"
+const GRENADE_RELEASE := 0.099      # throwGrenade at 99 ms
+const MONKEY_ARMS := "5b46984c"
+const MONKEY_ANIM := "bb6812ab"     # monkeybomb_throw
+const MONKEY_RELEASE := 3.3         # hand at the end of the forward swing
+var _item: Node3D
+var _item_id := 0
+
+
+func throwing() -> bool:
+	return _item != null
+
+
+# where the thrown item leaves the hand (world space), null without an item in hand
+func item_position() -> Variant:
+	return _item.global_position if _item and _item.is_inside_tree() else null
+
+
+# Shows `item` in hand and plays the arms animation (held on its last frame).
+func hold_item(item: Node3D, arms_anim: String, item_anim := "") -> float:
+	_clear_item()
+	_slash = -1.0
+	if _skel:
+		_skel.set_bone_pose_scale(HIDE_BONE, Vector3.ONE)
+	if _knife:
+		_knife.visible = false
+	if _weapon:
+		_weapon.visible = false
+	_item = item
+	_attach.add_child(item)
+	_no_shadows(item)
+	_item_id += 1
+	var length := _play_raw(_arms_anim, arms_anim)
+	if item_anim != "":
+		var aps := item.find_children("*", "AnimationPlayer", true, false)
+		if not aps.is_empty():
+			length = maxf(length, _play_raw(aps[0], item_anim))
+	return length
+
+
+# Plays the throw (or lets the held animation run when arms_anim is ""); the item is
+# removed after `release` s, the weapon comes back at the end of the animation.
+func throw_item(arms_anim: String, release: float) -> float:
+	if _item == null:
+		return 0.0
+	var length := 0.0
+	if arms_anim != "":
+		length = _play_raw(_arms_anim, arms_anim, 0.05)
+	elif _arms_anim.is_playing():
+		length = _arms_anim.current_animation_length - _arms_anim.current_animation_position
+	var id := _item_id
+	get_tree().create_timer(release, false).timeout.connect(func():
+		if id == _item_id and _item:
+			_item.visible = false)
+	get_tree().create_timer(maxf(length, release), false).timeout.connect(func():
+		if id == _item_id:
+			end_item())
+	return length
+
+
+# Back to the weapon (also when the grenade went off in hand or the player died).
+func end_item() -> void:
+	if _item == null:
+		return
+	_clear_item()
+	if drinking:
+		return
+	if _weapon:
+		_weapon.visible = true
+	_kick = -0.6  # weapon comes up from below
+	_play("idle", true)
+
+
+func _clear_item() -> void:
+	_item_id += 1
+	if _item:
+		_item.queue_free()
+		_item = null
+
+
+# blend: from the held pose (the original has no clip linking primed pose and throw)
+func _play_raw(ap: AnimationPlayer, anim: String, blend := 0.0) -> float:
+	if ap == null or not ap.has_animation(anim):
+		return 0.0
+	var a := ap.get_animation(anim)
+	a.loop_mode = Animation.LOOP_NONE
+	if blend <= 0.0:
+		ap.stop()
+	ap.play(anim, blend)
+	return a.length

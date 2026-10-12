@@ -5,6 +5,15 @@
 # and dog that walks into it and hurting the player; then it cools down. On maps
 # with a generator the traps get "genTurnOn" from TurnOnGenerator: power first.
 #
+# Timing from the switch's CIsAnimStateMachine (2b8efeb7, the same for every
+# electric trap of the three maps; the flogger's b373d4cb has the same 30 s state):
+#   off (d7a98b8c) -genTurnOn-> READY (1ac5406a) -goodieInteract-> TurnOn 11f334e0 0.966 s
+#   -> 726310c1 1.299 s, Lua "zapperStart" (the 30 s Lua timer starts)
+#   -> 9768b2de loop, Lua "zapperOn" (arcs on) -zapperEnd-> 5059d03e 1.033 s
+#   -> 8d5f0abc held for 30000 ms (the cooldown) -> TurnOff 09888375 0.966 s,
+#   plays f629ac13, Lua "zapperOff" -> READY.
+# The CActionBuyTrapSpec itself only stores the cost.
+#
 # Kill volume: the trap's "<trap>Effect<n>" sub-entities mark the electric arcs
 # (Der Riese, Shi No Numa); Verrückt has none, so its two fences are found among
 # the entity's collider boxes + child offsets by checking which placement fits a
@@ -12,13 +21,22 @@
 class_name Trap
 extends Node3D
 
-const ACTIVE_TIME := 30.0     # Lua: Timeout(30000, "<trap>End")
-const COOLDOWN := 40.0
+const ACTIVE_TIME := 30.0     # Lua: Timeout(30000, "<trap>End"), from "zapperStart"
+const COOLDOWN := 30.0        # ASM state 8e02e6be: 30000 ms
 const USE_RANGE := 1.9
 const PLAYER_DAMAGE := 40.0   # per second spent in the trap
 const LEVER_MODEL := "c110c7c0"
-const LEVER_PULL := "223b149d"
-const LEVER_RESET := "726310c1"
+# switch animations and state times of ASM 2b8efeb7 (see above)
+const LEVER_OFF := "d7a98b8c"
+const LEVER_READY := "1ac5406a"
+const LEVER_TURN_ON := ["11f334e0", 0.966]
+const LEVER_PULL := ["726310c1", 1.299]   # "zapperStart"
+const LEVER_ACTIVE := "9768b2de"          # "zapperOn", loops while the trap runs
+const LEVER_BACK := ["5059d03e", 1.033]   # after "zapperEnd"
+const LEVER_COOL := "8d5f0abc"            # held for COOLDOWN
+const LEVER_TURN_OFF := ["09888375", 0.966]   # plays TRAP_READY_SOUND, "zapperOff"
+const TRAP_READY_SOUND := "f629ac13"
+const FLOGGER_TURN_OFF := 0.833           # flogger ASM b373d4cb TurnOff state
 const FLOGGER_MODEL := "b373d4cb"
 const FLOGGER_RADIUS := 3.4
 
@@ -34,6 +52,9 @@ var arcs := []                # [from, to] pairs of arc end points (electric)
 var use_point := Vector3.ZERO
 var pivot := Vector3.ZERO     # flogger centre
 var _timer := 0.0
+var armed := false             # killing (electric: from "zapperOn", 2.3 s after buying)
+var _arm_at := 0.0
+var _turned_off := false
 var _hurt_cd := 0.0
 var _lever: AnimationPlayer
 var _flogger: Node3D
@@ -100,11 +121,23 @@ func _place_lever(_e: Dictionary) -> void:
 	if aps.is_empty():
 		return
 	_lever = aps[0]
-	var rest := _closest_pose(_lever, LEVER_PULL)
-	if rest != "":
-		_lever.play(rest)
+	if _lever.has_animation(LEVER_ACTIVE):
+		_lever.get_animation(LEVER_ACTIVE).loop_mode = Animation.LOOP_LINEAR
+	_lever_pose(LEVER_READY if level.power_on else LEVER_OFF)
+	# ASM "off" -genTurnOn-> "READY"
+	level.power_changed.connect(func(on: bool): if on and state == State.IDLE: _lever_pose(LEVER_READY))
+
+
+func _lever_pose(a: String) -> void:
+	if _lever and _lever.has_animation(a):
+		_lever.play(a)
 		_lever.seek(0.0, true)
 		_lever.pause()
+
+
+func _lever_play(a: String) -> void:
+	if _lever and _lever.has_animation(a):
+		_lever.play(a)
 
 
 # the single-key pose that matches the first frame of a motion (see Debris)
@@ -254,9 +287,23 @@ func interact(player: Player) -> void:
 
 func activate() -> void:
 	state = State.ACTIVE
-	_timer = ACTIVE_TIME
-	if _lever and _lever.has_animation(LEVER_PULL):
-		_lever.play(LEVER_PULL)
+	armed = kind != "electric"
+	if kind == "electric":
+		# TurnOn, then the pull ("zapperStart": the 30 s start), then "zapperOn"
+		_timer = LEVER_TURN_ON[1] + ACTIVE_TIME
+		_arm_at = ACTIVE_TIME - LEVER_PULL[1]
+		_lever_play(LEVER_TURN_ON[0])
+		if _lever and _lever.has_animation(LEVER_PULL[0]):
+			_lever.queue(LEVER_PULL[0])
+		if _lever and _lever.has_animation(LEVER_ACTIVE):
+			_lever.queue(LEVER_ACTIVE)
+	else:
+		_timer = ACTIVE_TIME
+
+
+# the arcs come on ("zapperOn"): from now on the trap kills
+func _arm() -> void:
+	armed = true
 	if kind == "electric":
 		_start_fx()
 
@@ -294,17 +341,33 @@ func _start_fx() -> void:
 			_loop.play()
 
 
+# "zapperEnd": arcs off, the switch goes back and holds for the 30 s cooldown
 func _stop() -> void:
 	state = State.COOLDOWN
-	_timer = COOLDOWN
+	armed = false
+	if kind == "electric":
+		_timer = LEVER_BACK[1] + COOLDOWN + LEVER_TURN_OFF[1]
+		_lever_play(LEVER_BACK[0])
+		if _lever and _lever.has_animation(LEVER_COOL):
+			_lever.queue(LEVER_COOL)
+	else:
+		_timer = COOLDOWN + FLOGGER_TURN_OFF
+	_turned_off = false
 	if _fx:
 		_fx.queue_free()
 		_fx = null
 		_lights.clear()
-	if kind == "electric" and not volumes.is_empty():
-		Sfx.instance.play_at(Sfx.iw_hash("trapend"), (volumes[0] as AABB).get_center())
-	if _lever and _lever.has_animation(LEVER_RESET):
-		_lever.play(LEVER_RESET)
+
+
+# ASM TurnOff, at the end of the cooldown: switch animation and its sound
+func _turn_off() -> void:
+	_turned_off = true
+	if kind != "electric":
+		return
+	_lever_play(LEVER_TURN_OFF[0])
+	if _lever and _lever.has_animation(LEVER_READY):
+		_lever.queue(LEVER_READY)
+	Sfx.instance.play_at(TRAP_READY_SOUND, use_point + Vector3.UP)
 
 
 func _physics_process(delta: float) -> void:
@@ -312,11 +375,17 @@ func _physics_process(delta: float) -> void:
 		return
 	_timer -= delta
 	if state == State.COOLDOWN:
+		if not _turned_off and _timer <= (LEVER_TURN_OFF[1] if kind == "electric" else FLOGGER_TURN_OFF):
+			_turn_off()
 		if _timer <= 0.0:
 			state = State.IDLE
 		return
 	if _timer <= 0.0:
 		_stop()
+		return
+	if not armed:
+		if _timer <= _arm_at:
+			_arm()
 		return
 	if _flogger:
 		_flogger.rotate_y(delta * 2.6)

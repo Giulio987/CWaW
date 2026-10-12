@@ -178,19 +178,46 @@ func _process(delta: float) -> void:
 		_refresh()
 
 
+# Upgraded look, from the player group: every first-person weapon model's own
+# materials are two-texture ones (flags 0x2d: the gun texture, then the "packapunch"
+# camo texture 91f20da3 on the model's second UV set, combined as BLEND_MODULATE_2X).
+# A normal CItemGun overrides them with its CIsMaterialSets (single-texture materials),
+# a "<weapon>_upgrade" CItemGun has none, so the upgraded gun shows the camo.
+const CAMO := "res://assets/textures/ingame/player/91f20da3.png"   # iw_hash("packapunch")
 static var _shine: StandardMaterial3D
 
 
-# Upgraded guns look different: the original swaps the texture; here an animated
-# blue-purple sheen over the weapon meshes of the first-person view.
 static func decorate(vm: Node) -> void:
+	var wpn = vm.get("_weapon")
+	if not wpn is Node:
+		return
+	var camo := load(CAMO) as Texture2D
+	var found := false
+	for mi: MeshInstance3D in (wpn as Node).find_children("*", "MeshInstance3D", true, false):
+		for s in mi.mesh.get_surface_count():
+			var mat := mi.get_active_material(s) as StandardMaterial3D
+			if mat == null or camo == null:
+				continue
+			var lm := str(mat.get_meta("extras", {}).get("lightmap", ""))
+			if not lm.ends_with(CAMO.get_file()):
+				continue
+			var m := mat.duplicate() as StandardMaterial3D
+			m.detail_enabled = true
+			m.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+			m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_2
+			m.detail_albedo = camo
+			m.detail_mask = null
+			m.albedo_color = Color(2.0, 2.0, 2.0)   # modulate x2
+			mi.set_surface_override_material(s, m)
+			found = true
+	if found:
+		return
+	# no camo material (should not happen): a blue-purple sheen instead
 	if _shine == null:
 		_shine = StandardMaterial3D.new()
 		_shine.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		_shine.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		_shine.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		_shine.albedo_color = Color(0.25, 0.12, 0.45, 0.35)
-	var wpn = vm.get("_weapon")
-	if wpn is Node:
-		for mi in (wpn as Node).find_children("*", "MeshInstance3D", true, false):
-			(mi as MeshInstance3D).material_overlay = _shine
+	for mi in (wpn as Node).find_children("*", "MeshInstance3D", true, false):
+		(mi as MeshInstance3D).material_overlay = _shine

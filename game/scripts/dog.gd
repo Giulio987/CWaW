@@ -7,6 +7,12 @@
 # (game/tools/dogsheet.gd):
 #   run 0b0e1cce / 6d4c918e (gallop loops), bite fe591198, leap 69acb481,
 #   deaths 773dd671 8c7140e3 8c7140e4 41af9c33 7811ea46, idle 90866617.
+# Flame dogs (ingame.lua SpawnDog: RandomNumber(1, 100, RAND_DOG_TYPE) < 50 spawns
+# "flame_dogSpawn" instead of "normal_dogSpawn"): the flame_dog entity of the dogs
+# group adds a "dog_fire" CRenderableEffectEmitterSpec (material 175d4fc7) attached to
+# the spine bone ba089bde, and a CDeathActionSpawnSpec that spawns effects entity
+# 509bce00 when it dies: fireball (bce537be), embers (623a30c5) and smoke (34c2dd63)
+# emitters. That entity has no CSplashEffectSpec, so the burst does not hurt anyone.
 class_name Dog
 extends Zombie
 
@@ -20,7 +26,13 @@ const DOG_RANGE := 1.35      # bite reach (m)
 const DOG_DAMAGE := 35.0     # three bites down a player without Juggernog
 const DOG_BITE_TIME := 0.9
 
+const FLAME_BONE := "ba089bde"
+const FLAME_TEX := "175d4fc7"
+
 var untracked := false       # teleporter dogs (Der Riese): not part of a dog round
+var flame := false           # flame_dog (set before adding it to the tree)
+var _fire: CPUParticles3D
+var _fire_light: OmniLight3D
 var _d_agent: NavigationAgent3D
 var _d_anim: AnimationPlayer
 var _d_model: Node3D
@@ -42,7 +54,7 @@ func setup_dog(spawn: Vector3, player: Player, hp: float, any_window: Barricade)
 func _ready() -> void:
 	add_to_group("zombies")
 	collision_layer = 2
-	collision_mask = 1 | 4
+	collision_mask = 1 | 4 | Level.NAV_FLOOR_LAYER
 	floor_snap_length = 0.5
 	floor_max_angle = deg_to_rad(50)
 	var shape := CollisionShape3D.new()
@@ -69,6 +81,47 @@ func _ready() -> void:
 	_d_anim.speed_scale = 1.15
 	if target:
 		_d_agent.target_position = target.global_position
+	if flame:
+		_add_fire()
+
+
+# ingame.lua SpawnDog: a dog is a flame dog when RandomNumber(1, 100) < 50
+static func roll_flame() -> bool:
+	return randi_range(1, 100) < 50
+
+
+# "dog_fire" emitter on the spine: 25-60 flames living 0.75-1.75 s, 0.25-0.6 m,
+# drifting up (emitter values 100-250 units, velocity -50..50 / 10..60, accel up 1000-2250)
+func _add_fire() -> void:
+	var holder: Node3D = self
+	var sk := _d_model.find_children("*", "Skeleton3D", true, false)
+	if not sk.is_empty():
+		var skel := sk[0] as Skeleton3D
+		for i in skel.get_bone_count():
+			if skel.get_bone_name(i).ends_with(FLAME_BONE):   # exported as "bone13_ba089bde"
+				var att := BoneAttachment3D.new()
+				att.bone_name = skel.get_bone_name(i)
+				skel.add_child(att)
+				holder = att
+				break
+	_fire = WeaponFx.particles(FLAME_TEX, {"amount": 40, "lifetime": 1.0, "size": 0.42, "grow": 0.6,
+		"speed": 0.15, "dir": Vector3.UP, "spread": 60.0, "gravity": Vector3(0, 4.0, 0), "one_shot": false,
+		"box": Vector3(0.45, 0.15, 0.18), "local": false, "color": Color(1, 1, 1, 0.9), "fade_in": 0.15})
+	holder.add_child(_fire)
+	if holder != self:
+		_fire.position = Vector3(-0.3, 0, 0)   # the bone's +x runs to the neck: cover the back too
+	_fire.emitting = true
+	_fire_light = OmniLight3D.new()
+	_fire_light.light_color = Color(1.0, 0.5, 0.15)
+	_fire_light.light_energy = 1.2
+	_fire_light.omni_range = 3.0
+	_fire_light.position = Vector3.UP * 0.7
+	add_child(_fire_light)
+
+
+func _process(_delta: float) -> void:
+	if _fire_light and state != State.DEAD:
+		_fire_light.light_energy = 0.9 + randf() * 0.6
 
 
 func _d_play(a: String, blend := 0.15) -> void:
@@ -169,13 +222,25 @@ func _dog_die(headshot: bool, knife: bool) -> void:
 	Sfx.instance.play_at(["dog_death1", "dog_death2"].pick_random(), global_position + Vector3.UP * 0.5)
 	_d_anim.speed_scale = 1.0
 	_d_anim.play(DOG_DEATHS.pick_random(), 0.1)
-	# the original dogs burst into flames as they die: a short orange flash
-	var l := OmniLight3D.new()
-	l.light_color = Color(1.0, 0.5, 0.15)
-	l.light_energy = 3.0
-	l.omni_range = 4.0
-	l.position = Vector3.UP * 0.5
-	add_child(l)
-	create_tween().tween_property(l, "light_energy", 0.0, 0.8)
+	if flame:
+		_flame_burst()
 	killed.emit(self, headshot, knife)
 	get_tree().create_timer(4.0, false).timeout.connect(queue_free)
+
+
+# flame_dog CDeathActionSpawnSpec -> effects entity 509bce00: fireball, embers, smoke
+func _flame_burst() -> void:
+	var at := global_position + Vector3.UP * 0.5
+	var parent := get_parent()
+	if _fire:
+		_fire.emitting = false
+	if _fire_light:
+		_fire_light.queue_free()
+		_fire_light = null
+	WeaponFx.pop(parent, at, "bce537be", 1.0, 2.2, 0.45)
+	WeaponFx.burst(parent, at, "623a30c5", {"amount": 40, "lifetime": 0.5, "size": 0.35, "grow": 0.5,
+		"speed": 3.75, "spread": 180.0, "gravity": Vector3(0, -3.0, 0), "damping": 2.0})
+	WeaponFx.burst(parent, at, "34c2dd63", {"amount": 12, "lifetime": 2.5, "size": 0.6, "grow": 2.5,
+		"speed": 0.6, "spread": 180.0, "gravity": Vector3(0, 0.5, 0), "additive": false,
+		"color": Color(0.55, 0.52, 0.5, 0.6), "sphere": 0.3})
+	WeaponFx.flash(parent, at, Color(1.0, 0.55, 0.2), 4.0, 5.0, 0.8)

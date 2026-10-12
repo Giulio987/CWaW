@@ -22,6 +22,8 @@ static func run(at: Node) -> void:
 			await _buy(at, game)
 		"fx":
 			await _fx(at, game)
+		"throwanim":
+			await _throw_anim(at, game)
 	at.get_tree().quit()
 
 
@@ -295,3 +297,44 @@ static func _fx(at: Node, game: Game) -> void:
 	await _wait(at, 0.15)
 	await _snap(at, "fx_ray_1")
 
+
+
+# First-person frames of the grenade / monkey throw animations (viewmodel.gd), slowed
+# down: analysis/preview/wfx_throw_*.png. "--weapon-test throwanim [monkey]"
+static func _throw_anim(at: Node, game: Game) -> void:
+	var p := game.player
+	var belt := GrenadeBelt.of(p)
+	var vm: Viewmodel = p.get("_viewmodel")
+	p.get_viewport().get_camera_3d().rotation.x = 0.0
+	var monkey := OS.get_cmdline_user_args().has("monkey")
+	var slow := 0.05
+	var marks: Array
+	if monkey:
+		MonkeyBelt.give(p)
+		marks = [0.05, 0.6, 1.2, 1.7, 2.4, 2.9, 3.1, 3.25, 3.35, 3.6]
+	else:
+		belt.set_count(2)
+		marks = [0.03, 0.09, 0.17, 0.6, 0.64, 0.68, 0.72, 0.76, 0.85, 1.2]
+	await _wait(at, 0.3)
+	Engine.time_scale = slow
+	var gt := 0.0
+	belt.set_held(true)
+	var released := monkey
+	for m in marks:
+		if not released and m >= 0.6:
+			while gt < 0.58:
+				await at.get_tree().process_frame
+				gt += at.get_process_delta_time()
+			belt.set_held(false)
+			released = true
+		while gt < m:
+			await at.get_tree().process_frame
+			gt += at.get_process_delta_time()
+		Engine.time_scale = 0.0
+		await _snap(at, "throw_%s_%03d" % ["monkey" if monkey else "frag", int(m * 100)])
+		print("[wfx] t=%.2f throwing=%s weapon visible=%s" % [m, vm.throwing(), vm._weapon.visible if vm._weapon else null])
+		Engine.time_scale = slow
+	Engine.time_scale = 1.0
+	await _wait(at, 4.0)
+	var weapon_back: bool = not vm.throwing() and (vm._weapon == null or vm._weapon.visible)
+	print("[wfx] throw anim: weapon back %s" % ("OK" if weapon_back else "FAIL"))
