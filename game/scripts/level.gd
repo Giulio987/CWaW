@@ -384,6 +384,7 @@ var _lod_groups := []      # [{sectors: {hash: lod}, nodes: [Node3D per lod]}]
 var _no_collision := {}    # MeshInstance3D -> true for variants that must not collide
 var _lod_timer := 0.0
 var _current_sector := ""
+static var ORIG_LODS := OS.get_cmdline_user_args().has("--orig-lods")
 # Sky dome (Der Riese, Shi No Numa): a 6 m dome at the origin (entity 1bf48c85) the
 # original draws around the camera. No collision, scaled up and kept on the camera.
 const SKY_ENTITY := "ent_1bf48c85"
@@ -425,7 +426,7 @@ func _setup_lods(base: String) -> void:
 			if node != null and node != best:
 				for mi in node.find_children("*", "MeshInstance3D", true, false) + ([node] if node is MeshInstance3D else []):
 					_no_collision[mi] = true
-		_lod_groups.append({"sectors": lod["sectors"], "nodes": nodes})
+		_lod_groups.append({"sectors": lod["sectors"], "nodes": nodes, "best": nodes.find(best)})
 	_update_lods(Vector3(INF, INF, INF))
 
 
@@ -478,7 +479,11 @@ func _update_lods(at: Vector3) -> void:
 		for grp in _lod_groups:
 			print("[lod]   show %d of %s" % [int(grp["sectors"].get(sector, 0)), grp["nodes"].map(func(nd): return "-" if nd == null else String(nd.name))])
 	for grp in _lod_groups:
-		var lod := int(grp["sectors"].get(sector, 0))
+		# The variants of the original are cut to what an armv6 phone could draw from each
+		# sector, and they leave holes near sector borders (Verrückt's stair landing sees
+		# the upper floor cut away). The most detailed one is always shown, unless
+		# --orig-lods asks for the original switching.
+		var lod: int = int(grp["sectors"].get(sector, 0)) if ORIG_LODS else grp["best"]
 		for i in grp["nodes"].size():
 			var node: Node3D = grp["nodes"][i]
 			if node:
@@ -499,6 +504,7 @@ func _prepare_meshes(root: Node) -> void:
 					mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	for mi in root.find_children("*", "MeshInstance3D", true, false):
 		var faces := PackedVector3Array()
+		var see_through := PackedVector3Array()   # upright cut-out surfaces (window grids, fences)
 		for s in mi.mesh.get_surface_count():
 			var mat := mi.mesh.surface_get_material(s) as StandardMaterial3D
 			var effect := false
@@ -523,9 +529,27 @@ func _prepare_meshes(root: Node) -> void:
 				var xf: Transform3D = mi.global_transform
 				for v in _surface_faces(mi.mesh, s):
 					_water_faces.append(xf * v)
+			elif not effect and mat != null and mat.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR:
+				# the holes of window grids and fences let bullets through: their upright
+				# faces only block bodies (layer 4, like the window blockers); flat ones
+				# stay solid so grenades do not fall through grated floors
+				var fs := _surface_faces(mi.mesh, s)
+				for k in range(0, fs.size() - 2, 3):
+					var nrm := (fs[k + 1] - fs[k]).cross(fs[k + 2] - fs[k]).normalized()
+					var dst := see_through if absf((mi.global_basis * nrm).normalized().y) < 0.5 else faces
+					dst.append(fs[k])
+					dst.append(fs[k + 1])
+					dst.append(fs[k + 2])
 			elif not effect:
 				faces.append_array(_surface_faces(mi.mesh, s))
 			else:
+				if OS.get_cmdline_user_args().has("--debug-fx"):
+					var vs := _surface_faces(mi.mesh, s)
+					if not vs.is_empty():
+						var box := AABB(mi.global_transform * vs[0], Vector3.ZERO)
+						for v in vs:
+							box = box.expand(mi.global_transform * v)
+						print("[fx] %s/%d blend %s tex %s centre %s size %s tris %d" % [mi.name, s, mat.get_meta("extras", {}).get("blend", ""), mat.get_meta("extras", {}).get("texture0", ""), box.get_center().snapped(Vector3(0.01, 0.01, 0.01)), box.size.snapped(Vector3(0.01, 0.01, 0.01)), vs.size() / 3])
 				_maybe_light_cone(mi, s)
 		# collision from the solid surfaces only (a floor with a blood decal must stay solid)
 		if not faces.is_empty() and not _no_collision.has(mi):
@@ -537,6 +561,22 @@ func _prepare_meshes(root: Node) -> void:
 			cs.shape = shape
 			body.add_child(cs)
 			mi.add_child(body)
+		if not see_through.is_empty() and not _no_collision.has(mi):
+			var shape := ConcavePolygonShape3D.new()
+			shape.set_faces(see_through)
+			shape.backface_collision = true
+			var body := StaticBody3D.new()
+			body.name = "SeeThrough"
+			body.collision_layer = 4
+			body.collision_mask = 0
+			var cs := CollisionShape3D.new()
+			cs.shape = shape
+			body.add_child(cs)
+			mi.add_child(body)
+
+
+const LAMP_CONE_ALPHA := 0.32
+const SHAFT_SHADER := "res://shaders/light_shaft.gdshader"
 
 
 # Lamp shafts and glows are flat additive cards (CIwAmbientFader entities) that
@@ -556,7 +596,18 @@ func _maybe_light_cone(mi: MeshInstance3D, surface: int) -> void:
 		hi = hi.max(v)
 	var size := hi - lo
 	if minf(size.x, size.z) > 0.05 or (lo + hi).length() / 2 > 3.0:
-		return  # not a flat card centred on its entity
+		# not a flat card centred on its entity: a big fixed shaft (window beams) fades
+		# when seen edge-on or from close by, so it does not look like a flat sheet
+		if maxf(size.y, maxf(size.x, size.z)) > 2.0 and mat.albedo_texture:
+			var sm := ShaderMaterial.new()
+			sm.shader = load(SHAFT_SHADER)
+			sm.set_shader_parameter("albedo_tex", mat.albedo_texture)
+			mi.set_surface_override_material(surface, sm)
+		return
+	if OS.get_cmdline_user_args().has("--debug-cones"):
+		print("[cone] %s at %s size %s tex %s" % [mi.name, mi.global_position.snapped(Vector3(0.01, 0.01, 0.01)), size.snapped(Vector3(0.01, 0.01, 0.01)), mat.get_meta("extras", {}).get("texture0", "")])
+	if size.y > 1.0:
+		mat.albedo_color.a = LAMP_CONE_ALPHA   # lamp cones a little dimmer than the other glows
 	mat.billboard_keep_scale = true
 	mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y if size.y > 1.2 * maxf(size.x, size.z) * 0.5 and size.y > 1.0 else BaseMaterial3D.BILLBOARD_ENABLED
 
@@ -617,6 +668,9 @@ func _build_boxes() -> void:
 	# other locations (mystery_box.gd)
 	var all := entities.keys().filter(func(n): return "CMysteryBoxSpec" in entities[n]["components"])
 	var names := [all.pick_random()] if all.size() > 1 else all
+	var forced := OS.get_cmdline_user_args().find("--box-at")   # tests: start at this location
+	if forced >= 0 and OS.get_cmdline_user_args()[forced + 1] in all:
+		names = [OS.get_cmdline_user_args()[forced + 1]]
 	for n in names:
 		if true:
 			var b := MysteryBox.new()

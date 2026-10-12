@@ -83,19 +83,40 @@ func _place(entity_: String) -> void:
 	global_transform = root * Level.flag_transform(e["children"][-1]) if not e["children"].is_empty() else root
 	if _body:
 		_body.free()
-	# solid box from the entity collider (entity frame, like the debris)
+	# solid box from the closed model: the entity collider is the use area, 2.2 x 1.9 m
+	# around the 1.1 m box, and kept the player an arm's length away
 	var body := StaticBody3D.new()
 	_body = body
 	add_child(body)
-	for c in e.get("colliders", []):
-		var lo := Vector3(c["min"][0], c["min"][1], c["min"][2]) * Level.UNITS
-		var hi := Vector3(c["max"][0], c["max"][1], c["max"][2]) * Level.UNITS
+	var solid := _model_box()
+	if solid.size != Vector3.ZERO:
+		solid.size.y = maxf(solid.size.y, 1.0)   # as tall as the original volume: no standing on it
 		var shape := CollisionShape3D.new()
 		var box := BoxShape3D.new()
-		box.size = (hi - lo).max(Vector3(0.2, 0.2, 0.2))
+		box.size = solid.size.max(Vector3(0.2, 0.2, 0.2))
 		shape.shape = box
+		shape.position = solid.get_center()
 		body.add_child(shape)
-		shape.global_transform = root * Transform3D(Basis(), (lo + hi) / 2)
+
+
+# Bounds of the box meshes in this node's frame (closed pose, teddy and weapon left out).
+var _solid := AABB()
+
+
+func _model_box() -> AABB:
+	if _solid.size != Vector3.ZERO or _model == null:
+		return _solid
+	var first := true
+	for mi in _model.find_children("*", "MeshInstance3D", true, false):
+		var xf: Transform3D = mi.transform
+		var n: Node = mi.get_parent()
+		while n != self and n is Node3D:
+			xf = (n as Node3D).transform * xf
+			n = n.get_parent()
+		var b: AABB = xf * mi.get_aabb()
+		_solid = b if first else _solid.merge(b)
+		first = false
+	return _solid
 
 
 # Two one-key poses (closed/open) and two animations (open/close): the opening

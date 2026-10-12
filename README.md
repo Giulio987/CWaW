@@ -35,6 +35,12 @@ Debug: `-- nacht --look <entità,...>`, `-- nacht --shots <armi,...>`, `-- nacht
 `-- nacht --stairs-test` apre le macerie e fa salire il giocatore al piano di sopra (stampa OK/FAIL);
 con `--no-open` verifica che saltando non si superino le macerie. `--look Entità@gradi` inquadra di lato:
 le viste frontali nascondono gli errori di rotazione. `tools/run_godot.sh <secondi> -- ...` esegue con un limite di tempo.
+Dalle foto della modalità foto (pausa → "Modalità foto (debug)"): `-- verruckt --view "x,y,z,yaw,pitch;..."` rifà
+le stesse inquadrature (`view_<n>.png`), con `--pick` stampa cosa colpisce un proiettile al centro (mesh, texture),
+con `--open Entità,... [secondi]` apre prima le macerie. `--walk "x,y,z;..."` fa camminare il giocatore lungo i punti
+(`--open`, `--nav` per seguire la navmesh, `--buy` per comprare ciò che lo blocca), `--box-at <entità>` fissa la cassa,
+`--orient-probe` misura lo spazio libero attorno a perk e casse, `--orig-lods` riattiva le varianti a basso dettaglio
+per settore dell'originale, `--debug-fx`/`--debug-cones` elencano le superfici di effetti e i coni di luce.
 
 Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `barricade.gd`, `debris.gd`,
 `player.gd`, `zombie.gd`, `game.gd` (round da `waves.json` estratto dagli script Lua originali), `hud.gd`, `weapons.gd`.
@@ -63,7 +69,7 @@ Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `
 | Trappole | ✅ | elettriche (Verrückt, Der Riese, capanne di Shi No Numa) e flogger: 30 s attive, uccidono zombie/cani (senza punti) e feriscono il giocatore (si accendono 2,3 s dopo l'acquisto, animazione della leva), poi 30 s di ricarica (+2 s di animazioni, dall'ASM `2b8efeb7`); serve la corrente dove c'è il generatore; volume dalle entità `<trappola>Effect<n>`, su Verrückt dalla geometria; `scripts/trap.gd`, test `--trap-test` (`--trap-debug`) |
 | Teletrasporti / Pack-a-Punch | ✅ | Der Riese: con la corrente si attiva un pad e lo si collega al mainframe; ogni collegamento apre la porta del mainframe, al terzo si apre il Pack-a-Punch (5000: caricatore/riserva dei `*_upgrade` originali, danno ×1.5, nomi WaW); teletrasporto 1500 con ricarica, power-up o cani all'arrivo; `scripts/teleporter.gd`, `scripts/pack_a_punch.gd`, test `--tele-test`, `--pap-test` |
 | Verrückt | ✅ | partenza divisa: a caso metà tedesca o americana (`--start german|american`), la porta `StartDoorLink` si apre con la corrente |
-| Orientamento barricate/macerie | 🔶 | macerie: le trasformazioni con quaternione identità tengono i quarti di giro nel byte "flags" (0x10 = −90°, 0x04 = 180° attorno a Y, `Level.flag_transform`), anche per la trasformazione figlia del modello; il collider è nel sistema dell'entità; test `-- <mappa> --debris-test [--shot Entità@gradi]`. Barricate: direzione dal muro, interno/esterno dai settori (`tools/wall_yaw.py`); casse/perk non usano ancora i flags |
+| Orientamento barricate/macerie | 🔶 | macerie: le trasformazioni con quaternione identità tengono i quarti di giro nel byte "flags" (0x10 = −90°, 0x04 = 180° attorno a Y, `Level.flag_transform`), anche per la trasformazione figlia del modello; il collider è nel sistema dell'entità; test `-- <mappa> --debris-test [--shot Entità@gradi]`. Barricate: direzione dal muro, interno/esterno dai settori (`tools/wall_yaw.py`); anche macchine perk, interruttore e casse usano i flags (`--orient-probe`: con i flags il retro è sempre contro il muro) |
 | Settori e LOD | ✅ | `CIwSGSectorBuilder` → `sectors.json`; `CIwLODControllerCameraVolume` mostra la variante del settore della telecamera |
 | Mystery box | ✅ | 950 punti, coperchio animato originale, armi che girano, offerta 12 s; test `--box-test` |
 | Perk-a-Cola | ✅ | Juggernog (250 hp), Speed Cola (ricarica ×0.5), Double Tap (cadenza ×0.75), Quick Revive (solo: si rialza una volta, perde i perk); corrente dal `GeneratorSwitch` su Der Riese/Verrückt (`--power` la accende subito), Shi No Numa un perk casuale per postazione; icone originali nell'HUD; `scripts/perk_machine.gd`, `scripts/perks.gd`, test `--perk-test` |

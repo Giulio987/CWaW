@@ -41,6 +41,8 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_stairs_test(game)
 	if args.has("--box-test"):
 		_box_test(game)
+	if args.has("--view"):
+		_view_shots(game)
 	if args.has("--walk"):
 		_walk_test(game)
 	if args.has("--orient-probe"):
@@ -1092,4 +1094,62 @@ func _walk_test(game: Game) -> void:
 		await get_tree().process_frame
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/walk_end.png"))
+	get_tree().quit()
+
+
+# Screenshots from photo-mode readouts: --view "x,y,z,yaw,pitch;..." (yaw/pitch in
+# degrees as the photo mode prints them) -> analysis/preview/view_<n>.png
+func _view_shots(game: Game) -> void:
+	await game.level.wait_navigation()
+	game.set_process(false)
+	var p := game.player
+	var specs := OS.get_cmdline_user_args()[OS.get_cmdline_user_args().find("--view") + 1].split(";")
+	var oi := OS.get_cmdline_user_args().find("--open")
+	if oi >= 0:
+		for d in game.level.debris.duplicate():
+			if d.entity in OS.get_cmdline_user_args()[oi + 1].split(","):
+				d.open()
+		await get_tree().create_timer(float(OS.get_cmdline_user_args()[oi + 2]) if OS.get_cmdline_user_args().size() > oi + 2 and OS.get_cmdline_user_args()[oi + 2].is_valid_float() else 3.0).timeout
+	for n in specs.size():
+		var v := specs[n].split_floats(",")
+		p.global_position = Vector3(v[0], v[1], v[2])
+		p.velocity = Vector3.ZERO
+		p.rotation.y = deg_to_rad(v[3])
+		var cam := get_viewport().get_camera_3d()
+		if v.size() > 4 and cam:
+			cam.rotation.x = deg_to_rad(v[4])
+		for k in 8:
+			await get_tree().physics_frame
+		p.global_position = Vector3(v[0], v[1], v[2])
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/view_%d.png" % n))
+		print("[view] %d at %s" % [n, p.global_position])
+		if OS.get_cmdline_user_args().has("--pick"):
+			# what a bullet through the screen centre hits: mesh, surface material, texture
+			var cam2 := get_viewport().get_camera_3d()
+			var q := PhysicsRayQueryParameters3D.create(cam2.global_position, cam2.global_position - cam2.global_basis.z * 30.0, 1 | 2)
+			q.exclude = [p.get_rid()]
+			var hit := get_viewport().get_world_3d().direct_space_state.intersect_ray(q)
+			if hit.is_empty():
+				print("[view]   centre ray: nothing")
+			else:
+				var mi = hit["collider"].get_parent()
+				var desc := ""
+				if mi is MeshInstance3D:
+					var best := INF
+					for sfc in mi.mesh.get_surface_count():
+						var arr = mi.mesh.surface_get_arrays(sfc)
+						var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+						var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+						var local: Vector3 = mi.global_transform.affine_inverse() * hit["position"]
+						for k in range(0, idx.size(), 3):
+							var plane := Plane(vs[idx[k]], vs[idx[k + 1]], vs[idx[k + 2]])
+							var cp := plane.project(local)
+							if absf(plane.distance_to(local)) < 0.02 and Geometry3D.ray_intersects_triangle(cp + plane.normal * 0.05, -plane.normal, vs[idx[k]], vs[idx[k + 1]], vs[idx[k + 2]]) != null:
+								var mat = mi.mesh.surface_get_material(sfc)
+								desc = "surface %d %s extras %s alpha %s" % [sfc, mat.resource_name if mat else "", mat.get_meta("extras", {}) if mat else {}, mat.transparency if mat else -1]
+								break
+						if desc != "":
+							break
+				print("[view]   centre ray: %s at %.2f m, %s" % [mi.name, hit["position"].distance_to(cam2.global_position), desc])
 	get_tree().quit()
