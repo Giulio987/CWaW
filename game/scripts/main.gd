@@ -41,6 +41,10 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_stairs_test(game)
 	if args.has("--box-test"):
 		_box_test(game)
+	if args.has("--walk"):
+		_walk_test(game)
+	if args.has("--orient-probe"):
+		_orient_probe(game)
 	if args.has("--perk-test"):
 		_perk_test(game)
 	if args.has("--knife-test"):
@@ -955,13 +959,18 @@ func _photo_test(game: Game) -> void:
 	await _shot("photo_0_menu")
 	hud._pause._photo_mode()
 	var yaw0 := game.player.rotation.y
-	for i in 10:
-		var ev := InputEventMouseMotion.new()
-		ev.relative = Vector2(40, 0)
-		hud._pause._unhandled_input(ev)
+	# the pointer is free (moving it alone does not turn), dragging turns the view
+	for drag in [false, true]:
+		for i in 10:
+			var ev := InputEventMouseMotion.new()
+			ev.relative = Vector2(40, 0)
+			ev.button_mask = MOUSE_BUTTON_MASK_LEFT if drag else 0
+			hud._pause._unhandled_input(ev)
+		if not drag:
+			print("[photo] %s: free pointer (visible=%s, turned %.0f° without dragging)" % ["OK" if Input.mouse_mode == Input.MOUSE_MODE_VISIBLE and is_equal_approx(yaw0, game.player.rotation.y) else "FAIL", Input.mouse_mode == Input.MOUSE_MODE_VISIBLE, rad_to_deg(yaw0 - game.player.rotation.y)])
 	await get_tree().create_timer(0.2).timeout
 	await _shot("photo_1_photo")
-	print("[photo] paused=%s turned=%.0f° info='%s'" % [get_tree().paused, rad_to_deg(yaw0 - game.player.rotation.y), hud._pause._info.text])
+	print("[photo] %s: paused=%s turned=%.0f° by dragging, info='%s'" % ["OK" if get_tree().paused and absf(yaw0 - game.player.rotation.y) > 0.1 else "FAIL", get_tree().paused, rad_to_deg(yaw0 - game.player.rotation.y), hud._pause._info.text])
 	var esc := InputEventAction.new()
 	esc.action = "ui_cancel"
 	esc.pressed = true
@@ -969,4 +978,118 @@ func _photo_test(game: Game) -> void:
 	print("[photo] back to menu=%s paused=%s" % [hud._pause._pages["main"].visible, get_tree().paused])
 	hud._pause.close()
 	print("[photo] %s" % ["OK" if not get_tree().paused else "FAIL"])
+	get_tree().quit()
+
+
+# Orientation probe: for every perk machine / box entity, the free space (m) along the
+# four local axes with and without the transform flags: -- verruckt --orient-probe
+func _orient_probe(game: Game) -> void:
+	await game.level.wait_navigation()
+	var lv := game.level
+	var space := game.player.get_world_3d().direct_space_state
+	for n in lv.entities:
+		var e: Dictionary = lv.entities[n]
+		var c: Array = e["components"]
+		if not ("CActionBuyPerkSpec" in c or n.to_lower() == "generatorswitch" or n.to_lower().begins_with("mysterybox")) or e["models"].is_empty():
+			continue
+		var line := "[orient] %s flags %s" % [n, e["transform"].get("flags")]
+		for mode in ["plain", "flag"]:
+			var t: Transform3D = lv.entity_transform(n) if mode == "plain" else Level.flag_transform(e["transform"])
+			var from := t.origin + Vector3.UP * 0.8
+			var d := []
+			for ax in [Vector3.FORWARD, Vector3.BACK, Vector3.LEFT, Vector3.RIGHT]:
+				var dir: Vector3 = (t.basis * ax).normalized()
+				var q := PhysicsRayQueryParameters3D.create(from, from + dir * 5.0, 1)
+				var hit := space.intersect_ray(q)
+				d.append(5.0 if hit.is_empty() else snappedf((hit["position"] - from).length(), 0.01))
+			line += "  %s -Z %.2f +Z %.2f -X %.2f +X %.2f" % [mode, d[0], d[1], d[2], d[3]]
+		print(line)
+	get_tree().quit()
+
+
+# Walk the player along points (x,y,z;x,y,z;...), optionally after opening a debris,
+# printing progress and saving a screenshot at the start and at the end:
+#   -- verruckt --walk "2.3,1.2,-15.4;-4,3.1,-16.6" [--open AmerDwn_AmerUp1_Trigger]
+func _walk_test(game: Game) -> void:
+	await game.level.wait_navigation()
+	game.set_process(false)
+	var args := OS.get_cmdline_user_args()
+	var p := game.player
+	var oi := args.find("--open")
+	if oi >= 0:
+		for d in game.level.debris.duplicate():
+			if d.entity == args[oi + 1]:
+				d.open()
+		await get_tree().create_timer(3.0).timeout
+	var path := []
+	for s in args[args.find("--walk") + 1].split(";"):
+		var v := s.split_floats(",")
+		path.append(Vector3(v[0], v[1], v[2]))
+	if args.has("--nav"):
+		# follow the navmesh from the first point to the last one (after the rebake)
+		while game.level.nav_region.is_baking():
+			await get_tree().create_timer(0.5).timeout
+		await get_tree().create_timer(1.0).timeout
+		var np := NavigationServer3D.map_get_path(p.get_world_3d().navigation_map, path[0], path[-1], true)
+		print("[walk] nav path %s" % np)
+		path = [path[0]]
+		for v in np:
+			path.append(v)
+	p.global_position = path[0]
+	p.velocity = Vector3.ZERO
+	var first: Vector3 = path[1] - path[0]
+	p.rotation.y = atan2(-first.x, -first.z)
+	for k in 10:
+		await get_tree().physics_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/walk_start.png"))
+	var i := 1
+	var t := 0.0
+	var last := 0.0
+	var buy := args.has("--buy")   # once stuck: buy what is in reach and walk on
+	var stuck := 0.0
+	var prev := p.global_position
+	while i < path.size() and t < 40.0:
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+		p.health = Player.MAX_HEALTH
+		var to: Vector3 = path[i] - p.global_position
+		to.y = 0
+		if to.length() < 0.4:
+			i += 1
+			continue
+		p.rotation.y = atan2(-to.x, -to.z)
+		var local := p.global_basis.inverse() * to.normalized()
+		p.move_input = Vector2(local.x, local.z)
+		stuck = stuck + get_physics_process_delta_time() if p.global_position.distance_to(prev) < 0.005 else 0.0
+		prev = p.global_position
+		if buy and stuck > 1.0:
+			buy = false
+			p.points = 10000
+			var target = p._interaction_target()
+			print("[walk] stuck at %s, target %s prompt '%s'" % [p.global_position.snapped(Vector3(0.01, 0.01, 0.01)), target.get("entity") if target is Object else target, str(target)])
+			Input.action_press("interact")
+			for k in 3:
+				await get_tree().process_frame
+			Input.action_release("interact")
+			print("[walk] points after buying: %d" % p.points)
+			await get_tree().create_timer(4.0).timeout
+		if t - last >= 0.5:
+			last = t
+			print("[walk] t=%.1f pos=%s waypoint %d/%d floor=%s" % [t, p.global_position.snapped(Vector3(0.01, 0.01, 0.01)), i, path.size(), p.is_on_floor()])
+	p.move_input = Vector2.ZERO
+	print("[walk] %s: end %s after %.1f s" % ["OK" if i >= path.size() else "FAIL", p.global_position.snapped(Vector3(0.01, 0.01, 0.01)), t])
+	if i < path.size():
+		# what stops the body: a shape cast ahead at a few heights
+		var dir: Vector3 = path[i] - p.global_position
+		dir.y = 0
+		for h in [0.05, 0.3, 0.6, 1.0, 1.5]:
+			var col := KinematicCollision3D.new()
+			if p.test_move(p.global_transform.translated(Vector3.UP * h), dir.normalized() * 0.3, col):
+				var c := col.get_collider()
+				print("[walk] blocked at +%.2f by %s (%s) normal %s at %s" % [h, c.name if c else "?", c.get_parent().name if c else "", col.get_normal().snapped(Vector3(0.01, 0.01, 0.01)), col.get_position().snapped(Vector3(0.01, 0.01, 0.01))])
+	for k in 6:
+		await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/walk_end.png"))
 	get_tree().quit()

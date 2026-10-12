@@ -467,8 +467,14 @@ func _interaction_target():
 	# (the Der Riese lab trap lever is next to a door): the one looked at wins
 	var cands := []
 	for d in game.level.debris:
-		if is_instance_valid(d) and d.global_position.distance_to(p) < INTERACT_RANGE + 1.0:
+		if not is_instance_valid(d):
+			continue
+		if d.global_position.distance_to(p) < INTERACT_RANGE + 1.0:
 			cands.append([d, d.global_position])
+		else:
+			var near: Vector3 = d.nearest_point(p)
+			if near.distance_to(p) < INTERACT_RANGE:
+				cands.append([d, near])
 	for o in game.level.interactables:
 		if o.usable_from(p) and o.prompt(self) != "":
 			var at: Vector3 = (o as Node3D).global_position

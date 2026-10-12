@@ -112,6 +112,25 @@ func interact_position() -> Vector3:
 	return global_position
 
 
+# Nearest point of the blocking volume to p (the entity origin once it is open). The
+# volume can reach far from the origin: Verrückt's stair pile AmerDwn_AmerUp1 blocks
+# the stairs 3 m below its centre, out of reach of the origin.
+func nearest_point(p: Vector3) -> Vector3:
+	var best := global_position
+	var best_d := p.distance_to(best)
+	if not is_instance_valid(_body):
+		return best
+	for c in _body.get_children():
+		if c is CollisionShape3D and c.shape is BoxShape3D and not c.is_queued_for_deletion():
+			var half: Vector3 = (c.shape as BoxShape3D).size / 2
+			var local: Vector3 = c.global_transform.affine_inverse() * p
+			var q: Vector3 = c.global_transform * local.clamp(-half, half)
+			if p.distance_to(q) < best_d:
+				best_d = p.distance_to(q)
+				best = q
+	return best
+
+
 func open() -> void:
 	opened.emit(self)
 	for c in _body.get_children():

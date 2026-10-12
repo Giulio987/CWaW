@@ -101,10 +101,8 @@ func _photo_mode() -> void:
 		add_child(_info)
 	_info.visible = true
 	_update_info()
-	if DisplayServer.is_touchscreen_available():
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	else:
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	# the pointer stays free (to take screenshots on the Mac): dragging turns the view
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
 func _end_photo() -> void:
@@ -123,7 +121,7 @@ func _update_info() -> void:
 	var pos: Vector3 = p.global_position
 	var lvl = game.get("level")
 	var sector: String = lvl.sector_at(pos) if lvl and lvl.has_method("sector_at") else ""
-	_info.text = "FOTO (debug) · %s · round %d · pos (%.2f, %.2f, %.2f)%s · yaw %.0f° pitch %.0f° · Esc o doppio tocco: torna" % [
+	_info.text = "FOTO (debug) · %s · round %d · pos (%.2f, %.2f, %.2f)%s · yaw %.0f° pitch %.0f° · trascina per girare · Esc o doppio tocco: torna" % [
 		game.get("level_name"), game.get("round_number"), pos.x, pos.y, pos.z,
 		(" · settore " + sector) if sector != "" else "",
 		rad_to_deg(p.rotation.y), rad_to_deg(cam.rotation.x) if cam else 0.0]
@@ -133,7 +131,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if _photo:
 		get_viewport().set_input_as_handled()
 		var p = game.get("player") if game else null
-		if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and p:
+		if event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_LEFT and p:
 			p.look(event.relative * Player.MOUSE_SENS * Settings.mouse_sens())
 			_update_info()
 		elif event is InputEventScreenDrag and p:

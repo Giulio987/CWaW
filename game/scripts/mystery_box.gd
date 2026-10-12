@@ -78,10 +78,12 @@ func _place(entity_: String) -> void:
 		_memory.pop_front()
 	uses = 0
 	var e: Dictionary = level.entities[entity]
-	global_transform = level.entity_transform(entity, true)
+	# quarter turns in the transform flags (Level.flag_transform), as for the debris
+	var root := Level.flag_transform(e["transform"])
+	global_transform = root * Level.flag_transform(e["children"][-1]) if not e["children"].is_empty() else root
 	if _body:
 		_body.free()
-	# solid box from the entity collider (world aligned, like the debris)
+	# solid box from the entity collider (entity frame, like the debris)
 	var body := StaticBody3D.new()
 	_body = body
 	add_child(body)
@@ -93,7 +95,7 @@ func _place(entity_: String) -> void:
 		box.size = (hi - lo).max(Vector3(0.2, 0.2, 0.2))
 		shape.shape = box
 		body.add_child(shape)
-		shape.global_transform = Transform3D(Basis(), level.entity_transform(entity).origin + (lo + hi) / 2)
+		shape.global_transform = root * Transform3D(Basis(), (lo + hi) / 2)
 
 
 # Two one-key poses (closed/open) and two animations (open/close): the opening

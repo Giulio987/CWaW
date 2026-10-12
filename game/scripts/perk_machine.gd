@@ -24,7 +24,8 @@ func setup(level_: Level, entity_: String, kind_: String) -> void:
 	kind = kind_
 	var e: Dictionary = level.entities[entity]
 	cost = int(e.get("params", {}).get("cost", Perks.INFO.get(kind, {}).get("cost", 0)))
-	var root := level.entity_transform(entity)
+	# quarter turns in the transform flags (Level.flag_transform), as for the debris
+	var root := Level.flag_transform(e["transform"])
 	global_transform = root
 	var model := _load_model(e)
 	if model:
