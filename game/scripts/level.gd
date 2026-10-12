@@ -150,13 +150,11 @@ func _build_water_cells() -> void:
 					_water_cells[Vector2i(x, z)] = true
 
 
-# grid cells a triangle touches (centre inside, or a corner in the cell)
+# grid cells whose centre a triangle covers
 static func _mark_cells(cells: Dictionary, a3: Vector3, b3: Vector3, c3: Vector3) -> void:
 	var a := Vector2(a3.x, a3.z)
 	var b := Vector2(b3.x, b3.z)
 	var c := Vector2(c3.x, c3.z)
-	for v in [a, b, c]:
-		cells[Vector2i(floori(v.x / WATER_CELL), floori(v.y / WATER_CELL))] = true
 	var lo := (a.min(b).min(c) / WATER_CELL).floor()
 	var hi := (a.max(b).max(c) / WATER_CELL).ceil()
 	for x in range(int(lo.x), int(hi.x) + 1):
@@ -241,24 +239,33 @@ func _build_nav_floor() -> void:
 				bed.append(v)
 			_mark_cells(bed_cells, a, b, c)
 			continue
-		if tri[4] or not zombie_floor:
+		if tri[4]:
 			continue   # flag 2 outside the water footprint
 		q.from = p + Vector3.UP * 0.3
 		q.to = p - Vector3.UP * 0.3
 		if not tri[3] and not space.intersect_ray(q).is_empty():
 			continue
+		if not tri[3] and p.y < water_y + 1.0 and _water_cells.has(_water_cell(p)):
+			# banks and mounds in the swamp the visible ground has no collision for
+			for v in [a, b, c]:
+				bed.append(v)
+			_mark_cells(bed_cells, a, b, c)
+			continue
+		if not zombie_floor:
+			continue
 		# stairs: the original ramp cuts the step nosings, lift it clear of them
 		for v in [a, b, c]:
 			faces.append(v + Vector3.UP * (0.15 if tri[3] else -0.05))
-	# water the original navmesh does not reach (behind fences, under huts): a floor at
-	# the usual wading depth where the world has nothing below either, so nobody falls
+	# water the original navmesh does not reach (behind fences, under huts, past the
+	# edges): a floor below the deepest bed where the world has nothing either, so
+	# nobody falls through
 	var holes := PackedVector3Array()
-	var deep := water_y - 0.6
+	var deep := water_y - 1.25
 	for cell: Vector2i in _water_cells:
 		if bed_cells.has(cell):
 			continue
 		var c0 := Vector3(cell.x, 0, cell.y) * WATER_CELL
-		q.from = c0 + Vector3(WATER_CELL * 0.5, water_y + 0.5, WATER_CELL * 0.5)
+		q.from = c0 + Vector3(WATER_CELL * 0.5, water_y + 1.2, WATER_CELL * 0.5)
 		q.to = q.from + Vector3.DOWN * 3.0
 		if not space.intersect_ray(q).is_empty():
 			continue
@@ -495,7 +502,7 @@ func _prepare_meshes(root: Node) -> void:
 			if effect and OS.get_cmdline_user_args().has("--hide-fx"):
 				mi.set_surface_override_material(s, _hidden_material())
 			if not effect and _is_water(mat):
-				var xf := mi.global_transform
+				var xf: Transform3D = mi.global_transform
 				for v in _surface_faces(mi.mesh, s):
 					_water_faces.append(xf * v)
 			elif not effect:

@@ -7,6 +7,7 @@
 # walk --spawn <name> [--side-off x,y,z]: follow one zombie to its window
 # zipline [--zip-log]: switch, gate, ride up, ride down killing a zombie -> OK/FAIL
 # profile --line x1,z1,x2,z2 [--hy y,..]: world / nav floor / navmesh heights along a line
+# wade: player and a zombie in the doctors' swamp: bed height, speed x0.5, grenade on the bed
 # view --cam x,y,z,yaw,pitch[;...] [--markers]: free camera shots
 class_name SwampTests
 
@@ -34,6 +35,8 @@ static func run(at: Node) -> void:
 			await _spawns(at, game)
 		"walk":
 			await _walk(at, game)
+		"wade":
+			await _wade(at, game)
 	at.get_tree().quit()
 
 
@@ -77,11 +80,13 @@ static func _navmesh_overlay(game: Game) -> void:
 			for v in [poly[0], poly[k], poly[k + 1]]:
 				im.surface_add_vertex(verts[v] + Vector3.UP * 0.05)
 	im.surface_end()
-	var floor := game.level.nav_region.find_child("NavFloor", false, false)
-	if floor:
+	for fl in [["NavFloor", Color(1, 0, 1, 0.5)], ["SwampBed", Color(0, 0.9, 1, 0.45)]]:
+		var floor := game.level.nav_region.find_child(fl[0], false, false)
+		if floor == null:
+			continue
 		var fm := StandardMaterial3D.new()
 		fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		fm.albedo_color = Color(1, 0, 1, 0.5)
+		fm.albedo_color = fl[1]
 		fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		fm.cull_mode = BaseMaterial3D.CULL_DISABLED
 		fm.no_depth_test = true
@@ -421,3 +426,77 @@ static func _walk(at: Node, game: Game) -> void:
 		k += 1
 		await _wait(at, 2.5)
 	print("[swamp] walk end t=%.1f state=%s reached=%.1f dist=%.1f %s" % [z.life, Zombie.State.keys()[z.state], z.reached_window, z.global_position.distance_to(z.window.outside), "OK" if z.reached_window > 0.0 else "FAIL"])
+
+
+# The player wades on the swamp bed (original navmesh) at WaterMoveSpeedModifier;
+# a zombie wades towards them; a grenade comes to rest on the bed; holes in the bed.
+static func _wade(at: Node, game: Game) -> void:
+	var lv := game.level
+	var p := game.player
+	p.health = 1e9
+	var ok := true
+	# floor everywhere under the water: rays over every water cell
+	var space := game.get_world_3d().direct_space_state
+	var holes := 0
+	var lo := INF
+	var hi := -INF
+	for cell: Vector2i in lv._water_cells:
+		var c := (Vector3(cell.x, 0, cell.y) + Vector3(0.5, 0, 0.5)) * Level.WATER_CELL
+		var h := space.intersect_ray(PhysicsRayQueryParameters3D.create(c + Vector3.UP * 1.2, c + Vector3.DOWN * 3.0, 1))
+		if h.is_empty():
+			holes += 1
+		else:
+			lo = minf(lo, h["position"].y)
+			hi = maxf(hi, h["position"].y)
+	print("[swamp] wade water cells=%d holes=%d floor y %.2f..%.2f" % [lv._water_cells.size(), holes, lo, hi])
+	ok = ok and holes == 0
+	# player in the doctors' swamp
+	var spot := Vector3(29.0, 0.5, 38.0)   # storage swamp, bed ~0.9 m under the water
+	p.global_position = spot
+	p.rotation.y = 0.0   # facing -z
+	await _wait(at, 1.0)
+	print("[swamp] wade player at %s on_floor=%s in_water=%s" % [p.global_position.snapped(Vector3(0.01, 0.01, 0.01)), p.is_on_floor(), lv.in_water(p.global_position)])
+	ok = ok and p.is_on_floor() and lv.in_water(p.global_position) and p.global_position.y < -0.2
+	await _snap(at, "wade_fp")
+	var a := p.global_position
+	p.move_input = Vector2(0, -1)
+	await _wait(at, 1.5)
+	p.move_input = Vector2.ZERO
+	var v := Vector2(p.global_position.x - a.x, p.global_position.z - a.z).length() / 1.5
+	print("[swamp] wade speed %.2f m/s (dry %.2f x %.2f)" % [v, Player.SPEED, Level.WATER_MOVE_SPEED])
+	ok = ok and absf(v - Player.SPEED * Level.WATER_MOVE_SPEED) < 0.4
+	# a zombie wading in, side view at water level
+	var z := Zombie.new()
+	z.setup(p.global_position + Vector3(0.5, 0.3, 6), lv.windows[0], p, 1e6, false, 5)
+	z.state = Zombie.State.CHASE
+	game.add_child(z)
+	var cam := Camera3D.new()
+	game.add_child(cam)
+	for we in game.find_children("*", "WorldEnvironment", true, false):
+		we.environment.fog_enabled = false
+	await _wait(at, 2.0)
+	for k in 3:
+		cam.make_current()
+		var side := Vector3(0.5, 0.0, 1.0).rotated(Vector3.UP, k * 1.2).normalized() * 3.0
+		cam.global_position = z.global_position + side + Vector3(0, 0.35 + lv.water_y - z.global_position.y, 0)
+		cam.look_at(z.global_position + Vector3.UP * 0.9)
+		await _wait(at, 0.05)
+		await _snap(at, "wade_zombie_%d" % k)
+	print("[swamp] wade zombie at %s state=%s" % [z.global_position.snapped(Vector3(0.01, 0.01, 0.01)), Zombie.State.keys()[z.state]])
+	ok = ok and z.global_position.y < -0.1
+	z.queue_free()
+	# a grenade dropped into the water
+	var g := Grenade.spawn(game, p.global_position + Vector3(0, 1.5, -1.0), Vector3.ZERO, 30.0, p)
+	await _wait(at, 2.5)
+	var gq := PhysicsRayQueryParameters3D.create(g.global_position + Vector3.UP, g.global_position + Vector3.DOWN * 3.0, 1)
+	gq.exclude = [p.get_rid()]
+	var gh := space.intersect_ray(gq)
+	print("[swamp] wade grenade y=%.2f bed=%.2f water=%.2f" % [g.global_position.y, gh["position"].y if gh else 99.0, lv.water_y])
+	ok = ok and g.global_position.y < lv.water_y - 0.1 and gh and absf(g.global_position.y - gh["position"].y) < 0.25
+	cam.global_position = g.global_position + Vector3(1.5, 0.4 + lv.water_y - g.global_position.y, 1.0)
+	cam.look_at(g.global_position)
+	cam.make_current()
+	await _wait(at, 0.05)
+	await _snap(at, "wade_grenade")
+	g.queue_free()
+	print("[swamp] wade %s" % ["OK" if ok else "FAIL"])

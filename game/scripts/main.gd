@@ -833,6 +833,24 @@ func _dog_look(game: Game) -> void:
 	d.setup_dog(p.global_position + fwd * 3.0, p, 1e6, game.level.windows[0])
 	game.add_child(d)
 	await get_tree().physics_frame
+	if OS.get_cmdline_user_args().has("--live"):
+		# --dog-look --live: let it run at the player for a moment, side view of the gait
+		p.health = 1e6
+		await get_tree().create_timer(0.7).timeout
+		p.set_physics_process(false)
+		var side := d.global_position + (d.global_position - p.global_position).normalized().cross(Vector3.UP) * 2.5
+		var cam := Camera3D.new()
+		game.add_child(cam)
+		cam.global_position = side + Vector3.UP * 0.5
+		cam.look_at(d.global_position + Vector3.UP * 0.4)
+		cam.make_current()
+		for k in 3:
+			await _shot("dog_live_%d" % k)
+			await get_tree().create_timer(0.12).timeout
+			cam.look_at(d.global_position + Vector3.UP * 0.4)
+		print("[doglook] live dog y=%.2f floor ray=%s" % [d.global_position.y, p.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(d.global_position + Vector3.UP, d.global_position + Vector3.DOWN * 3)).get("position", Vector3.INF)])
+		get_tree().quit()
+		return
 	d.set_physics_process(false)
 	for mi in d.find_children("*", "MeshInstance3D", true, false):
 		print("[doglook] mesh %s visible=%s aabb %s" % [mi.name, mi.visible, (mi as MeshInstance3D).global_transform * (mi as MeshInstance3D).get_aabb()])
