@@ -49,7 +49,9 @@ VOCAB_X = ["zombie_0%d" % i for i in range(1, 10)] + [
     # music & jingles (waves.lua, BuyPerk* entities, mystery box state machine)
     "begin_wave", "start_game", "music_box_play", "teddypoof", "perkjinglejugga", "perkjinglespeed",
     "perkjingledouble", "perkjinglerevive", "perkpoweron", "perkhumloop", "pack_buy", "pack_tick",
-    "countdown_tick", "PowerStart1", "PowerStart2", "menu_press", "mx_frontend"]
+    "countdown_tick", "PowerStart1", "PowerStart2", "menu_press", "mx_frontend",
+    # console.bin WalkingFootstepSounds / WalkingFootstepWaterSounds (player.gd footsteps)
+    "player_footstep_walk3", "player_footstep_walk4", "water_walk1", "water_walk2"]
 # friendly name -> recovered name or spec hash (hashes: identified from where they are used)
 ALIAS = {
     "round_start": "begin_wave",         # waves.lua StartWave, rounds > 1 (the "round change" chant)

@@ -215,6 +215,8 @@ func nuke_kill() -> void:
 
 
 func _dog_die(headshot: bool, knife: bool) -> void:
+	if state == State.DEAD:
+		return   # killed (and counted) once only
 	state = State.DEAD
 	_d_attacking = false
 	collision_layer = 0

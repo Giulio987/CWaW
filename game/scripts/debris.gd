@@ -1,13 +1,15 @@
 # Debris/door bought with points to open the way to another area.
 # The model is shown in its "closed" one-keyframe pose and plays the opening
-# animation when bought. Entities carry no rotation, so the model is turned to
-# the wall-aligned yaw that best fits the entity's own collider box.
+# animation when bought. Most entities store their quarter turn in the transform
+# flags rather than in the quaternion (Level.flag_transform), the model hangs off
+# a child transform with its own turn, and the collider is in the entity frame.
 class_name Debris
 extends Node3D
 
 signal opened(debris: Debris)
 
 const JUMP_GUARD := 2.5  # metres added above the original volume
+const MIN_DEPTH := 0.4   # blockers made from the model's closed pose are at least this thick
 
 var cost := 1000
 var entity := ""
@@ -21,24 +23,20 @@ func setup(level: Level, name_: String) -> void:
 	entity = name_
 	var e: Dictionary = level.entities[name_]
 	cost = int(e["params"].get("cost", 1000))
-	# rotation fitted to the entity's collider box (tools/wall_yaw.py), else the wall direction
-	var yaw: float = e.get("debris_yaw", e.get("wall_yaw", 0.0))
+	var root := Level.flag_transform(e["transform"])
 	var extra := OS.get_cmdline_user_args().find("--debris-yaw-add")
 	if extra >= 0:
-		yaw += deg_to_rad(float(OS.get_cmdline_user_args()[extra + 1]))
-	var root := level.entity_transform(name_)
-	global_transform = Transform3D(Basis(Vector3.UP, yaw), root.origin)
+		root.basis = Basis(Vector3.UP, deg_to_rad(float(OS.get_cmdline_user_args()[extra + 1]))) * root.basis
+	global_transform = root
 	_body = StaticBody3D.new()
 	add_child(_body)
 	for h in e["models"]:
-		var path := "res://assets/characters/levels/%s/dynamics/%s.glb" % [level.level_name, h]
-		if not ResourceLoader.exists(path):
+		var model := level.dynamics_model(h)   # rigged, else a static model (some Der Riese debris)
+		if model == null:
 			continue
-		var model: Node3D = (load(path) as PackedScene).instantiate()
 		_body.add_child(model)
 		if not e["children"].is_empty():
-			var p: Array = e["children"][-1]["pos"]
-			model.position = Vector3(p[0], p[1], p[2]) * Level.UNITS
+			model.transform = Level.flag_transform(e["children"][-1])
 		var aps := model.find_children("*", "AnimationPlayer")
 		if aps.size() > 0:
 			_anim = aps[0]
@@ -50,17 +48,26 @@ func setup(level: Level, name_: String) -> void:
 				_anim.play(_closed)
 				_anim.seek(0.0, true)
 				_anim.pause()
-	# the entity's own collision volume (CIwColliderSpec) blocks the whole passage;
-	# it is world aligned (entities carry no rotation) and raised so it cannot be jumped
-	for c in e.get("colliders", []):
+	# the entity's own collision volume (CIwColliderSpec box, entity frame) blocks the
+	# whole passage, raised so it cannot be jumped. The Shi No Numa gates with a real
+	# rotation only have a cylinder (a use radius), so they get the closed model's box
+	# (tools/wall_yaw.py "closed_box").
+	var boxes: Array = e.get("colliders", [])
+	if boxes.is_empty() and e.has("closed_box"):
+		boxes = [e["closed_box"]]
+	for c in boxes:
 		var lo := Vector3(c["min"][0], c["min"][1], c["min"][2]) * Level.UNITS
 		var hi := Vector3(c["max"][0], c["max"][1], c["max"][2]) * Level.UNITS + Vector3.UP * JUMP_GUARD
+		var mid := (lo + hi) / 2
+		var size := (hi - lo).max(Vector3(0.2, 0.2, 0.2))
+		if c == e.get("closed_box"):
+			size.z = max(size.z, MIN_DEPTH)
 		var shape := CollisionShape3D.new()
 		var box := BoxShape3D.new()
-		box.size = (hi - lo).max(Vector3(0.2, 0.2, 0.2))
+		box.size = size
 		shape.shape = box
 		_body.add_child(shape)
-		shape.global_transform = Transform3D(Basis(), root.origin + (lo + hi) / 2)
+		shape.position = mid
 
 
 # The rigs have a closed pose (1 key), an opening animation (many keys) and an

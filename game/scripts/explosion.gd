@@ -4,14 +4,28 @@
 # and the player is hurt by his own explosives when very close.
 class_name Explosion
 
+# Frag grenade, original values (effects group CSplashEffectSpec 925f425b, see
+# tools/weapon_stats.py): a flat 250 to every zombie within 1200 units = 3 m, no falloff;
+# line of sight is only checked beyond 960 units = 2.4 m ("los_free"). The splash's
+# target mask (0x10000) does not include the player: thrown grenades never hurt him;
+# the entity the grenade is attached to always takes the damage, so a grenade cooked
+# until it goes off in hand kills him (Grenade.in_hand; 250 > PlayerHealth 20/40).
 const FRAG := {
-	"radius": 5.0, "max_damage": 400.0, "min_damage": 60.0, "kill_radius": 1.5,
+	"radius": 3.0, "max_damage": 250.0, "min_damage": 250.0, "kill_radius": 0.0, "los_free": 2.4,
 	"crawl_chance": 0.5, "gib_chance": 0.4, "head_chance": 0.25,
-	"player_radius": 3.0, "player_damage": 80.0, "shake": 1.0, "shake_radius": 14.0,
+	"player_radius": 0.0, "player_damage": 0.0, "shake": 1.0, "shake_radius": 14.0,
 }
-# Ray Gun splash; max/min damage are fractions of the gun's damage
+# Monkey bomb: same splash volume, 10000 damage (CSplashEffectSpec 9cede4f8)
+const MONKEY := {
+	"radius": 3.0, "max_damage": 10000.0, "min_damage": 10000.0, "kill_radius": 0.0, "los_free": 2.4,
+	"crawl_chance": 0.5, "gib_chance": 0.4, "head_chance": 0.25,
+	"player_radius": 0.0, "player_damage": 0.0, "shake": 1.0, "shake_radius": 14.0,
+}
+# Ray Gun splash; max/min damage are fractions of the gun's damage. Original: the
+# projectile spawns a CSplashEffect (effects group 8e9001fb): the full 2450 to everything
+# within 900 units = 2.25 m, no falloff (tools/weapon_stats.py)
 const RAYGUN := {
-	"radius": 2.0, "max_damage": 0.35, "min_damage": 0.1, "kill_radius": 0.0,
+	"radius": 2.25, "max_damage": 1.0, "min_damage": 1.0, "kill_radius": 0.0,
 	"crawl_chance": 0.25, "gib_chance": 0.3, "head_chance": 0.0,
 	"player_radius": 1.6, "player_damage": 40.0, "shake": 0.35, "shake_radius": 4.0,
 }
@@ -35,7 +49,7 @@ static func blast(game: Node3D, pos: Vector3, by: Player, cfg: Dictionary, exclu
 		var d := pos.distance_to(closest)
 		if d > radius:
 			continue
-		if not _visible(space, eye, [(feet + top) * 0.5, top], by):
+		if d > float(cfg.get("los_free", 0.0)) and not _visible(space, eye, [(feet + top) * 0.5, top], by):
 			continue
 		var dmg := lerpf(float(cfg["max_damage"]), float(cfg["min_damage"]), clampf(d / radius, 0.0, 1.0))
 		if d < float(cfg["kill_radius"]):

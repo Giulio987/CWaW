@@ -18,7 +18,9 @@ var level_name := ""
 
 var _to_spawn := 0
 var _spawned := 0
-var _alive := 0
+var _alive := 0          # living enemies of the round: _live + dogs still on their way in
+var _live := {}          # tracked zombie/dog -> true, until it dies or leaves the tree
+var _dogs_pending := 0   # dogs whose lightning has struck but which are not in the tree yet
 var _spawn_timer := 0.0
 var _spawn_interval := 4.0
 var _initial_left := 0
@@ -231,7 +233,7 @@ func _process(delta: float) -> void:
 			_spawn_timer = _initial_interval / 4.0
 		else:
 			_spawn_timer = _spawn_interval
-	if _spawned >= _to_spawn and _alive <= 0:
+	if _spawned >= _to_spawn and alive_count() <= 0:
 		_between_rounds = true
 		Sfx.instance.play("end_wave")
 		_wave_end()
@@ -241,13 +243,13 @@ func _process(delta: float) -> void:
 # since the last one, then 1 in 3, always after four), FastWaves start sooner.
 func _wave_end() -> void:
 	if not dog_rounds:
-		get_tree().create_timer(8.0).timeout.connect(_next_round)
+		get_tree().create_timer(8.0, false).timeout.connect(_next_round)
 		return
 	waves_since_dog += 1
 	var dogs := waves_since_dog > 2 and (randi_range(1, 3) == 1 or waves_since_dog > 4)
 	if OS.get_cmdline_user_args().has("--dogs-next"):
 		dogs = true
-	get_tree().create_timer(5.5).timeout.connect(_start_dog_round if dogs else _next_round)
+	get_tree().create_timer(5.5, false).timeout.connect(_start_dog_round if dogs else _next_round)
 
 
 # One spawn candidate per Lua AvailableSpawns entry of the open areas:
@@ -357,8 +359,47 @@ func _make_zombie(c: Dictionary, origin: Vector3) -> Zombie:
 	add_child(z)
 	last_spawn = c["spawn"]
 	_spawned += 1
-	_alive += 1
+	_track(z)
 	return z
+
+
+# ------------------------------------------------------------------ round bookkeeping
+# Every zombie/dog of the round is tracked by node, not by a bare counter: a kill is
+# counted once however many times it is reported, and the round cannot end while a
+# tracked body is still alive. One that leaves the tree without dying (freed by
+# something else) is replaced: the wave spawns another.
+
+func _track(z: Zombie) -> void:
+	_live[z] = true
+	z.tree_exiting.connect(_on_tracked_exit.bind(z), CONNECT_ONE_SHOT)
+	_alive = _live.size() + _dogs_pending
+
+
+func _untrack(z: Zombie) -> bool:
+	var was := _live.erase(z)
+	_alive = _live.size() + _dogs_pending
+	return was
+
+
+func _on_tracked_exit(z: Zombie) -> void:
+	if not _live.has(z):
+		return
+	_untrack(z)
+	if z.state != Zombie.State.DEAD and not z is Dog and not _between_rounds and is_inside_tree():
+		_spawned = maxi(_spawned - 1, 0)
+
+
+# Living tracked enemies (pending dogs included). A tracked body counts while it is
+# not DEAD, whatever the kill signal said.
+func alive_count() -> int:
+	var n := _dogs_pending
+	for z in _live.keys():
+		if not is_instance_valid(z):
+			_live.erase(z)
+		elif (z as Zombie).state != Zombie.State.DEAD:
+			n += 1
+	_alive = _live.size() + _dogs_pending
+	return n
 
 
 # Spawns the original hides behind the jungle backdrop on Shi No Numa (its navmesh
@@ -525,11 +566,15 @@ func spawn_dog(untracked: bool) -> void:
 	var at: Vector3 = spots.slice(0, 2).pick_random()
 	if not untracked:
 		_dogs_spawned += 1
-		_alive += 1
+		_dogs_pending += 1
+		_alive = _live.size() + _dogs_pending
 	_lightning(at)
 	Sfx.instance.play_at("dog_spawn", at + Vector3.UP)
 	await get_tree().create_timer(0.6, false).timeout
 	var d := Dog.new()
+	if not untracked:
+		_dogs_pending -= 1
+		_track(d)
 	d.untracked = untracked
 	d.flame = Dog.roll_flame()   # "flame_dogSpawn" or "normal_dogSpawn"
 	d.setup_dog(at + Vector3.UP * 0.1, player, _dog_health if _dog_health > 0.0 else 300.0, level.windows[0])
@@ -542,9 +587,9 @@ func _on_dog_killed(d: Zombie, headshot: bool, knife: bool) -> void:
 		player.add_points((120 if knife else (90 if headshot else 50)) * points_multiplier)
 	if (d as Dog).untracked:
 		return
-	_alive -= 1
+	_untrack(d)
 	# EnemyKilled: the last dog of the round drops a Max Ammo, the round ends 2 s later
-	if dog_round and _dogs_spawned >= _dogs_total and _alive <= 0:
+	if dog_round and _dogs_spawned >= _dogs_total and alive_count() <= 0:
 		spawn_powerup("maxammo", d.global_position)
 		dog_round = false
 		_between_rounds = true
@@ -556,7 +601,7 @@ func _dog_round_end() -> void:
 	Sfx.instance.play("dog_end_music")
 	Sfx.instance.start_ambience(["zombies", "world", "wind"])
 	_fog(false)
-	get_tree().create_timer(6.0).timeout.connect(_next_round)
+	get_tree().create_timer(6.0, false).timeout.connect(_next_round)
 
 
 func _fog(on: bool) -> void:
@@ -600,7 +645,8 @@ func _lightning(at: Vector3) -> void:
 
 
 func _on_zombie_killed(z: Zombie, headshot: bool, knife: bool) -> void:
-	_alive -= 1
+	if not _untrack(z):
+		return   # not one of the round's, or already counted
 	# World at War: 130 knife kill, 100 headshot, 60 other (plus 10 per hit)
 	if not suppress_kill_points:
 		player.add_points((120 if knife else (90 if headshot else 50)) * points_multiplier)
@@ -622,6 +668,7 @@ func apply_powerup(kind: String) -> void:
 	Sfx.instance.play("14c4f851")  # pickup sting, then the announcer (as in the original sequences)
 	get_tree().create_timer(0.3, false).timeout.connect(Sfx.instance.play.bind(kind))
 	_show_powerup(Powerup.KINDS[kind]["label"])
+	Achievements.powerup(kind)   # before the nuke kills (achievements.gd)
 	match kind:
 		"maxammo":
 			for w in player.weapons:

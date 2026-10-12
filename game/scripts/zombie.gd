@@ -56,7 +56,15 @@ const ATTACK_DAMAGE := 45.0
 
 enum State { TO_WINDOW, TEARING, CLIMBING, CHASE, ATTACK, DEAD, RISING }
 
-var state := State.TO_WINDOW
+# Death is final: once DEAD no callback (climb/drop tween, rise timer, attack) can
+# bring the body back. Attempts are counted for the lifecycle tests.
+var state := State.TO_WINDOW:
+	set(v):
+		if state == State.DEAD and v != State.DEAD:
+			revive_blocked += 1
+			return
+		state = v
+var revive_blocked := 0
 var health := 100.0
 var window: Barricade
 var target: Player
@@ -265,6 +273,8 @@ func _update_speed_up(delta: float) -> void:
 
 func _physics_process(delta: float) -> void:
 	life += delta
+	if state == State.DEAD:
+		return
 	_update_speed_up(delta)
 	match state:
 		State.RISING:
@@ -521,13 +531,20 @@ func _start_tearing() -> void:
 	_play(TEAR)
 
 
+var _climb_tw: Tween
+
+
 func _start_climb() -> void:
 	state = State.CLIMBING
 	_play(CLIMB, 0.1)
 	collision_mask = 0
-	var tw := create_tween()
-	tw.tween_property(self, "global_position", window.inside, _anim.get_animation(CLIMB).length)
-	tw.finished.connect(func():
+	_climb_tw = create_tween()
+	_climb_tw.tween_property(self, "global_position", window.inside, _anim.get_animation(CLIMB).length)
+	_climb_tw.finished.connect(func():
+		# killed while climbing in: this used to set CHASE again, so the corpse got up
+		# and attacked (unshootable, already counted dead) until it was freed
+		if state == State.DEAD:
+			return
 		collision_mask = 1 | 4 | Level.NAV_FLOOR_LAYER
 		window.occupied_by = null
 		state = State.CHASE
@@ -707,6 +724,8 @@ static func crawler_health(hp: float, full: float, level_name: String) -> float:
 
 
 func become_crawler() -> void:
+	if crawler or state == State.DEAD:
+		return
 	crawler = true
 	var g := get_parent() as Game
 	if max_health < 1e5:   # tests use huge health on purpose
@@ -738,7 +757,12 @@ func nuke_kill() -> void:
 
 
 func _die(headshot: bool, knife := false) -> void:
+	if state == State.DEAD:
+		return   # killed (and counted) once only
 	_end_unstick()
+	# the climb through the window stops where it is (its end would set CHASE)
+	if _climb_tw and _climb_tw.is_valid():
+		_climb_tw.kill()
 	Sfx.instance.play_at("zombie_death", global_position + Vector3.UP * 1.5)
 	if headshot:
 		lose_head()

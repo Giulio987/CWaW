@@ -16,6 +16,7 @@ const RED := Color(0.62, 0.04, 0.03)
 var _selected := 0
 var _cards := []
 var _title: Label
+var _achievements: AchievementsScreen
 
 
 func _ready() -> void:
@@ -69,6 +70,20 @@ func _ready() -> void:
 	play_btn.offset_bottom = -40
 	play_btn.pressed.connect(func(): play.emit(MAPS[_selected]["id"]))
 	add_child(play_btn)
+	var ach_btn := Button.new()
+	ach_btn.text = "OBIETTIVI"
+	ach_btn.add_theme_font_override("font", UiArt.font())
+	ach_btn.add_theme_font_size_override("font_size", 34)
+	ach_btn.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85))
+	ach_btn.add_theme_color_override("font_hover_color", Color(1, 0.2, 0.1))
+	ach_btn.flat = true
+	ach_btn.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	ach_btn.offset_left = -250
+	ach_btn.offset_right = -24
+	ach_btn.offset_top = -86
+	ach_btn.offset_bottom = -30
+	ach_btn.pressed.connect(show_achievements)
+	add_child(ach_btn)
 	_select(0)
 
 
@@ -128,7 +143,18 @@ func _select(i: int) -> void:
 		(c.get_child(1) as Label).add_theme_color_override("font_color", RED if picked else Color(0.85, 0.85, 0.85))
 
 
+# achievement list over the menu (achievements_screen.gd)
+func show_achievements() -> AchievementsScreen:
+	if _achievements == null:
+		_achievements = AchievementsScreen.new()
+		add_child(_achievements)
+		_achievements.closed.connect(func(): _achievements = null)
+	return _achievements
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if _achievements != null:
+		return
 	if event.is_action_pressed("ui_right"):
 		_select((_selected + 1) % MAPS.size())
 	elif event.is_action_pressed("ui_left"):

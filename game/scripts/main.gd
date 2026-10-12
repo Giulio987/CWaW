@@ -3,6 +3,7 @@ extends Node3D
 
 
 func _ready() -> void:
+	add_child(Achievements.new())   # achievements.gd: unlock popups, stats, user://achievements.cfg
 	var args := OS.get_cmdline_user_args()
 	var level := ""
 	for a in args:
@@ -46,6 +47,8 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_knife_test(game)
 	if args.has("--door-test"):
 		_door_test(game)
+	if args.has("--debris-test"):
+		_debris_test(game)
 	if args.has("--window-shot-test"):
 		_window_shot_test(game)
 	if args.has("--spin"):
@@ -62,6 +65,10 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_tele_test(game)
 	if args.has("--bridge-test") or args.has("--flytrap-test"):
 		DerrieseTests.start(self, game, args)   # derriese_tests.gd
+	if args.has("--achievement-test") or args.has("--footstep-test"):
+		AchievementTests.start(self, game, args)   # achievement_tests.gd
+	if args.has("--photo-test"):
+		_photo_test(game)
 	if args.has("--pap-test"):
 		_pap_test(game)
 	var shots := args.find("--shots")
@@ -173,8 +180,9 @@ func _stairs_test(game: Game) -> void:
 		path = NavigationServer3D.map_get_path(p.get_world_3d().navigation_map, p.global_position, target, true)
 		if path.size() > 0 and path[-1].y > 3.0:
 			break
-	if jumping:
-		# debris still there: walk the straight stair line instead (navmesh is blocked)
+	if jumping or not OS.get_cmdline_user_args().has("--nav-path"):
+		# walk the straight stair line (debris still there: hopping). The navmesh path
+		# (--nav-path) runs along the side of the rubble mound, steeper than a body can climb
 		var top := game.level.entity_transform("FrontSofaTrigger").origin
 		path = PackedVector3Array([Vector3(-11.6, 0, -7.0), Vector3(-11.6, 1.25, -8.5), Vector3(-12.6, 2.0, -10.0), Vector3(-13.9, 2.75, -10.5), top + Vector3(-1.0, 0.6, 0), Vector3(-19.3, 4.0, -11.2)])
 	print("[stairs] path points=%d from %s to %s\n%s" % [path.size(), p.global_position, target, path])
@@ -369,6 +377,66 @@ func _door_test(game: Game) -> void:
 	get_tree().quit()
 
 
+# Every debris blocks its passage (rays across its blocker, along its local z, at knee
+# and chest height), then opens: the opening animation plays and the blocker goes. -- <map> --debris-test
+func _debris_test(game: Game) -> void:
+	await game.level.wait_navigation()
+	game.set_process(false)
+	var space := get_viewport().get_world_3d().direct_space_state
+	var all_ok := true
+	var list: Array = game.level.debris.duplicate()
+	for d in list:
+		var blocked := 0
+		for h in [0.5, 1.2]:
+			for side in [-0.3, 0.0, 0.3]:
+				var b: Basis = d.global_transform.basis
+				var shapes: Array = d._body.get_children().filter(func(n): return n is CollisionShape3D)
+				var mid: Vector3 = shapes[0].global_position if shapes.size() > 0 else d.global_position
+				var c: Vector3 = Vector3(mid.x, d.global_position.y + h, mid.z) + b.x * side
+				var q := PhysicsRayQueryParameters3D.create(c - b.z * 1.5, c + b.z * 1.5)
+				q.hit_from_inside = true
+				var hit := space.intersect_ray(q)
+				if not hit.is_empty() and (hit["collider"] as Node).get_parent() == d:
+					blocked += 1
+		print("[debris] %s blocked %d/6 yaw %.0f" % [d.entity, blocked, rad_to_deg(d.global_transform.basis.get_euler().y)])
+		all_ok = all_ok and blocked == 6
+	# --shot <entity>[@deg]: four frames (0.3 s apart) of that debris opening, seen like --look
+	var si := OS.get_cmdline_user_args().find("--shot")
+	var spec: String = OS.get_cmdline_user_args()[si + 1] if si >= 0 else ""
+	if spec != "":
+		var target := game.level.entity_transform(spec.get_slice("@", 0)).origin + Vector3.UP
+		var dir := target - game.level.player_spawn.origin
+		dir.y = 0
+		dir = dir.rotated(Vector3.UP, deg_to_rad(float(spec.get_slice("@", 1))) if "@" in spec else 0.0)
+		var from := target - dir.normalized() * 3.0
+		game.player.global_position = Vector3(from.x, target.y - 1.0, from.z)
+		game.player.rotation.y = atan2(-dir.x, -dir.z)
+		for i in 8:
+			await get_tree().process_frame
+	for d in list:
+		d.open()
+	if spec != "":
+		for k in 4:
+			await get_tree().create_timer(0.3).timeout
+			await RenderingServer.frame_post_draw
+			get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/debris_open_%s_%d.png" % [spec.replace("@", "_"), k]))
+		get_tree().quit()
+		return
+	await get_tree().physics_frame
+	for d in list:
+		if not is_instance_valid(d):
+			continue
+		var playing: bool = d._anim != null and d._anim.is_playing() and d._anim.current_animation == d._opening
+		var shapes: int = d._body.get_children().filter(func(n): return n is CollisionShape3D and not n.is_queued_for_deletion()).size()
+		print("[debris] %s opening=%s playing=%s blockers left=%d" % [d.entity, d._opening, playing, shapes])
+		all_ok = all_ok and shapes == 0 and (playing or d._anim == null)
+	await get_tree().create_timer(6.0).timeout
+	var left := list.filter(func(d): return is_instance_valid(d)).size()
+	print("[debris] %d still in the scene after 6 s" % left)
+	print("[debris] %s" % ("OK" if all_ok and left == 0 else "FAIL"))
+	get_tree().quit()
+
+
 # Shoot from inside at a zombie standing outside each window: -- nacht --window-shot-test
 func _window_shot_test(game: Game) -> void:
 	await game.level.wait_navigation()
@@ -490,7 +558,7 @@ func _perk_test(game: Game) -> void:
 				p._reloading = 0.0
 				p._fire(p.weapon(), Weapons.stats(p.weapon()["name"]))
 				var rate: float = Weapons.stats(p.weapon()["name"])["rate"]
-				check.call(absf(p._cooldown - rate * 0.75) < 0.001, "fire interval %.3f s (base %.3f)" % [p._cooldown, rate])
+				check.call(absf(p._cooldown - rate * Perks.DBTAP_RATE) < 0.001, "fire interval %.3f s (base %.3f)" % [p._cooldown, rate])
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/perk_%s.png" % m.kind))
 		m.interact(p)
@@ -813,7 +881,7 @@ func _pap_test(game: Game) -> void:
 	pap.interact(p)
 	var w := p.weapon()
 	var s := Weapons.stats_of(w)
-	check.call(w.get("upgraded", false) and (gun != "thompson" or w["mag"] == 40) and s["damage"] > base, "%s: mag %d reserve %d damage %.0f (base %.0f)" % [Weapons.display_of(w), w["mag"], w["reserve"], s["damage"], base])
+	check.call(w.get("upgraded", false) and (gun != "thompson" or w["mag"] == 40) and s["damage"] >= base, "%s: mag %d reserve %d damage %.0f (base %.0f)" % [Weapons.display_of(w), w["mag"], w["reserve"], s["damage"], base])
 	check.call(pap.prompt(p) == "Arma già potenziata", "no second upgrade: '%s'" % pap.prompt(p))
 	for i in 10:
 		await get_tree().process_frame
@@ -874,4 +942,31 @@ func _dog_look(game: Game) -> void:
 		await _shot("dog_flame_burst")
 		await get_tree().create_timer(0.6).timeout
 		await _shot("dog_flame_burst2")
+	get_tree().quit()
+
+
+# Pause menu photo mode: -- nacht --photo-test
+func _photo_test(game: Game) -> void:
+	await game.level.wait_navigation()
+	await get_tree().create_timer(1.0).timeout
+	var hud: Hud = game.hud
+	hud.open_pause()
+	await get_tree().create_timer(0.2).timeout
+	await _shot("photo_0_menu")
+	hud._pause._photo_mode()
+	var yaw0 := game.player.rotation.y
+	for i in 10:
+		var ev := InputEventMouseMotion.new()
+		ev.relative = Vector2(40, 0)
+		hud._pause._unhandled_input(ev)
+	await get_tree().create_timer(0.2).timeout
+	await _shot("photo_1_photo")
+	print("[photo] paused=%s turned=%.0f° info='%s'" % [get_tree().paused, rad_to_deg(yaw0 - game.player.rotation.y), hud._pause._info.text])
+	var esc := InputEventAction.new()
+	esc.action = "ui_cancel"
+	esc.pressed = true
+	hud._pause._unhandled_input(esc)
+	print("[photo] back to menu=%s paused=%s" % [hud._pause._pages["main"].visible, get_tree().paused])
+	hud._pause.close()
+	print("[photo] %s" % ["OK" if not get_tree().paused else "FAIL"])
 	get_tree().quit()

@@ -32,6 +32,10 @@ func _ready() -> void:
 		(func(): ZombieTests.run(self)).call_deferred()
 	elif args.has("--swamp-test"):   # map | rise | zipline (swamp_tests.gd, Shi No Numa)
 		(func(): load("res://scripts/swamp_tests.gd").run(self)).call_deferred()
+	if args.has("--life-watch"):   # alongside the bot: round counters and corpses (lifecycle_tests.gd)
+		var lw: Node = load("res://scripts/lifecycle_tests.gd").new()
+		lw.game = game
+		add_child(lw)
 	if args.has("--zombie-watch"):   # alongside the bot: zombies slow to reach windows
 		(func(): ZombieTests.watch(self)).call_deferred()
 	var dir := ProjectSettings.globalize_path("res://../analysis/autotest")

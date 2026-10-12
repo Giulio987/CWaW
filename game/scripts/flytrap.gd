@@ -220,6 +220,7 @@ func _go() -> void:
 	activated = true
 	triggers[TRIGGER].enabled = false
 	print("[flytrap] achievement der_ElevateYourSenses")
+	Achievements.unlock("der_ElevateYourSenses")
 	if _ring:
 		_ring.visible = true
 		_ring_t = 0.0

@@ -126,6 +126,7 @@ func _physics_process(delta: float) -> void:
 		# cooked too long: it goes off in the player's hand
 		var cam := player.get_viewport().get_camera_3d()
 		var g := Grenade.spawn(player.game, cam.global_position - cam.global_basis.z * 0.4 - Vector3.UP * 0.3, Vector3.ZERO, 0.0, player)
+		g.in_hand = true
 		g.explode()
 		_drop_in_hand()
 		cooking = false

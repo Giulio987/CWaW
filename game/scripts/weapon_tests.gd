@@ -93,8 +93,8 @@ static func _grenade(at: Node, game: Game) -> void:
 		"centre": _zombie(game, c + side * 0.4, 150.0),
 		"near": _zombie(game, c - side * 1.0, 150.0),
 		"mid": _zombie(game, c + side * 2.2, 150.0),
-		"tough_a": _zombie(game, c - side * 2.6, 2e5),
-		"tough_b": _zombie(game, c + fwd * 0.1 + side * 3.2, 2e5),
+		"tough_a": _zombie(game, c - side * 1.6, 2e5),   # original frag: flat 250 within 3 m
+		"tough_b": _zombie(game, c + fwd * 0.4 + side * 1.9, 2e5),
 		"far": _zombie(game, c - side * 6.5, 150.0),
 	}
 	await _wait(at, 0.4)
@@ -118,7 +118,7 @@ static func _grenade(at: Node, game: Game) -> void:
 	print("[wfx] grenade result %s states %s" % [r, st])
 	var ok: bool = zs["centre"].state == Zombie.State.DEAD and zs["near"].state == Zombie.State.DEAD \
 		and zs["far"].state != Zombie.State.DEAD and zs["far"].health == 150.0 \
-		and (zs["tough_a"].health < 2e5 or zs["tough_b"].health < 2e5)
+		and zs["tough_a"].health == 2e5 - Explosion.FRAG["max_damage"] and zs["tough_b"].health == 2e5 - Explosion.FRAG["max_damage"]
 	print("[wfx] grenade damage %s" % ("OK" if ok else "FAIL"))
 	print("[wfx] player hurt by far grenade: %s" % ("no OK" if r["player"] == 0.0 else "yes FAIL"))
 

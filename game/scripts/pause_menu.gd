@@ -1,6 +1,8 @@
 # In-game pause menu (Esc on Mac, pause button on touch): Riprendi,
 # Impostazioni (sensitivity, invert Y, FOV, volumes - saved by Settings),
-# Torna al menu principale (with confirmation).
+# Torna al menu principale (with confirmation), Modalità foto (debug: the game stays
+# paused with no menu over it, the mouse still looks around, a corner line shows map,
+# position and view direction so a screenshot says where it was taken).
 class_name PauseMenu
 extends CanvasLayer
 
@@ -9,6 +11,9 @@ signal closed
 var game: Node  # Game
 var _pages := {}
 var _was_captured := false
+var _shade: ColorRect
+var _photo := false
+var _info: Label
 
 
 func _init() -> void:
@@ -18,13 +23,15 @@ func _init() -> void:
 
 
 func _ready() -> void:
-	var shade := ColorRect.new()
-	shade.color = Color(0, 0, 0, 0.72)
-	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(shade)
+	_shade = ColorRect.new()
+	_shade.color = Color(0, 0, 0, 0.72)
+	_shade.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_shade)
 	_pages["main"] = _page("PAUSA", [
 		["Riprendi", close],
 		["Impostazioni", func(): _show("settings")],
+		["Obiettivi", func(): add_child(AchievementsScreen.new())],   # achievements_screen.gd (closes itself)
+		["Modalità foto (debug)", _photo_mode],
 		["Torna al menu principale", func(): _show("confirm")],
 	])
 	_pages["confirm"] = _page("Tornare al menu principale?\nI progressi andranno persi.", [
@@ -52,6 +59,8 @@ func open() -> void:
 func close() -> void:
 	if not visible:
 		return
+	if _photo:
+		_end_photo()
 	Settings.save()
 	visible = false
 	get_tree().paused = false
@@ -78,7 +87,61 @@ func _first_focusable(n: Node) -> Control:
 	return null
 
 
+func _photo_mode() -> void:
+	_photo = true
+	_shade.visible = false
+	for k in _pages:
+		_pages[k].visible = false
+	if _info == null:
+		_info = Label.new()
+		_info.position = Vector2(12, 8)
+		_info.add_theme_font_size_override("font_size", 16)
+		_info.add_theme_color_override("font_outline_color", Color.BLACK)
+		_info.add_theme_constant_override("outline_size", 4)
+		add_child(_info)
+	_info.visible = true
+	_update_info()
+	if DisplayServer.is_touchscreen_available():
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _end_photo() -> void:
+	_photo = false
+	_shade.visible = true
+	_info.visible = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_show("main")
+
+
+func _update_info() -> void:
+	var p = game.get("player") if game else null
+	if p == null or _info == null:
+		return
+	var cam: Camera3D = p.get_viewport().get_camera_3d()
+	var pos: Vector3 = p.global_position
+	var lvl = game.get("level")
+	var sector: String = lvl.sector_at(pos) if lvl and lvl.has_method("sector_at") else ""
+	_info.text = "FOTO (debug) · %s · round %d · pos (%.2f, %.2f, %.2f)%s · yaw %.0f° pitch %.0f° · Esc o doppio tocco: torna" % [
+		game.get("level_name"), game.get("round_number"), pos.x, pos.y, pos.z,
+		(" · settore " + sector) if sector != "" else "",
+		rad_to_deg(p.rotation.y), rad_to_deg(cam.rotation.x) if cam else 0.0]
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if _photo:
+		get_viewport().set_input_as_handled()
+		var p = game.get("player") if game else null
+		if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and p:
+			p.look(event.relative * Player.MOUSE_SENS * Settings.mouse_sens())
+			_update_info()
+		elif event is InputEventScreenDrag and p:
+			p.look(event.relative * 0.005 * Settings.touch_sens())
+			_update_info()
+		elif event.is_action_pressed("ui_cancel") or (event is InputEventScreenTouch and event.double_tap):
+			_end_photo()
+		return
 	if visible and event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
 		if _pages["main"].visible:

@@ -32,6 +32,8 @@ static func run(at: Node) -> void:
 			await _drop(at, game)
 		"speedup":
 			await _speedup(at, game)
+		"lifecycle":   # lifecycle_tests.gd
+			await load("res://scripts/lifecycle_tests.gd").run(at)
 	at.get_tree().quit()
 
 

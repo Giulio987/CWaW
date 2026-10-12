@@ -4,8 +4,8 @@ class_name Perks
 extends RefCounted
 
 const JUGG_HEALTH := 250.0     # Juggernog: max health 100 -> 250
-const SPEED_RELOAD := 0.5      # Speed Cola: reload time x0.5
-const DBTAP_RATE := 0.75       # Double Tap: fire interval x0.75
+const SPEED_RELOAD := 0.5      # Speed Cola: reload time x0.5 (original: the guns' reload states run at double speed)
+const DBTAP_RATE := 0.5        # Double Tap: fire interval x0.5 (original: the fire states run at double speed, tools/weapon_stats.py)
 const REVIVE_GRACE := 3.0      # Quick Revive (solo): seconds of invulnerability after getting up
 
 # perk -> display name, HUD colour, icon index in the perk atlas, default cost

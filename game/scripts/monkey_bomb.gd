@@ -133,7 +133,7 @@ func explode() -> void:
 	for z in lured:
 		if is_instance_valid(z) and z.get("lure") == self:
 			z.set("lure", null)
-	var res := Explosion.blast(game, pos, by, Explosion.FRAG)
+	var res := Explosion.blast(game, pos, by, Explosion.MONKEY)
 	res["lured"] = lured.size()
 	last_result = res
 	Explosion.frag_effect(game, pos)

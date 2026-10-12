@@ -207,6 +207,7 @@ func trigger(n: String, _by: Player) -> void:
 		print("[egg] trigger %s" % n)
 	match n:
 		"RadioVolume":
+			Achievements.unlock("radioSilence")   # nacht.lua: Game.SetAchievement("radioSilence")
 			var ch := radio_channel
 			for k in [1, 2, 3]:
 				if k != ch:
@@ -215,6 +216,7 @@ func trigger(n: String, _by: Player) -> void:
 				_enable("RadioTrack%d" % ch)
 			radio_channel = ch + 1 if ch < 4 else 1
 		"DentistChairVolume":
+			Achievements.unlock("ver_openwide")   # verruckt.lua: Game.SetAchievement("ver_openwide")
 			_disable_trigger(n)
 			_enable("DentistWhizz")
 			_timeout(5500, _disable.bind("DentistWhizz"))
@@ -248,6 +250,7 @@ func trigger(n: String, _by: Player) -> void:
 func _telephone() -> void:
 	match telephone_state:
 		"OffStart":
+			Achievements.unlock("ea47fa40")   # "Dead Air": activate the phone (no Lua call: engine)
 			_disable_trigger("TelephoneNoiseTrigger")
 			_disable("TelephoneOffHookEmitter")
 			_enable("TelephoneNoiseEmitter")

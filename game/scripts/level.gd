@@ -312,6 +312,24 @@ static func _to_transform(xf: Dictionary) -> Transform3D:
 		Vector3(p[0], p[1], p[2]) * UNITS)
 
 
+# A transform stored with the identity quaternion keeps quarter turns about Y in the
+# byte after it (tools/entities.py "flags"): 0x10 = -90°, 0x04 = 180°. Measured on the
+# debris, whose doors and frames fill their doorways only with these turns (and whose
+# colliders turn with them). Only Debris uses it so far: other entities are placed
+# and tuned without it.
+static func flag_transform(xf: Dictionary) -> Transform3D:
+	var t := _to_transform(xf)
+	var f = xf.get("flags")
+	if f == null:
+		return t
+	var yaw := 0.0
+	if int(f) & 0x10:
+		yaw -= PI / 2
+	if int(f) & 0x04:
+		yaw += PI
+	return Transform3D(Basis(Vector3.UP, yaw) * t.basis, t.origin)
+
+
 func has_entity(name: String) -> bool:
 	return entities.has(name) or _by_lower.has(name.to_lower())
 

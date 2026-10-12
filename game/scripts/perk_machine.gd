@@ -155,6 +155,7 @@ func prompt(player: Player) -> String:
 func interact(player: Player) -> void:
 	if kind == "power":
 		if not level.power_on:
+			Achievements.unlock("ver_yougotpowah")   # verruckt.lua GeneratorSwitch (Verrückt only)
 			level.turn_on_power()
 			Sfx.instance.play_at(Sfx.iw_hash("genswitch"), global_position + Vector3.UP)
 		return

@@ -7,7 +7,9 @@ const TICK := 0.5
 
 var zombie: Zombie
 var by: Player
-var dps := 150.0
+var dps := 150.0         # while in the flame jet
+var after_dps := 150.0   # once out of it (original CPeriodicDamage c38dd981: 150 every 1 s for 10 s)
+var _jet := 0.0          # seconds left of in-jet damage (refreshed by each jet pulse)
 var _left := 0.0
 var _tick := 0.0
 var _fx: CPUParticles3D
@@ -15,7 +17,8 @@ var _light: OmniLight3D
 var _dying := false
 
 
-static func ignite(z: Zombie, player: Player, damage_per_s: float, afterburn: float) -> Burning:
+# afterburn_dps < 0: keep burning at damage_per_s after leaving the jet
+static func ignite(z: Zombie, player: Player, damage_per_s: float, afterburn: float, afterburn_dps := -1.0) -> Burning:
 	var b := z.get_node_or_null("Burning") as Burning
 	if b == null:
 		b = Burning.new()
@@ -24,7 +27,9 @@ static func ignite(z: Zombie, player: Player, damage_per_s: float, afterburn: fl
 		z.add_child(b)
 		b._tick = 0.15   # first damage almost at once
 	b.by = player
-	b.dps = maxf(b.dps if b._left > 0.0 else 0.0, damage_per_s)
+	b.dps = maxf(b.dps if b._jet > 0.0 else 0.0, damage_per_s)
+	b.after_dps = damage_per_s if afterburn_dps < 0.0 else afterburn_dps
+	b._jet = 0.2
 	b._left = maxf(b._left, afterburn)
 	return b
 
@@ -64,8 +69,11 @@ func _process(delta: float) -> void:
 	_tick -= delta
 	if _tick <= 0.0:
 		_tick = TICK
+		var hurt := (dps if _jet > 0.0 else after_dps) * TICK
 		if by != null and is_instance_valid(by):
-			zombie.take_damage(dps * TICK, false, by)
+			Achievements.event("flamethrower.totaldamage", minf(hurt, maxf(zombie.health, 0.0)))
+			zombie.take_damage(hurt, false, by)
+	_jet -= delta
 	if _left <= 0.0 and zombie.state != Zombie.State.DEAD:
 		_fx.emitting = false
 		set_process(false)

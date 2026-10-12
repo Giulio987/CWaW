@@ -70,7 +70,9 @@ func give_weapon(name: String) -> void:
 			changed.emit()
 			return
 	var st := Weapons.stats(name)
-	var w := {"name": name, "mag": st["mag"], "reserve": st["reserve"] - st["mag"]}
+	# reserve = spare ammo besides the magazine (original CItemGun); the start pistol
+	# gets Weapons.START_RESERVE like the original Lua (AddPlayerWeapon("colt45", 32))
+	var w := {"name": name, "mag": st["mag"], "reserve": Weapons.START_RESERVE if weapons.is_empty() and name == "colt45" else st["reserve"]}
 	if weapons.size() >= 2:
 		weapons[current] = w  # two-weapon limit: replace the one in hand
 	else:
@@ -213,6 +215,7 @@ func _physics_process(delta: float) -> void:
 	if is_on_floor():
 		Stairs.step_up(self, delta)
 	move_and_slide()
+	_footsteps(delta)
 
 	var w := weapon()
 	var s := Weapons.stats_of(w)
@@ -232,11 +235,55 @@ func _physics_process(delta: float) -> void:
 		interact()
 
 
+# Footsteps, as the original player update does them (CPlayer, kiwi 0x1a1f88):
+# when the step timer has run out and the player moves, the next sound of
+# WalkingFootstepSounds (console.bin: player_footstep_walk3,player_footstep_walk4)
+# plays, or of WalkingFootstepWaterSounds (water_walk1,water_walk2) when the floor
+# is water (collision material flag 2 there; the swamp water of level.gd here), in
+# turn with one shared index; then the timer restarts at
+# FootstepSpeedMultiplier / (|vx| + |vz|) of the velocity in the player's frame: the
+# faster (and the more diagonal the stick: it is the Manhattan length) the player
+# moves, the closer the steps; wading at half speed
+# (WaterMoveSpeedModifier) doubles the interval. FootstepSpeedMultiplier (fixed 14/4096
+# per world unit/frame of the original) is set here as metres of |vx|+|vz| per step,
+# calibrated by ear (0.42 s at walking speed). Sound specs: volume 0x599/4096
+# (-9 dB), pitch 0x0c00/4096 (0.75). The original has no zombie footsteps.
+const FOOTSTEPS := ["player_footstep_walk3", "player_footstep_walk4"]
+const FOOTSTEPS_WATER := ["water_walk1", "water_walk2"]
+const FOOTSTEP_STRIDE := 1.75
+const FOOTSTEP_DB := -9.1
+const FOOTSTEP_PITCH := 0.75
+var _step_t := 0.0
+var _step_i := 0
+var footsteps_log := []   # [time, sound] (tests)
+
+
+func _footsteps(delta: float) -> void:
+	_step_t -= delta
+	if _step_t > 0.0 or not is_on_floor():
+		return
+	var v := global_basis.inverse() * get_real_velocity()   # in the player's frame, as the original's
+	var hv := absf(v.x) + absf(v.z)
+	if hv < 0.05:
+		return
+	var water: bool = game != null and game.level != null and game.level.in_water(global_position)
+	var list: Array = FOOTSTEPS_WATER if water else FOOTSTEPS
+	if _step_i >= list.size():
+		_step_i = 0
+	if Sfx.instance:
+		Sfx.instance.play(list[_step_i], FOOTSTEP_DB, FOOTSTEP_PITCH)
+	if footsteps_log.size() < 200:
+		footsteps_log.append([Time.get_ticks_msec() / 1000.0, list[_step_i]])
+	_step_i += 1
+	_step_t = FOOTSTEP_STRIDE / hv
+
+
 func _fire(w: Dictionary, s: Dictionary) -> void:
 	if w["mag"] <= 0:
 		reload()
 		return
 	w["mag"] -= 1
+	Achievements.fired(w["name"])
 	_cooldown = s["rate"] * (Perks.DBTAP_RATE if has_perk("dbtap") else 1.0)
 	_viewmodel.kick()
 	if w["name"] != "flamethrower":   # FlameJet plays its own fire loop
@@ -244,30 +291,80 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 	_camera.rotation.x = min(_camera.rotation.x + 0.012, 1.45)
 	var space := get_world_3d().direct_space_state
 	# Ray Gun bolt / flamethrower cone (weapon_fx.gd) replace the hitscan
-	var pellets: int = 0 if WeaponFx.fire(self, w, s, _camera) else int(s["pellets"])
-	for p in pellets:
-		var spread := Vector3.ZERO
-		if s["pellets"] > 1:
-			spread = Vector3(randf_range(-1, 1), randf_range(-1, 1), 0) * 0.06
-		var from := _camera.global_position
-		var dir := (-_camera.global_basis.z + _camera.global_basis * spread).normalized()
-		var q := PhysicsRayQueryParameters3D.create(from, from + dir * s["range"], 1 | 2)  # bullets ignore window blockers
-		q.exclude = [get_rid()]
-		var hit := space.intersect_ray(q)
-		RadioEggs.bullet(self, from, (hit["position"] as Vector3) + dir * 0.5 if not hit.is_empty() else from + dir * s["range"])   # easter-egg triggers
-		if hit.is_empty():
-			continue
-		var target: Object = hit["collider"]
-		if target is Zombie:
-			var head: bool = (hit["position"] as Vector3).y > target.global_position.y + 1.45
-			var dmg: float = s["damage"] * (float(s.get("head", 2.0)) if head else 1.0)
-			target.take_damage(dmg, head, self, false, hit["position"])
-		else:
-			game.spawn_impact(hit["position"], hit["normal"])
+	if not WeaponFx.fire(self, w, s, _camera):
+		_fire_bullet(s, space)
 	game.muzzle_flash(_camera)
 	if w["mag"] == 0:
 		reload()
 	changed.emit()
+
+
+# One shot as in the original (weapons.gd): the bullet goes through up to s.hits
+# zombies (each one passed lowers the damage) and stops at the first wall; shotguns
+# hit every zombie inside their cone once (no pellets). Damage from Weapons.hit_damage.
+func _fire_bullet(s: Dictionary, space: PhysicsDirectSpaceState3D) -> void:
+	var from := _camera.global_position
+	var dir := -_camera.global_basis.z
+	var reach := float(s.get("range", Weapons.RANGE))
+	var exclude: Array[RID] = [get_rid()]
+	var targets := []   # [distance, zombie, hit position, head]
+	var first := Vector3.INF
+	var cone := float(s.get("cone", 0.0))
+	while targets.size() < int(s.get("hits", 1)):
+		var q := PhysicsRayQueryParameters3D.create(from, from + dir * reach, 1 | 2)  # bullets ignore window blockers
+		q.exclude = exclude
+		var hit := space.intersect_ray(q)
+		if hit.is_empty():
+			break
+		var pos: Vector3 = hit["position"]
+		if first == Vector3.INF:
+			first = pos
+		var target: Object = hit["collider"]
+		if not target is Zombie:
+			game.spawn_impact(pos, hit["normal"])
+			reach = from.distance_to(pos)
+			break
+		var z := target as Zombie
+		exclude.append(z.get_rid())
+		targets.append([from.distance_to(pos), z, pos, pos.y > z.global_position.y + 1.45])
+	RadioEggs.bullet(self, from, first + dir * 0.5 if first != Vector3.INF else from + dir * reach)   # easter-egg triggers
+	if cone > 0.0:
+		targets = _cone_targets(s, space, from, dir, cone)
+	for i in targets.size():
+		var t: Array = targets[i]
+		var z: Zombie = t[1]
+		if not is_instance_valid(z):
+			continue
+		var pos: Vector3 = t[2]
+		var lateral := (pos - from - dir * dir.dot(pos - from)).length() if cone > 0.0 else 0.0
+		var loc := -1 if cone > 0.0 else Weapons.location(z, pos, t[3])
+		z.take_damage(Weapons.hit_damage(s, t[0], i, loc, lateral), t[3], self, false, pos)
+
+
+# Zombies inside the shotgun cone (full angle `cone` degrees, up to s.hits, nearest
+# first) with a clear line from the muzzle: [distance, zombie, aim point, false].
+func _cone_targets(s: Dictionary, space: PhysicsDirectSpaceState3D, from: Vector3, dir: Vector3, cone: float) -> Array:
+	var tan_half := tan(deg_to_rad(cone * 0.5))
+	var reach := float(s.get("range", Weapons.RANGE))
+	var out := []
+	for n in get_tree().get_nodes_in_group("zombies"):
+		var z := n as Zombie
+		if z == null or z.state == Zombie.State.DEAD:
+			continue
+		var c := z.global_position + Vector3.UP * (0.35 if z.crawler or z is Dog else 1.1)
+		var along := dir.dot(c - from)
+		if along <= 0.05 or along > reach:
+			continue
+		var off := (c - from - dir * along).length()
+		if off > along * tan_half + 0.3:   # cone vs the zombie's ~0.3 m body
+			continue
+		var aim := from + dir * along + (c - from - dir * along).limit_length(maxf(off - 0.3, 0.0))
+		var q := PhysicsRayQueryParameters3D.create(from, aim, 1)   # walls only
+		if not space.intersect_ray(q).is_empty():
+			continue
+		out.append([along, z, aim, false])
+	out.sort_custom(func(a, b): return a[0] < b[0])
+	return out.slice(0, int(s.get("hits", 1)))
 
 
 func _finish_reload() -> void:
@@ -283,6 +380,7 @@ func add_points(n: int) -> void:
 	if n < 0:
 		print("[points] spent %d at %s" % [-n, global_position])
 	points += n
+	Achievements.points(n)
 	changed.emit()
 
 
@@ -403,6 +501,7 @@ func interact() -> void:
 		if _repair_cooldown <= 0.0 and t.repair_board():
 			_repair_cooldown = 1.0
 			add_points(10)
+			Achievements.repaired(10)
 			Sfx.instance.play_at("window_repair", t.global_position)
 	elif not Input.is_action_just_pressed("interact"):
 		return

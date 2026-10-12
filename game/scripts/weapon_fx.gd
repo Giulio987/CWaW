@@ -16,7 +16,8 @@ const TEX := "res://assets/textures/ingame/effects/%s.png"
 
 const FLAME_CONE := 18.0       # degrees, half angle
 const FLAME_DPS_MUL := 10.0    # burn damage per second = weapon damage x this
-const FLAME_AFTERBURN := 3.0   # seconds a zombie keeps burning out of the jet
+const FLAME_AFTERBURN := 10.0  # seconds a zombie keeps burning out of the jet (original CPeriodicDamage: 10 s)
+const FLAME_AFTERBURN_DPS := 150.0   # original: 150 every 1 s
 
 static var _mats := {}
 
@@ -59,7 +60,7 @@ static func _fire_flamethrower(player: Player, w: Dictionary, s: Dictionary, cam
 	var origin := cam.global_position
 	var fwd := -cam.global_basis.z
 	var reach := float(s["range"])
-	var dps := float(s["damage"]) * FLAME_DPS_MUL
+	var dps := float(s.get("dps", float(s["damage"]) * FLAME_DPS_MUL))   # original: weapons.gd "dps"
 	var space := player.get_world_3d().direct_space_state
 	for n in player.get_tree().get_nodes_in_group("zombies"):
 		var z := n as Zombie
@@ -76,7 +77,7 @@ static func _fire_flamethrower(player: Player, w: Dictionary, s: Dictionary, cam
 		var q := PhysicsRayQueryParameters3D.create(origin, target, 1)
 		if not space.intersect_ray(q).is_empty():
 			continue
-		Burning.ignite(z, player, dps, FLAME_AFTERBURN)
+		Burning.ignite(z, player, dps, FLAME_AFTERBURN, FLAME_AFTERBURN_DPS)
 
 
 # ------------------------------------------------------------------ visuals

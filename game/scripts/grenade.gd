@@ -20,6 +20,7 @@ static func release_cache() -> void:
 var by: Player
 var fuse := FUSE
 var _exploded := false
+var in_hand := false   # cooked too long: goes off in the player's hand (explosion.gd FRAG)
 var _last_bounce := 0.0
 
 
@@ -102,6 +103,9 @@ func explode() -> void:
 	var game := get_parent() as Node3D
 	var pos := global_position + Vector3.UP * 0.05
 	var res := Explosion.blast(game, pos, by, Explosion.FRAG)
+	if in_hand and by != null and is_instance_valid(by) and not by.dead:
+		res["player"] = maxf(by.health, 1.0)
+		by.take_hit(res["player"])
 	last_result = res
 	Explosion.frag_effect(game, pos)
 	Sfx.instance.play_at("grenade_explosion", pos, 4.0)
