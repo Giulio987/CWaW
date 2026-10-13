@@ -476,9 +476,9 @@ func _add_lod_leftovers(best: Node3D, nodes: Array) -> void:
 	var covered := func(p: Vector3) -> bool:
 		for t in cells.get(Vector3i((p / 2.0).floor()), []):
 			var n: Vector3 = (t[1] - t[0]).cross(t[2] - t[0])
-			if n.length_squared() < 1e-10 or absf((p - t[0]).dot(n.normalized())) > 0.03:
+			if n.length_squared() < 1e-10 or absf((p - t[0]).dot(n.normalized())) > COVER_DIST:
 				continue
-			var hit = Geometry3D.ray_intersects_triangle(p + n.normalized() * 0.05, -n.normalized(), t[0], t[1], t[2])
+			var hit = Geometry3D.ray_intersects_triangle(p + n.normalized() * (COVER_DIST + 0.02), -n.normalized(), t[0], t[1], t[2])
 			if hit != null:
 				return true
 		return false
@@ -502,7 +502,15 @@ func _add_lod_leftovers(best: Node3D, nodes: Array) -> void:
 					var b := mi.global_transform * vs[idx[k + 1]]
 					var c := mi.global_transform * vs[idx[k + 2]]
 					var kk: String = key.call(a, b, c)
-					if seen.has(kk) or covered.call((a + b + c) / 3.0):
+					# covered: the centre or two of three points towards the corners lie on the
+					# shown variant (a retriangulated copy a few cm off z-fights: Der Riese's
+					# mainframe room floor flickered)
+					var cen := (a + b + c) / 3.0
+					var hits := 0
+					for q in [cen.lerp(a, 0.8), cen.lerp(b, 0.8), cen.lerp(c, 0.8)]:
+						if covered.call(q):
+							hits += 1
+					if seen.has(kk) or covered.call(cen) or hits >= 2:
 						continue
 					seen[kk] = true
 					var nrm := (b - a).cross(c - a).normalized()
@@ -539,6 +547,7 @@ func _add_lod_leftovers(best: Node3D, nodes: Array) -> void:
 		print("[lod] %s: %d triangles from the other variants" % [best.name, added])
 
 
+const COVER_DIST := 0.03   # leftover triangles this close to a shown one are duplicates
 var _leftover_floors := []   # MeshInstance3D: floors added from other variants
 
 

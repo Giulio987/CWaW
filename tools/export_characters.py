@@ -76,21 +76,28 @@ def add_animation(w, name, anim, joints):
 def main(out_dir, paths):
     groups = [Group(p) for p in paths]
     index = Index(groups)
-    skels, anims, models = {}, {}, {}
+    # Skeletons are looked up in the group first: different groups can hold different
+    # skeletons under the same name (Der Riese's power switch: its own 3-bone rig and a
+    # 6-bone one from another group; the last one read won and left the lever floating).
+    # Animations go with the skeletons that have the same bones.
+    skels, group_skels, anims, models = {}, {}, {}, {}
     for g in groups:
         for r in g.resources:
             if r.cls == C["CIwAnimSkel"]:
-                skels[r.name_hash] = Skeleton(r.body)
+                s = Skeleton(r.body)
+                skels.setdefault(r.name_hash, s)
+                group_skels[(group_dir(g.path), r.name_hash)] = s
     for g in groups:
         for r in g.resources:
             if r.cls == C["CIwAnim"]:
                 try:
                     skel_hash = struct.unpack_from("<I", r.body, 0)[0]
-                    a = Anim(r.body, C["CIwAnimKeyFrame"], skels[skel_hash].scale if skel_hash in skels else 0.25)
+                    s = group_skels.get((group_dir(g.path), skel_hash), skels.get(skel_hash))
+                    a = Anim(r.body, C["CIwAnimKeyFrame"], s.scale if s else 0.25)
                 except (ValueError, AssertionError) as e:
                     print(f"skip anim {r.name_hash:08x}: {e}")
                     continue
-                anims.setdefault(a.skel, []).append((r.name_hash, a))
+                anims.setdefault(a.skel, []).append((r.name_hash, a, s.names if s else None))
             if r.cls == C["CIwModel"]:
                 models[(group_dir(g.path), r.name_hash)] = r.body
     for g in groups:
@@ -104,7 +111,7 @@ def main(out_dir, paths):
                 print(f"skip skin {r.name_hash:08x}: model or skeleton missing")
                 continue
             m = Model(body)
-            skel = skels[skin.skel]
+            skel = group_skels.get((gdir, skin.skel), skels[skin.skel])
             w = GlbWriter(os.path.join(out_dir, gdir, f"{skin.model:08x}.glb"))
             w.add_model(f"{skin.model:08x}", m, index, gdir, split_parts=True, part_names=PART_NAMES)
             if not w.j["meshes"]:
@@ -130,8 +137,9 @@ def main(out_dir, paths):
                 if "mesh" in node:
                     node["skin"] = 0
             w.j["scenes"][0]["nodes"] += roots
-            for name, a in anims.get(skin.skel, []):
-                add_animation(w, f"{name:08x}", a, joints)
+            for name, a, names in anims.get(skin.skel, []):
+                if names is None or names == skel.names:
+                    add_animation(w, f"{name:08x}", a, joints)
             w.write()
             print(w.out_path, len(anims.get(skin.skel, [])), "anims")
 

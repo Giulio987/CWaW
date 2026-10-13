@@ -1252,6 +1252,9 @@ func _view_shots(game: Game) -> void:
 	game.set_process(false)
 	var p := game.player
 	var specs := OS.get_cmdline_user_args()[OS.get_cmdline_user_args().find("--view") + 1].split(";")
+	if OS.get_cmdline_user_args().has("--power"):
+		game.level.turn_on_power()
+		await get_tree().create_timer(6.0).timeout
 	var oi := OS.get_cmdline_user_args().find("--open")
 	if oi >= 0:
 		for d in game.level.debris.duplicate():

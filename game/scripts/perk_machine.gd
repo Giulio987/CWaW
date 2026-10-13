@@ -92,13 +92,18 @@ func _load_model(e: Dictionary) -> Node3D:
 
 
 # The rigs have an "off" pose, a turning-on animation and an "on" loop/pose;
-# the turning-on one is the longest, its first frame is the off pose.
+# the turning-on one is the longest, its first frame is the off pose. Some rigs
+# carry each animation twice (Der Riese's power switch: a copy keying only 3 of
+# its 6 bones, "<name>2" in Godot): the copy keying more bones wins, the other one
+# leaves the lever floating off the panel.
 func _pick_animations() -> void:
 	var longest := 0.0
+	var tracks := 0
 	for a in _anim.get_animation_list():
 		var anim := _anim.get_animation(a)
-		if anim.length > longest:
+		if anim.length > longest + 0.001 or (absf(anim.length - longest) <= 0.001 and anim.get_track_count() > tracks):
 			longest = anim.length
+			tracks = anim.get_track_count()
 			_anim_on = a
 	if OS.get_cmdline_user_args().has("--perk-anims"):
 		for a in _anim.get_animation_list():
