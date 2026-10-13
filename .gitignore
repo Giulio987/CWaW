@@ -9,3 +9,4 @@ analysis/godot_import.log
 analysis/characters.log
 __pycache__/
 .DS_Store
+.godot_run.lock/
