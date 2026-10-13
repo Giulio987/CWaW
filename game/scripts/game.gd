@@ -7,6 +7,12 @@ const DIFFICULTY := 3   # index into the Lua tables (1..5)
 
 var max_alive := 24     # Script.Level.MaxZombiesAmount
 
+# Debug start (menu switch or --debug-start): round 5, Ray Gun, 10000 points; no achievements
+const DEBUG_ROUND := 5
+const DEBUG_WEAPON := "raygun"
+const DEBUG_POINTS := 10000
+static var debug_start := false
+
 var level: Level
 var player: Player
 var hud: Hud
@@ -160,6 +166,12 @@ func _exit_tree() -> void:
 
 func _begin() -> void:
 	hud.message("")
+	if OS.get_cmdline_user_args().has("--debug-start"):
+		debug_start = true
+	if debug_start:
+		round_number = DEBUG_ROUND - 1   # _next_round starts DEBUG_ROUND
+		player.points = DEBUG_POINTS
+		player.give_weapon(DEBUG_WEAPON)
 	get_tree().create_timer(2.0).timeout.connect(_next_round)
 
 

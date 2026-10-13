@@ -84,6 +84,19 @@ func _ready() -> void:
 	ach_btn.offset_bottom = -30
 	ach_btn.pressed.connect(show_achievements)
 	add_child(ach_btn)
+	var dbg := CheckButton.new()
+	dbg.text = "DEBUG: round %d · Ray Gun · %d punti" % [Game.DEBUG_ROUND, Game.DEBUG_POINTS]
+	dbg.tooltip_text = "Gli obiettivi non si sbloccano in questa modalità"
+	dbg.add_theme_font_size_override("font_size", 18)
+	dbg.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	dbg.button_pressed = Game.debug_start
+	dbg.toggled.connect(func(on: bool): Game.debug_start = on)
+	dbg.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	dbg.offset_left = 24
+	dbg.offset_right = 420
+	dbg.offset_top = -80
+	dbg.offset_bottom = -36
+	add_child(dbg)
 	_select(0)
 
 
