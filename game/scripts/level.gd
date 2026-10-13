@@ -39,6 +39,8 @@ var debris := []            # Debris nodes (bought to open areas)
 var wall_buys := []         # {name, position, weapon, cost}
 var boxes := []             # MysteryBox nodes
 var perk_machines := []     # PerkMachine nodes (the power switch included)
+var perk_order := []        # Shi No Numa: perk per station order (save_game.gd keeps it)
+static var forced_perk_order := []   # set by a resumed game before load_level
 var power_on := true        # false until the GeneratorSwitch is used on maps that have one
 var player_spawn := Transform3D.IDENTITY
 var traps := []             # Trap nodes (CActionBuyTrapSpec)
@@ -648,6 +650,7 @@ func _animate(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_animate(delta)
+	_animate_cels()
 	var cam := get_viewport().get_camera_3d()
 	if _sky and cam:
 		_sky.global_transform = Transform3D(Basis.from_scale(Vector3.ONE * SKY_SCALE), cam.global_position + Vector3.DOWN * 0.5 * SKY_SCALE)
@@ -708,6 +711,8 @@ func _update_lods(at: Vector3) -> void:
 
 
 func _prepare_meshes(root: Node) -> void:
+	if FileAccess.file_exists("res://assets/material_cels.json"):
+		_cel_table = JSON.parse_string(FileAccess.get_file_as_string("res://assets/material_cels.json"))
 	var sky := root.find_child(SKY_ENTITY, true, false) as Node3D
 	if sky:
 		_sky = sky
@@ -727,6 +732,7 @@ func _prepare_meshes(root: Node) -> void:
 			var effect := false
 			if mat != null:
 				_apply_lightmap(mat)
+				_add_cel_anim(mat, mat)
 				var blend: String = mat.get_meta("extras", {}).get("blend", "")
 				if blend != "":
 					effect = true  # fire, smoke, glows, light shafts, decals, fog cards
@@ -796,9 +802,13 @@ const LAMP_CONE_ALPHA := 0.32
 const SHAFT_SHADER := "res://shaders/light_shaft.gdshader"
 
 
-# Lamp shafts and glows are flat additive cards (CIwAmbientFader entities) that
-# the original turns towards the camera: tall ones around the vertical axis,
-# square glows fully.
+# Glows and fire sprites are flat additive cards centred on their entity: they turn
+# towards the camera (tall ones around the vertical axis, square glows fully). Cards
+# off their entity's origin stay where they are: the wall lamps' beams
+# (CIwAmbientFader, lightBeam<n>) start at the lamp and slant away from the wall, the
+# chalk writing (994f5dac) lies on its wall; turned, they swung into the air.
+# Soft-edged ones (vertex alpha fading out: window and lamp shafts, smoke plumes) fade
+# when seen edge-on or from close by, so they do not look like flat sheets.
 func _maybe_light_cone(mi: MeshInstance3D, surface: int) -> void:
 	var mat := mi.mesh.surface_get_material(surface) as StandardMaterial3D
 	if mat == null or mat.blend_mode != BaseMaterial3D.BLEND_MODE_ADD:
@@ -812,21 +822,155 @@ func _maybe_light_cone(mi: MeshInstance3D, surface: int) -> void:
 		lo = lo.min(v)
 		hi = hi.max(v)
 	var size := hi - lo
-	if minf(size.x, size.z) > 0.05 or (lo + hi).length() / 2 > 3.0:
-		# not a flat card centred on its entity: a big fixed shaft (window beams) fades
-		# when seen edge-on or from close by, so it does not look like a flat sheet
-		if maxf(size.y, maxf(size.x, size.z)) > 2.0 and mat.albedo_texture:
+	var centre := (lo + hi) / 2
+	var centred := Vector2(centre.x, centre.z).length() <= 0.1 + 0.1 * maxf(size.x, size.z) and centre.length() <= 3.0
+	# sprites show their whole texture or one cel of an animated sheet; a piece of an
+	# atlas is a decal (the chalk writing, centred on its own entity too)
+	var arrays := mi.mesh.surface_get_arrays(surface)
+	var uvs = arrays[Mesh.ARRAY_TEX_UV]
+	var sprite := _cel_table.has(String(mat.resource_name))
+	if not sprite and uvs is PackedVector2Array and not uvs.is_empty():
+		var uv_lo: Vector2 = uvs[0]
+		var uv_hi: Vector2 = uvs[0]
+		for uv in uvs:
+			uv_lo = uv_lo.min(uv)
+			uv_hi = uv_hi.max(uv)
+		sprite = (uv_hi - uv_lo).x > 0.9 and (uv_hi - uv_lo).y > 0.9
+	if minf(size.x, size.z) > 0.05 or not centred or not sprite:
+		var cols = arrays[Mesh.ARRAY_COLOR]
+		var soft := false
+		if cols is PackedColorArray:
+			for c in cols:
+				soft = soft or c.a < 0.5
+		if soft and maxf(size.y, maxf(size.x, size.z)) > 1.0 and mat.albedo_texture:
 			var sm := ShaderMaterial.new()
 			sm.shader = load(SHAFT_SHADER)
 			sm.set_shader_parameter("albedo_tex", mat.albedo_texture)
 			mi.set_surface_override_material(surface, sm)
+			_add_cel_anim(sm, mat)
+			var thin := size.min_axis_index()
+			# upright cards only: flat ground glows (Shi No Numa's 13 m 41a63f86) stay flat
+			if thin != Vector3.AXIS_Y and size[thin] < 0.2 * size[size.max_axis_index()]:
+				_cross_shaft(mi, surface, arrays, verts, thin, sm, mat)
 		return
 	if OS.get_cmdline_user_args().has("--debug-cones"):
-		print("[cone] %s at %s size %s tex %s" % [mi.name, mi.global_position.snapped(Vector3(0.01, 0.01, 0.01)), size.snapped(Vector3(0.01, 0.01, 0.01)), mat.get_meta("extras", {}).get("texture0", "")])
+		print("[cone] %s at %s centre %s size %s tex %s" % [mi.name, mi.global_position.snapped(Vector3(0.01, 0.01, 0.01)), centre.snapped(Vector3(0.01, 0.01, 0.01)), size.snapped(Vector3(0.01, 0.01, 0.01)), mat.get_meta("extras", {}).get("texture0", "")])
+	# an own copy: the material is shared with the fixed cards of the same texture
+	var bm := mat.duplicate() as StandardMaterial3D
 	if size.y > 1.0:
-		mat.albedo_color.a = LAMP_CONE_ALPHA   # lamp cones a little dimmer than the other glows
-	mat.billboard_keep_scale = true
-	mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y if size.y > 1.2 * maxf(size.x, size.z) * 0.5 and size.y > 1.0 else BaseMaterial3D.BILLBOARD_ENABLED
+		bm.albedo_color.a = LAMP_CONE_ALPHA   # lamp cones a little dimmer than the other glows
+	bm.billboard_keep_scale = true
+	bm.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y if size.y > 1.2 * maxf(size.x, size.z) * 0.5 and size.y > 1.0 else BaseMaterial3D.BILLBOARD_ENABLED
+	mi.set_surface_override_material(surface, bm)
+	_add_cel_anim(bm, mat)
+
+
+# A flat soft shaft (one card, or a few parallel ones) still reads as a sheet from
+# most angles: two copies turned 60° either way around its long axis make it a soft
+# volume, the original card staying as it was. The copies are dimmer and weighted
+# by how much they face the camera, so the shaft keeps some body from every side.
+const SHAFT_CROSS_STRENGTH := 0.2
+
+
+func _cross_shaft(mi: MeshInstance3D, surface: int, arrays: Array, verts: PackedVector3Array, thin: int, sm: ShaderMaterial, src: StandardMaterial3D) -> void:
+	# long axis: the texture's v direction (the shaft and smoke textures stream along v),
+	# area-weighted over the triangles; turned about the area centre
+	var uvs: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV]
+	var idx = arrays[Mesh.ARRAY_INDEX]
+	if uvs.is_empty() or not (idx is PackedInt32Array) or (idx as PackedInt32Array).is_empty():
+		return
+	var area := 0.0
+	var c := Vector3.ZERO
+	var axis := Vector3.ZERO
+	for k in range(0, idx.size() - 2, 3):
+		var e1 := verts[k + 1] - verts[k]
+		var e2 := verts[k + 2] - verts[k]
+		var w := e1.cross(e2).length() / 2.0
+		area += w
+		c += (verts[k] + verts[k + 1] + verts[k + 2]) / 3.0 * w
+		var d1: Vector2 = uvs[idx[k + 1]] - uvs[idx[k]]
+		var d2: Vector2 = uvs[idx[k + 2]] - uvs[idx[k]]
+		var det := d1.x * d2.y - d2.x * d1.y
+		if absf(det) < 1e-8:
+			continue
+		var pv := (e2 * d1.x - e1 * d2.x) / det   # dP/dv
+		pv[thin] = 0.0
+		if pv.length_squared() < 1e-10:
+			continue
+		pv = pv.normalized() * w
+		axis += pv if axis.dot(pv) >= 0.0 else -pv
+	if area <= 0.0 or axis.length_squared() < 1e-10:
+		return
+	c /= area
+	axis = axis.normalized()
+	# only shafts that run along it: a long low strip (Verrückt's b9e939f7 mist bands,
+	# 12 m by 2) would swing its ends into the walls
+	var normal := Vector3.ZERO
+	normal[thin] = 1.0
+	var across := axis.cross(normal).normalized()
+	var along_lo := INF
+	var along_hi := -INF
+	var across_lo := INF
+	var across_hi := -INF
+	for v in verts:
+		along_lo = minf(along_lo, v.dot(axis))
+		along_hi = maxf(along_hi, v.dot(axis))
+		across_lo = minf(across_lo, v.dot(across))
+		across_hi = maxf(across_hi, v.dot(across))
+	if across_hi - across_lo > 1.5 * (along_hi - along_lo):
+		return
+	# the copies: dimmer, weighted by how much they face the camera
+	var cm := sm.duplicate() as ShaderMaterial
+	cm.set_shader_parameter("strength", SHAFT_CROSS_STRENGTH)
+	cm.set_shader_parameter("facing_lo", 0.0)
+	cm.set_shader_parameter("facing_hi", 1.0)
+	_add_cel_anim(cm, src)
+	var one := ArrayMesh.new()
+	one.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	for turn in [-60.0, 60.0]:
+		var copy := MeshInstance3D.new()
+		copy.name = "%s_shaft%d_%d" % [mi.name, surface, int(turn)]
+		copy.mesh = one
+		copy.material_override = cm
+		copy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		copy.transform = Transform3D(Basis(axis, deg_to_rad(turn)), c) * Transform3D(Basis.IDENTITY, -c)
+		mi.add_child(copy)
+	if OS.get_cmdline_user_args().has("--debug-fx"):
+		print("[fx] %s/%d crossed shaft, axis %s" % [mi.name, surface, (mi.global_basis * axis).normalized().snapped(Vector3(0.01, 0.01, 0.01))])
+
+
+# Texture cel animation of the original materials (tools/material_cels.py): flames
+# flip through their frame sheet, window shafts and smoke scroll. The cel offset is
+# added to the model's UVs every celPeriod ticks.
+const CEL_TICKS := 30.0   # ticks per second (assumed: the game's 30 Hz update)
+var _cel_table := {}      # material hash -> [num, numU, w, h, period]
+var _cel_anims := []      # [material, cel, texture size, cel shown]
+
+
+func _add_cel_anim(mat: Material, src: StandardMaterial3D) -> void:
+	var cel = _cel_table.get(String(src.resource_name))
+	if cel == null or src.albedo_texture == null:
+		return
+	for a in _cel_anims:
+		if a[0] == mat:
+			return
+	_cel_anims.append([mat, cel, Vector2(src.albedo_texture.get_width(), src.albedo_texture.get_height()), -1])
+
+
+func _animate_cels() -> void:
+	var tick := int(Time.get_ticks_msec() * CEL_TICKS / 1000.0)
+	for a in _cel_anims:
+		var cel: Array = a[1]
+		var k := (tick / maxi(int(cel[4]), 1)) % int(cel[0])
+		if k == a[3]:
+			continue
+		a[3] = k
+		var num_u := maxi(int(cel[1]), 1)
+		var ofs := Vector2((k % num_u) * cel[2], (k / num_u) * cel[3]) / (a[2] as Vector2)
+		if a[0] is StandardMaterial3D:
+			a[0].uv1_offset = Vector3(ofs.x, ofs.y, 0.0)
+		else:
+			a[0].set_shader_parameter("uv_offset", ofs)
 
 
 static func _surface_faces(mesh: Mesh, surface: int) -> PackedVector3Array:
@@ -880,11 +1024,20 @@ func _build_debris() -> void:
 			debris.append(d)
 
 
+# Script.Level.MysteryBoxes[1]: the level's Begin deactivates every other box
+# (verruckt.lua 125-131/171-175, shinonuma.lua 184-190/280-284, derriese.lua
+# 163-169/245-249); Nacht has a single box and no list.
+const FIRST_BOX := {"verruckt": "MysteryBoxGenerator", "shinonuma": "MysteryBox_downstairsRoom1",
+	"derriese": "MysteryBox_powerCourtyard"}
+
+
 func _build_boxes() -> void:
 	# one active box per map, like the original; the teddy bear moves it to the
 	# other locations (mystery_box.gd)
 	var all := entities.keys().filter(func(n): return "CMysteryBoxSpec" in entities[n]["components"])
-	var names := [all.pick_random()] if all.size() > 1 else all
+	var names := all.slice(0, 1)
+	if FIRST_BOX.get(level_name, "") in all:
+		names = [FIRST_BOX[level_name]]
 	var forced := OS.get_cmdline_user_args().find("--box-at")   # tests: start at this location
 	if forced >= 0 and OS.get_cmdline_user_args()[forced + 1] in all:
 		names = [OS.get_cmdline_user_args()[forced + 1]]
@@ -900,8 +1053,8 @@ func _build_boxes() -> void:
 
 # Perk-a-Cola machines. Maps with a GeneratorSwitch (Der Riese, Verrückt) need the
 # power on first (--power starts with it on). Shi No Numa has one entity per perk at
-# each of its four locations: each location shows a different perk, picked at random
-# (the original cycles them in shinonuma.lua).
+# each of its four locations: each location gets a different perk, picked at random
+# (SetPerkMachinePreSelected); the machine appears when its hut is bought (PerkMachine.setup_hut).
 func _build_perks() -> void:
 	var by_place := {}   # rounded position -> [entity names]
 	for n in entities:
@@ -914,6 +1067,11 @@ func _build_perks() -> void:
 	keys.sort()
 	var order: Array = Perks.ORDER.duplicate()
 	order.shuffle()
+	if forced_perk_order.size() == order.size():
+		order = forced_perk_order.duplicate()
+	forced_perk_order = []
+	perk_order = order
+	PerkMachine.reset_hut_pool()
 	for i in keys.size():
 		var names: Array = by_place[keys[i]]
 		names.sort()
@@ -922,7 +1080,9 @@ func _build_perks() -> void:
 			for n in names:
 				if Perks.kind_of(entities[n]) == order[i % order.size()]:
 					pick = n
-		_add_perk_machine(pick, Perks.kind_of(entities[pick]))
+		var pm := _add_perk_machine(pick, Perks.kind_of(entities[pick]))
+		if names.size() > 1:
+			pm.setup_hut(names)   # Shi No Numa: hidden until its hut is bought, then hover/cycle/drop
 	var switch: Dictionary = _by_lower.get("generatorswitch", {})
 	if not perk_machines.is_empty() and not switch.is_empty() and "CActionScriptableSpec" in switch["components"]:
 		power_on = OS.get_cmdline_user_args().has("--power")
@@ -930,12 +1090,13 @@ func _build_perks() -> void:
 	PerkMachine.release_cache()
 
 
-func _add_perk_machine(entity: String, kind: String) -> void:
+func _add_perk_machine(entity: String, kind: String) -> PerkMachine:
 	var m := PerkMachine.new()
 	m.name = "Perk_" + entity
 	nav_region.add_child(m)
 	m.setup(self, entity, kind)
 	perk_machines.append(m)
+	return m
 
 
 # Doors the generator opens (TurnOnGenerator "genTurnOn"): Verrückt's StartDoorLink
@@ -979,7 +1140,21 @@ func turn_on_power() -> void:
 		return
 	power_on = true
 	power_changed.emit(true)
-	Sfx.instance.play("pa_power_on")
+	if level_name == "derriese":
+		# derriese.lua 595: Timeout(1000, "GeneratorOnSound") -> PlaySound("pa_power_on")
+		get_tree().create_timer(1.0, false).timeout.connect(func(): Sfx.instance.play("pa_power_on"))
+	elif level_name == "verruckt" and has_entity("SoundGeneratorTurnOn"):
+		# verruckt.lua TurnOnGenerator 306-307: EnableSoundEmitter("SoundGeneratorTurnOn"),
+		# Timeout(37500, "endGenSound") disables it (the sound, a3c737f1, lasts 37.5 s).
+		# Nacht and Shi No Numa have no generator; pa_power_on is Der Riese's only.
+		var gen := AudioStreamPlayer3D.new()
+		gen.stream = Sfx.instance._stream("generator_on")
+		gen.unit_size = 8.0
+		gen.max_distance = 60.0
+		add_child(gen)
+		gen.global_position = entity_transform("SoundGeneratorTurnOn").origin
+		gen.play()
+		get_tree().create_timer(37.5, false).timeout.connect(gen.queue_free)
 	for m in perk_machines:
 		if m.kind != "power":
 			Sfx.instance.play_at(Sfx.iw_hash("perkpoweron"), m.global_position + Vector3.UP, -4.0)

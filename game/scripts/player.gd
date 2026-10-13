@@ -5,19 +5,42 @@ extends CharacterBody3D
 signal died
 signal changed  # points/ammo/weapon/health changed (HUD refresh)
 
-const SPEED := 4.2
-const SPRINT := 6.0
-const JUMP := 4.0
+# Movement, from console.bin and the player movement code (kiwi 0x182c68 / ctor 0x182ea8):
+# step = Max<State>MoveSpeed x WorldScale (4.0) x stick (iwfixed, after the
+# analoguePadMovingResponse curve) x frame time in ms -> world units (400 per metre).
+# The speeds are therefore centimetres per millisecond (= x10 m/s): MaxRunMoveSpeed /
+# MaxWalkMoveSpeed / MaxRunStrafeSpeed 0.649 -> 6.49 m/s with the stick fully pushed
+# (keyboard). Per-state caps replace it: MaxAimMoveSpeed 0.25 (2.5 m/s, aiming down the
+# sights), MaxKnife/Grenade/Betty/Molotov/Monkey/DrinkPerkColaMoveSpeed 0.5 (5 m/s);
+# BackpedalSpeedRatio 0.5 when the stick points backwards; WaterMoveSpeedModifier 0.5.
+# (The Accel*Ramp* arrays are accelerometer tilt-steering curves, not acceleration.)
+const MOVE_UNIT := 4.0 * 1000.0 / 400.0   # cm/ms x WorldScale -> m/s
+const SPEED := 0.649 * MOVE_UNIT          # MaxRunMoveSpeed: 6.49 m/s
+const AIM_SPEED := 0.25 * MOVE_UNIT       # MaxAimMoveSpeed
+const ACTION_SPEED := 0.5 * MOVE_UNIT     # MaxKnife/Grenade/DrinkPerkCola/Monkey...MoveSpeed
+const BACKPEDAL := 0.5                    # BackpedalSpeedRatio
+const SPRINT := 8.0                       # remake extra (the original has no sprint)
+const JUMP := 4.0                         # remake extra
 const GRAVITY := 12.0
 const MOUSE_SENS := 0.0025
-const MAX_HEALTH := 100.0
-const REGEN_DELAY := 4.0
+# Health: CHealthSpec of the player entity (player group e8a50fda: max 20, regen 3000 ms)
+# and console.bin PlayerHealth 20 / PerkedPlayerHealth 40 (Juggernog) / PlayerHealthRecruit
+# 30 / PerkedPlayerHealthRecruit 60, scaled x5 to keep the remake's damage values
+# (zombie / dog / trap / explosion hits are in these units).
+const HEALTH_SCALE := 5.0
+const MAX_HEALTH := 20.0 * HEALTH_SCALE
+# CHealth (kiwi 0x19c6b4): REGEN_DELAY after the last hit, health jumps back to full
+# (the delay restarts with every hit, kiwi 0x19c59c).
+const REGEN_DELAY := 3.0
 const INTERACT_RANGE := 1.8
+# InteractTime 750 ms (console.bin; code default 1500): the use button is held this long
+# to buy / open / use (barricade repair keeps its own per-board pace).
+const INTERACT_TIME := 0.75
 
 var game: Node  # Game
 var points := 500
 var health := MAX_HEALTH
-var max_health := MAX_HEALTH   # raised by Juggernog
+var max_health := MAX_HEALTH   # raised by Juggernog, Recruit difficulty (base_health)
 var perks := []                # owned perks (Perks.ORDER keys), lost when going down
 var dead := false
 var weapons := []          # [{name, mag, reserve}]
@@ -31,7 +54,6 @@ var _viewmodel: Viewmodel
 var _cooldown := 0.0
 var _reloading := 0.0
 var _since_hit := 99.0
-var _kick := 0.0
 var _repair_cooldown := 0.0
 
 
@@ -58,6 +80,13 @@ func _ready() -> void:
 	changed.connect(_sync_viewmodel)
 	add_child(GrenadeBelt.new())   # frag grenades (grenade_belt.gd)
 	give_weapon("colt45")
+	max_health = base_health(false)
+	health = max_health
+	if not InputMap.has_action("aim"):   # aim down the sights: right mouse button
+		InputMap.add_action("aim")
+		var mb := InputEventMouseButton.new()
+		mb.button_index = MOUSE_BUTTON_RIGHT
+		InputMap.action_add_event("aim", mb)
 
 
 func give_weapon(name: String) -> void:
@@ -109,9 +138,24 @@ func _unhandled_input(event: InputEvent) -> void:
 		reload()
 	elif event.is_action_pressed("melee"):
 		melee()
+	elif event.is_action_pressed("aim"):
+		aim_wanted = not aim_wanted if Settings.aim_toggle() else true
+	elif event.is_action_released("aim") and not Settings.aim_toggle():
+		aim_wanted = false
+
+
+# Look input (mouse / touch drag), radians. Vertical speed is scaled like the original's
+# default sensitivities (SensitivityYDefault 0.375 / SensitivityXDefault 0.5, settings.gd);
+# aiming slows the turn rate: MaxAimTurnSpeed 0.5 / MaxRunTurnSpeed 1.0 and
+# MaxAimVerticalAimSpeed 0.5 / MaxRunVerticalAimSpeed 0.7.
+const AIM_TURN := 0.5
+const AIM_VTURN := 0.5 / 0.7
 
 
 func look(delta: Vector2) -> void:
+	_look_amount += delta.length()
+	delta.x *= lerpf(1.0, AIM_TURN, _aim_blend)
+	delta.y *= lerpf(1.0, AIM_VTURN, _aim_blend) * Settings.look_y_ratio()
 	rotate_y(-delta.x)
 	_camera.rotation.x = clamp(_camera.rotation.x - delta.y * (-1.0 if Settings.invert_y() else 1.0), -1.45, 1.45)
 
@@ -180,6 +224,9 @@ func reload() -> void:
 	if _reloading > 0.0 or w["mag"] >= s["mag"] or w["reserve"] <= 0:
 		return
 	_reloading = s["reload"] * (Perks.SPEED_RELOAD if has_perk("speed") else 1.0)
+	if aiming:   # the reload leaves the sights straight away (no lowering animation)
+		aiming = false
+		_viewmodel.aiming = false
 	_viewmodel.reload(_reloading)
 	Sfx.instance.sequence(w["name"] + "_reload")
 
@@ -192,17 +239,20 @@ func _physics_process(delta: float) -> void:
 	_melee_cooldown -= delta
 	_since_hit += delta
 	if _since_hit > REGEN_DELAY and health < max_health:
-		health = min(max_health, health + 40.0 * delta)
+		health = max_health   # CHealth: back to full at once
 		changed.emit()
 	if _reloading > 0.0:
 		_reloading -= delta
 		if _reloading <= 0.0:
 			_finish_reload()
 
-	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back") + move_input
+	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back") + stick_response(move_input)
 	input = input.limit_length(1.0)
+	_update_aim(delta, input)
+	if input.y > 0.0:
+		input.y *= BACKPEDAL   # BackpedalSpeedRatio: only the backwards part of the stick
 	var dir := (transform.basis * Vector3(input.x, 0, input.y))
-	var speed := SPRINT if Input.is_action_pressed("sprint") else SPEED
+	var speed := move_speed(input)
 	if game and game.level and game.level.in_water(global_position):
 		speed *= Level.WATER_MOVE_SPEED   # wading in the swamp (level.gd)
 	velocity.x = dir.x * speed
@@ -228,11 +278,15 @@ func _physics_process(delta: float) -> void:
 		_fire(w, s)
 		if not s["auto"]:
 			fire_held = false
-	_kick = move_toward(_kick, 0.0, delta * 0.3)
-	_camera.rotation.z = 0.0
+	_update_kick(delta)
+	_auto_aim(delta)
 	_update_prompt()
 	if Input.is_action_pressed("interact"):
+		_interact_hold += delta
 		interact()
+	else:
+		_interact_hold = 0.0
+		_interact_done = false
 
 
 # Footsteps, as the original player update does them (CPlayer, kiwi 0x1a1f88):
@@ -288,7 +342,7 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 	_viewmodel.kick()
 	if w["name"] != "flamethrower":   # FlameJet plays its own fire loop
 		Sfx.instance.weapon_fire(w["name"])
-	_camera.rotation.x = min(_camera.rotation.x + 0.012, 1.45)
+	_recoil += RECOIL * (RECOIL_AIMED if aiming else 1.0)
 	var space := get_world_3d().direct_space_state
 	# Ray Gun bolt / flamethrower cone (weapon_fx.gd) replace the hitscan
 	if not WeaponFx.fire(self, w, s, _camera):
@@ -296,6 +350,7 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 	if not w["name"] in ["raygun", "flamethrower", "wunderwaffe"]:   # these have their own effects
 		_viewmodel.muzzle_flash()
 		game.muzzle_flash(_camera, _viewmodel.muzzle_position())
+	_heat = minf(_heat + HEAT_PER_SHOT, 1.0)   # continuous fire widens the spread
 	if w["mag"] == 0:
 		reload()
 	changed.emit()
@@ -306,7 +361,7 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 # hit every zombie inside their cone once (no pellets). Damage from Weapons.hit_damage.
 func _fire_bullet(s: Dictionary, space: PhysicsDirectSpaceState3D) -> void:
 	var from := _camera.global_position
-	var dir := -_camera.global_basis.z
+	var dir := _spread_dir(-_camera.global_basis.z, Weapons.spread(weapon(), aiming, _heat))
 	var reach := float(s.get("range", Weapons.RANGE))
 	var exclude: Array[RID] = [get_rid()]
 	var targets := []   # [distance, zombie, hit position, head]
@@ -341,6 +396,9 @@ func _fire_bullet(s: Dictionary, space: PhysicsDirectSpaceState3D) -> void:
 		var lateral := (pos - from - dir * dir.dot(pos - from)).length() if cone > 0.0 else 0.0
 		var loc := -1 if cone > 0.0 else Weapons.location(z, pos, t[3])
 		z.take_damage(Weapons.hit_damage(s, t[0], i, loc, lateral), t[3], self, false, pos)
+	# a shot that hits no head ends the headshot streak (kiwi 0x20cb80 -> 0x131868)
+	if not targets.any(func(t): return t[3]):
+		headshot_streak = 0
 
 
 # Zombies inside the shotgun cone (full angle `cone` degrees, up to s.hits, nearest
@@ -369,6 +427,242 @@ func _cone_targets(s: Dictionary, space: PhysicsDirectSpaceState3D, from: Vector
 	return out.slice(0, int(s.get("hits", 1)))
 
 
+# ------------------------------------------------------------------ aiming, movement caps
+
+# Aim down the sights (toggleAim): right mouse button (hold, or click with the
+# "aim_toggle" option), touch button ToggleAimIcon (hud.gd: toggle_aim). The FOV goes to
+# the gun's aim FOV (CItemGun 0xc4, Weapons.aim_fov; AimModeFOV "0" = use the gun's) in
+# AimModeInterpolateTime 300 ms, movement is capped at MaxAimMoveSpeed, turning slowed
+# (look), the arms play the aim states (viewmodel.gd set_aim), the spread drops to the
+# gun's aimed values and the auto-aim "lockon" pulls the view (_auto_aim).
+const AIM_TIME := 0.3          # AimModeInterpolateTime 300 ms
+var aim_wanted := false        # button held / toggled on
+var aiming := false            # actually aiming (not while reloading, sprinting, knifing...)
+var _aim_blend := 0.0          # 0 hip .. 1 sights (FOV / turn speed)
+
+
+func toggle_aim() -> void:
+	aim_wanted = not aim_wanted
+
+
+func _update_aim(delta: float, input: Vector2) -> void:
+	var sprinting := Input.is_action_pressed("sprint") and input.length() > 0.1
+	var on := aim_wanted and not dead and _reloading <= 0.0 and not sprinting \
+		and not _viewmodel.drinking and not _viewmodel.throwing() and not _viewmodel.slashing()
+	if on != aiming:
+		aiming = on
+		_viewmodel.set_aim(on)
+		if on:
+			_lock_t = LOCK_STICKY if Settings.auto_aim() else 0.0   # the "lockon" output of state 32
+		changed.emit()
+	_aim_blend = move_toward(_aim_blend, 1.0 if aiming else 0.0, delta / AIM_TIME)
+	# the gun's aim FOV is relative to the original ViewportFOV 50: scaled with the user's FOV
+	var base := float(Settings.get_value("fov"))
+	var aimed := Weapons.aim_fov(weapon()) * base / 50.0
+	_camera.fov = Settings.vertical_fov(lerpf(base, aimed, smoothstep(0.0, 1.0, _aim_blend)))
+
+
+# Ground speed for the current state (original per-state caps, see the constants).
+func move_speed(input: Vector2) -> float:
+	var speed := SPEED
+	if Input.is_action_pressed("sprint") and not aiming and input.y <= 0.0:
+		speed = SPRINT   # remake extra, forwards / sideways only
+	if _viewmodel.slashing() or _viewmodel.throwing() or _viewmodel.drinking:
+		speed = minf(speed, ACTION_SPEED)
+	if aiming:
+		speed = minf(speed, AIM_SPEED)
+	return speed
+
+
+# Touch stick deflection (0..1) through analoguePadMovingResponse
+# {(0,0),(819,0),(820,2048),(4096,4096)}: 20 % dead zone, then from half to full speed.
+static func stick_response(v: Vector2) -> Vector2:
+	var m := v.length()
+	if m < 0.2:
+		return Vector2.ZERO
+	return v / m * lerpf(0.5, 1.0, clampf((m - 0.2) / 0.8, 0.0, 1.0))
+
+
+# Bullet spread: a random direction inside a cone of `spread_deg` (full angle).
+static func _spread_dir(dir: Vector3, spread_deg: float) -> Vector3:
+	if spread_deg <= 0.0:
+		return dir
+	var half := deg_to_rad(spread_deg) * 0.5 * sqrt(randf())
+	var side := dir.cross(Vector3.UP if absf(dir.y) < 0.99 else Vector3.RIGHT).normalized()
+	side = side.rotated(dir, randf() * TAU)
+	return dir.rotated(side, half).normalized()
+
+
+# ------------------------------------------------------------------ camera kick
+
+# Weapon recoil (remake addition: the original only plays the arms' fire animation):
+# the view climbs a little per shot and settles back.
+const RECOIL := 0.006            # rad per shot
+const RECOIL_AIMED := 0.5
+const RECOIL_RECOVERY := 10.0    # 1/s, exponential
+const HEAT_PER_SHOT := 0.2       # spread from minimum to maximum in 5 quick shots
+const HEAT_DECAY := 2.0          # per second
+var _recoil := 0.0
+var _heat := 0.0
+# Being hit: CCameraProcessorKick with the CCameraKickConfig "player_damaged"
+# (misc group: 800 ms, magnitude 227) shaped by CamKickCurve {(0,0),(300,3900),
+# (450,4100),(700,3700),(1300,1500),(2600,400),(4096,0)} (time and value x4096,
+# kiwi 0xa9120): the view rotates about the horizontal axis square to the hit direction
+# (kiwi 0xa9080). 227 read as an iwangle (4096 = 360 deg): ~20 deg at the peak.
+const DAMAGE_KICK_TIME := 0.8
+const DAMAGE_KICK := 227.0 * TAU / 4096.0
+const KICK_CURVE := [[0.0, 0.0], [300.0, 3900.0], [450.0, 4100.0], [700.0, 3700.0],
+	[1300.0, 1500.0], [2600.0, 400.0], [4096.0, 0.0]]
+var _hit_kick_t := -1.0
+var _hit_kick_axis := Vector2.ZERO   # (pitch, roll) weights
+var _applied_kick := Vector2.ZERO    # offset currently added to the camera (pitch, roll)
+
+
+static func kick_curve(t: float) -> float:
+	var x := clampf(t, 0.0, 1.0) * 4096.0
+	for i in KICK_CURVE.size() - 1:
+		var a: Array = KICK_CURVE[i]
+		var b: Array = KICK_CURVE[i + 1]
+		if x <= b[0]:
+			return lerpf(a[1], b[1], (x - a[0]) / maxf(b[0] - a[0], 1.0)) / 4096.0
+	return 0.0
+
+
+func _start_hit_kick(from: Vector3) -> void:
+	var d := from - global_position
+	d.y = 0.0
+	if d.length() < 0.01:
+		d = -global_basis.z
+	var l := global_basis.inverse() * d.normalized()
+	_hit_kick_axis = Vector2(-l.z, -l.x)   # hit in front: the head goes back; from a side: rolls away
+	_hit_kick_t = 0.0
+
+
+func _update_kick(delta: float) -> void:
+	_recoil *= exp(-RECOIL_RECOVERY * delta)
+	_heat = move_toward(_heat, 0.0, delta * HEAT_DECAY)
+	var k := Vector2(_recoil, 0.0)
+	if _hit_kick_t >= 0.0:
+		_hit_kick_t += delta
+		if _hit_kick_t >= DAMAGE_KICK_TIME:
+			_hit_kick_t = -1.0
+		else:
+			k += _hit_kick_axis * DAMAGE_KICK * kick_curve(_hit_kick_t / DAMAGE_KICK_TIME)
+	# offsets are added on top of the look rotation (tests and photo mode set it directly)
+	_camera.rotation.x += k.x - _applied_kick.x
+	_camera.rotation.z += k.y - _applied_kick.y
+	_applied_kick = k
+
+
+# ------------------------------------------------------------------ auto-aim
+
+# CAutoAim (kiwi 0x1ab49c): every frame the enemy (CAutoAimSpec flag mask 0x4000) with
+# the lowest score = (AutoAimWeightAngle x angle^2 + AutoAimWeightRange x distance) >> 12
+# (angle off the view in iwangle units, 4096 = 360 deg; distance in world units, 400 per
+# metre; raw weights 490 and 3276 = AutoAimWeightAngleMax / RangeMax, the "Auto-Aim on"
+# values) is taken if below AutoAimScoreAcquire 6500 and in sight; the current target is
+# kept until its score passes AutoAimScoreRelease 7500, or a target better by
+# AutoAimScoreDiffSwitch 500 replaces it. E.g. 5 m: within 18 deg, 10 m: 13 deg, none
+# beyond 20 m. An aim point moves to the target at AutoAimSpeed 2.0 (x WorldScale: 8
+# units/ms = 20 m/s), or back to 500 units (5 m) ahead at AutoAimCentreSpeed 1.0.
+# The view is pulled to the aim point only while aiming down the sights: raising the
+# sights (gun state 32) emits "lockon", which arms LockOnStickyTime 1500 ms; each frame
+# the view turns by remaining/1500 of the angle to the aim point (kiwi 0x1a4e08), no
+# target switching meanwhile. Remake: the pull also gives way to the player's own look
+# input like the original's LockOnSpringConst 0.729 damping (dt / (dt + 0.729 x drag)).
+# Option "Mira assistita" (toggleAutoaim); off = no assist (the original then switched
+# to the much narrower Min weights: AutoAimWeightAngleMin 1.0, RangeMin 4.5).
+const AA_WEIGHT_ANGLE := 490.0
+const AA_WEIGHT_RANGE := 3276.0
+const AA_ACQUIRE := 6500.0
+const AA_RELEASE := 7500.0
+const AA_SWITCH := 500.0
+const AA_SPEED := 2.0 * MOVE_UNIT        # 20 m/s
+const AA_CENTRE_SPEED := 1.0 * MOVE_UNIT
+const AA_CENTRE := 5.0
+const LOCK_STICKY := 1.5                 # LockOnStickyTime
+const LOCK_SPRING := 0.729               # LockOnSpringConst
+var auto_aim_target: Zombie = null
+var _aim_point := Vector3.INF
+var _lock_t := 0.0
+var _look_amount := 0.0                  # look input this frame (rad), for the damping
+
+
+func _aa_point(z: Zombie) -> Vector3:
+	return z.global_position + Vector3.UP * (0.35 if z.crawler or z is Dog else 1.1)
+
+
+func _aa_score(z: Zombie, eye: Vector3, fwd: Vector3) -> float:
+	var to := _aa_point(z) - eye
+	var a := fwd.angle_to(to) * 4096.0 / TAU
+	return (AA_WEIGHT_ANGLE * a * a + AA_WEIGHT_RANGE * to.length() * 400.0) / 4096.0
+
+
+func _aa_visible(z: Zombie, eye: Vector3) -> bool:
+	var q := PhysicsRayQueryParameters3D.create(eye, _aa_point(z), 1)
+	return get_world_3d().direct_space_state.intersect_ray(q).is_empty()
+
+
+func _auto_aim(delta: float) -> void:
+	var look := _look_amount
+	_look_amount = 0.0
+	if not Settings.auto_aim() or dead:
+		auto_aim_target = null
+		_aim_point = Vector3.INF
+		_lock_t = 0.0
+		return
+	var eye := _camera.global_position
+	var fwd := -_camera.global_basis.z
+	var cur := auto_aim_target
+	var cur_score := INF
+	if cur != null and (not is_instance_valid(cur) or cur.state == Zombie.State.DEAD):
+		cur = null
+	if cur != null:
+		cur_score = _aa_score(cur, eye, fwd)
+		if cur_score > AA_RELEASE or not _aa_visible(cur, eye):
+			cur = null
+			cur_score = INF
+	if not (aiming and _lock_t > 0.0 and cur != null):   # locked: no switching
+		var best: Zombie = null
+		var best_score := AA_ACQUIRE
+		for n in get_tree().get_nodes_in_group("zombies"):
+			var z := n as Zombie
+			if z == null or z == cur or z.state == Zombie.State.DEAD:
+				continue
+			var sc := _aa_score(z, eye, fwd)
+			if sc < best_score and _aa_visible(z, eye):
+				best = z
+				best_score = sc
+		if best != null and (cur == null or best_score < cur_score - AA_SWITCH):
+			cur = best
+	auto_aim_target = cur
+	var goal := _aa_point(cur) if cur else eye + fwd * AA_CENTRE
+	if _aim_point == Vector3.INF:
+		_aim_point = goal
+	_aim_point = _aim_point.move_toward(goal, (AA_SPEED if cur else AA_CENTRE_SPEED) * delta)
+	if not aiming:
+		_lock_t = 0.0
+		return
+	if _lock_t <= 0.0 or cur == null:
+		_lock_t = maxf(_lock_t - delta, 0.0)
+		return
+	var f := _lock_t / LOCK_STICKY
+	_lock_t = maxf(_lock_t - delta, 0.0)
+	var ms := delta * 1000.0
+	f *= ms / (ms + LOCK_SPRING * look / MOUSE_SENS)   # the player's own look input wins
+	var to := _aim_point - eye
+	var yaw_err := wrapf(atan2(-to.x, -to.z) - rotation.y, -PI, PI)
+	var pitch_err := atan2(to.y, Vector2(to.x, to.z).length()) - (_camera.rotation.x - _applied_kick.x)
+	rotate_y(yaw_err * f)
+	_camera.rotation.x = clampf(_camera.rotation.x + pitch_err * f, -1.45, 1.45)
+
+
+# Max health for the difficulty: PlayerHealth / PerkedPlayerHealth, Recruit variants.
+static func base_health(jugg: bool) -> float:
+	var recruit := Game.recruit()
+	return HEALTH_SCALE * (60.0 if jugg and recruit else 40.0 if jugg else 30.0 if recruit else 20.0)
+
+
 func _finish_reload() -> void:
 	var w := weapon()
 	var s := Weapons.stats_of(w)
@@ -378,19 +672,54 @@ func _finish_reload() -> void:
 	changed.emit()
 
 
+# Consecutive heads taken off (kiwi 0x1315a0, score component +0x2c): it picks the
+# headshot kill points (PlayerHeadShotPoints {100,100,110,110,120,120,130,130,140}, the
+# streak before this head; the 9th and later 140) and at 3, 5, 7 (HeadshotAnnounceCount)
+# the announcer line (kiwi 0x131874): with player vox (Game.SetUsingPlayerVox(true): Shi No
+# Numa, Der Riese) the character's "killstreak1..3" (player%d_killstreak%d, player 1 in
+# solo). Elsewhere it would play HeadshotAnnounceSounds, but console.bin only has it as
+# "XHeadshotAnnounceSounds" (disabled): the code default "10" names no sound.
+const HEADSHOT_POINTS := [100, 100, 110, 110, 120, 120, 130, 130, 140]
+const HEADSHOT_ANNOUNCE := [3, 5, 7]
+const PLAYER_VOX_LEVELS := ["shinonuma", "derriese"]
+var headshot_streak := 0
+
+
+func headshot_points() -> int:
+	return HEADSHOT_POINTS[mini(headshot_streak, HEADSHOT_POINTS.size() - 1)]
+
+
+func head_popped() -> void:
+	headshot_streak += 1
+	var i := HEADSHOT_ANNOUNCE.find(headshot_streak)
+	if i >= 0 and game != null and String(game.get("level_name")) in PLAYER_VOX_LEVELS and Sfx.instance:
+		Sfx.instance.play(Sfx.iw_hash("player1_killstreak%d" % (i + 1)))
+
+
 func add_points(n: int) -> void:
 	if n < 0:
 		print("[points] spent %d at %s" % [-n, global_position])
 	points += n
 	Achievements.points(n)
+	if game and game.has_method("points_earned"):
+		game.points_earned(n)   # power-up drop threshold, game over score (game.gd)
 	changed.emit()
 
 
-func take_hit(damage: float) -> void:
+# `from`: where the hit came from (camera kick direction); by default the nearest zombie.
+func take_hit(damage: float, from := Vector3.INF) -> void:
 	if dead or _revive_grace > 0.0:
 		return
 	health -= damage
 	_since_hit = 0.0
+	if from == Vector3.INF:
+		var best := INF
+		for z in get_tree().get_nodes_in_group("zombies"):
+			var d: float = (z as Node3D).global_position.distance_to(global_position)
+			if d < best:
+				best = d
+				from = (z as Node3D).global_position
+	_start_hit_kick(from if from != Vector3.INF else global_position - global_basis.z)
 	Sfx.instance.play("zombie_hit", -2.0)
 	Sfx.instance.play("player_pain", -4.0)
 	changed.emit()
@@ -417,7 +746,7 @@ func give_perk(kind: String) -> void:
 		return
 	perks.append(kind)
 	if kind == "jugga":
-		max_health = Perks.JUGG_HEALTH
+		max_health = base_health(true)   # PerkedPlayerHealth 40 (Recruit 60) x HEALTH_SCALE
 		health = max_health
 	changed.emit()
 
@@ -425,7 +754,7 @@ func give_perk(kind: String) -> void:
 # Solo Quick Revive: instead of dying, get back up once; every perk is lost (WaW).
 func _self_revive() -> void:
 	perks.clear()
-	max_health = MAX_HEALTH
+	max_health = base_health(false)
 	health = max_health
 	_revive_grace = Perks.REVIVE_GRACE
 	get_tree().create_timer(Perks.REVIVE_GRACE, false).timeout.connect(func(): _revive_grace = 0.0)
@@ -445,13 +774,13 @@ func _update_prompt() -> void:
 	elif t is Barricade:
 		prompt = "Tieni premuto E per riparare la barricata"
 	elif t is Debris:
-		prompt = "Premi E per sgombrare [%d]" % t.cost
+		prompt = "Tieni premuto E per sgombrare [%d]" % t.cost
 	elif t is Dictionary:
 		var has := weapons.any(func(w): return w["name"] == t["weapon"])
 		if has:
-			prompt = "Premi E per le munizioni %s [%d]" % [Weapons.display(t["weapon"]), t["ammo_cost"]]
+			prompt = "Tieni premuto E per le munizioni %s [%d]" % [Weapons.display(t["weapon"]), t["ammo_cost"]]
 		else:
-			prompt = "Premi E per comprare %s [%d]" % [Weapons.display(t["weapon"]), t["cost"]]
+			prompt = "Tieni premuto E per comprare %s [%d]" % [Weapons.display(t["weapon"]), t["cost"]]
 
 
 func _interaction_target():
@@ -511,9 +840,9 @@ func interact() -> void:
 			add_points(10)
 			Achievements.repaired(10)
 			Sfx.instance.play_at("window_repair", t.global_position)
-	elif not Input.is_action_just_pressed("interact"):
-		return
-	elif t is MysteryBox or t is PerkMachine or (t is Object and t in game.level.interactables):
+	elif _interact_done or _interact_hold < INTERACT_TIME:
+		return   # InteractTime: held long enough, once per press
+	elif _mark_interacted() and (t is MysteryBox or t is PerkMachine or (t is Object and t in game.level.interactables)):
 		t.interact(self)
 	elif t is Debris:
 		if points >= t.cost:
@@ -532,3 +861,19 @@ func interact() -> void:
 			Sfx.instance.play("buy_success")
 		else:
 			Sfx.instance.play("buy_fail")
+
+
+# InteractTime hold (interact): progress 0..1 for the HUD, -1 when there is nothing to hold for.
+var _interact_hold := 0.0
+var _interact_done := false
+
+
+func _mark_interacted() -> bool:
+	_interact_done = true
+	return true
+
+
+func interact_progress() -> float:
+	if _interact_hold <= 0.0 or _interact_done or prompt == "" or prompt.begins_with("Tieni premuto E per riparare"):
+		return -1.0
+	return clampf(_interact_hold / INTERACT_TIME, 0.0, 1.0)

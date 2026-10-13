@@ -28,6 +28,7 @@ for l in nacht verruckt shinonuma derriese; do
 done
 $PY -I tools/resolve_names.py
 $PY -I tools/export_gltf.py "$A/models" $G
+$PY -I tools/material_cels.py "$A/material_cels.json" $G
 $PY -I tools/export_characters.py "$A/characters" $G > /dev/null
 $PY -I tools/pair_arms.py > /dev/null
 $PY -I tools/sound_index.py "$A/sounds/index.json"

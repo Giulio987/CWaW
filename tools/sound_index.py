@@ -12,6 +12,17 @@
 - ambience:   CAmbienceChannel hash -> [sounds]
 - levels:     level -> {spec hash: path} for specs whose data differs per level group
               (e.g. gameover_intro); "sounds" keeps one of them
+- ambience_channels: level (or "ingame" for sfx.group's zombies) -> CAmbienceChannel hash ->
+              {sounds: [[spec, weight]], min_ms, max_ms, flag}. Body: u32 n, n x {u32 spec,
+              u32 weight (4096 = 1, the weights add up to 1)}, u32 min gap, u32 max gap, u8 flag.
+              The gap follows the end of the previous sound (wind: 13 s sounds, 3-5 s gaps;
+              jungleBackground 0/0 = a continuous loop). flag 1 only on "zombies".
+              Each level group has its own copy (Der Riese's wind uses other sounds).
+- vox:        player voice lines (Game.PlayMultiplayerSound): line -> {priority, chance, delay_ms,
+              broadcast, variants: [[spec per character 0..3]]}. Table in the player CIwEntSpec
+              (player.group.bin ffed825c): u32 line hash, u32 priority, u32 chance %, u8 broadcast,
+              u32 delay ms, u32 n, n x cstring "player%d_<line><k>". Kiwi 0x191f78 (va) picks a
+              variant at random and formats it with the character index (0 in solo: 0x192184).
 Music/jingles: begin_wave/start_game/end_wave come from waves.lua, the perk jingles are
 referenced by the BuyPerk* entities (perkjingle<perk>), the box sounds by the box
 CIsAnimStateMachine (350fb630); ALIAS gives them friendly names (round_start, jingle_jugga...).
@@ -66,11 +77,40 @@ ALIAS = {
     "jingle_dbtap": "perkjingledouble",  # BuyPerkDbTap
     "jingle_revive": "perkjinglerevive",  # BuyPerkRevive
     "perk_hum": "perkhumloop",           # SoundPerkHum* emitters
+    "generator_on": "a3c737f1",          # Verrückt SoundGeneratorTurnOn emitter (37.5 s, verruckt.lua 306-307)
 }
+
+
+def ambience_channel(b):
+    (n,) = struct.unpack_from("<I", b, 0)
+    snd = [[f"{h:08x}", w / 4096.0] for h, w in (struct.unpack_from("<II", b, 4 + 8 * k) for k in range(n))]
+    lo, hi = struct.unpack_from("<II", b, 4 + 8 * n)
+    return {"sounds": snd, "min_ms": lo, "max_ms": hi, "flag": b[12 + 8 * n]}
+
+
+def vox_table(b):
+    out = {}
+    i = b.find(b"player%d_")
+    while i >= 0:
+        if i >= 21:
+            h, prio, chance = struct.unpack_from("<III", b, i - 21)
+            bc = b[i - 9]
+            delay, n = struct.unpack_from("<II", b, i - 8)
+            strs = b[i:].split(b"\0")[:n] if 0 < n < 8 else []
+            if strs and all(s.startswith(b"player%d_") for s in strs):
+                line = strs[0][9:].decode().rstrip("0123456789")
+                if iw_hash(line) != h:
+                    line = f"{h:08x}"
+                out[line] = {"priority": prio, "chance": chance, "delay_ms": delay, "broadcast": bc,
+                             "variants": [[f"{iw_hash(s.decode().replace('%d', str(c))):08x}" for c in range(4)]
+                                          for s in strs]}
+        i = b.find(b"player%d_", i + 1)
+    return out
 
 
 def main(out):
     sounds, seqs, guns_raw, amb, per_group = {}, {}, {}, {}, {}
+    amb_levels, vox = {}, {}
     for p in glob.glob(os.path.join(ROOT, "extracted/**/*.group.bin"), recursive=True):
         gd = group_dir(p)
         for r in Group(p).resources:
@@ -95,6 +135,10 @@ def main(out):
                 guns_raw[r.name_hash] = b
             elif r.cls == iw_hash("CAmbienceChannel"):
                 amb[f"{r.name_hash:08x}"] = b
+                lv = gd.split("/")[1] if gd.startswith("levels/") else "ingame"
+                amb_levels.setdefault(lv, {})[f"{r.name_hash:08x}"] = ambience_channel(b)
+            elif r.cls == iw_hash("CIwEntSpec") and b"player%d_" in b:
+                vox.update(vox_table(b))
     known = set(sounds)
     names = {}
     for w, a in itertools.product(VOCAB_W, VOCAB_A):
@@ -132,7 +176,7 @@ def main(out):
             for lv, p in by_level.items():
                 levels.setdefault(lv, {})[f"{h:08x}"] = p
     index = {"sounds": {f"{h:08x}": p for h, p in sounds.items()}, "names": names, "sequences": seqs,
-             "guns": guns, "ambience": ambience, "levels": levels}
+             "guns": guns, "ambience": ambience, "levels": levels, "ambience_channels": amb_levels, "vox": vox}
     os.makedirs(os.path.dirname(out), exist_ok=True)
     json.dump(index, open(out, "w"), indent=1)
     print(out, len(sounds), "sounds,", len(names), "names,", len(seqs), "sequences,", len(guns), "guns,",

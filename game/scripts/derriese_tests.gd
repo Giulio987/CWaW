@@ -17,6 +17,8 @@ static func start(parent: Node, game_: Game, args: PackedStringArray) -> void:
 		t._bridge_test()
 	elif args.has("--flytrap-test"):
 		t._flytrap_test()
+	elif args.has("--extras-test"):
+		t._extras_test()
 
 
 func _check(tag: String, ok: bool, what: String) -> void:
@@ -211,3 +213,150 @@ func _fire_at(p: Player, at: Vector3) -> void:
 	var from: Vector3 = p._camera.global_position
 	RadioEggs.bullet(p, from, from + (at - from).normalized() * ((at - from).length() + 1.0))
 	await get_tree().physics_frame
+
+
+# -- derriese --extras-test: derriese_extras.gd (start sequence, dropping doors, map boards,
+# genElectric, SeeTeleporterTrigger, mainframe steam) and the delayed generator timings.
+func _extras_test() -> void:
+	const TAG := "extras"
+	var lv := game.level
+	var p := game.player
+	var x := lv.nav_region.get_node_or_null("DerrieseExtras") as DerrieseExtras
+	_check(TAG, x != null, "DerrieseExtras built")
+	if x == null:
+		get_tree().quit()
+		return
+	var net := lv.teleporters
+	var door_y0: float = net._door.position.y
+	_check(TAG, absf(door_y0 - (net._door_closed_y - TeleporterNetwork.DOOR_DROP[3])) < 0.01, "mainframe door starts down (ASM S0 open): %.2f" % door_y0)
+	await lv.wait_navigation()
+	game.set_process(false)
+	p.health = 1e9
+	var mf: Vector3 = lv.entity_transform("mainframe_door").origin
+	var mf_from := mf + Vector3(0, 2.0, -7.0)
+	await get_tree().create_timer(1.2).timeout
+	await _shot("extras_mainframe_closing", mf_from, mf + Vector3.UP * 1.5)
+	await get_tree().create_timer(6.0).timeout
+	print("[%s] start log %s" % [TAG, x.start_log])
+	var want := {"doorClose": 0.5, "pa_level_start": 2.5, "power_out": 6.5}
+	for e in x.start_log:
+		_check(TAG, absf(float(e[0]) - float(want.get(e[1], -9.0))) < 0.25, "%s at %.2f s (lua %.1f s)" % [e[1], e[0], want.get(e[1], -1.0)])
+	_check(TAG, x.start_log.size() == 3, "3 start events")
+	_check(TAG, absf(net._door.position.y - net._door_closed_y) < 0.01, "mainframe door closed after the start")
+	await _shot("extras_mainframe_closed", mf_from, mf + Vector3.UP * 1.5)
+	await _shot("extras_mainframe_closed_side", mf + Vector3(5.0, 2.0, -3.0), mf + Vector3.UP * 1.5)
+	# dropping doors: closed and solid before the power
+	_check(TAG, x.drop_doors.size() == 2, "2 dropping doors")
+	var space := game.get_world_3d().direct_space_state
+	var mids := []
+	for d in x.drop_doors:
+		var holder: Node3D = d["holder"]
+		var model: Node3D = d["model"]
+		var mid: Vector3 = holder.global_transform * (model.position + Vector3(1.6, 1.0, -0.27))
+		var nrm: Vector3 = holder.global_basis.z.normalized()
+		mids.append([mid, nrm])
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(mid + nrm * 2.0, mid - nrm * 2.0, 1))
+		_check(TAG, not hit.is_empty() and (hit["collider"] as Node).name == "Blocker", "%s blocks before the power (%s)" % [d["entity"], "nothing" if hit.is_empty() else hit["collider"].name])
+		await _shot("extras_%s_closed_front" % d["entity"], mid + nrm * 5.0 + Vector3.UP * 0.6, mid)
+		await _shot("extras_%s_closed_back" % d["entity"], mid - nrm * 5.0 + Vector3.UP * 0.6, mid)
+		await _shot("extras_%s_closed_side" % d["entity"], mid + nrm * 3.5 + holder.global_basis.x * 3.5 + Vector3.UP * 1.0, mid)
+		# the player cannot walk through
+		p.global_position = mid + nrm * 1.2 + Vector3.DOWN * 0.9
+		p.velocity = Vector3.ZERO
+		for i in 5:
+			await get_tree().physics_frame
+		var end := await _walk(p, -nrm, 2.0)
+		_check(TAG, (end - mid).dot(nrm) > 0.0, "%s: walking into it stops in front (%.2f m)" % [d["entity"], (end - mid).dot(nrm)])
+	# boards, genElectric before the power
+	_check(TAG, x.tele_maps.size() == 3 and x.mystery_maps.size() == 6, "3 teleporter + 6 mystery boards (%d, %d)" % [x.tele_maps.size(), x.mystery_maps.size()])
+	_check(TAG, x.tele_map_state == "off", "teleporter boards off: %s" % x.tele_map_state)
+	_check(TAG, x._gen_electric.size() == 6 and x._gen_electric.all(func(n): return not n.visible), "genElectric6-11 hidden")
+	var box: MysteryBox = lv.boxes[0]
+	_check(TAG, x.mystery_map_pose == DerrieseExtras.BOX_MAP_ANIMS.get(box.entity, "?"), "mystery boards on %s (%s)" % [box.entity, x.mystery_map_pose])
+	await _board_shots(x, "TeleporterMapA", "extras_telemap_off")
+	await _board_shots(x, "mysteryMap_lab", "extras_mysterymap")
+	for n in ["TeleporterMapB", "TeleporterMapC", "mysteryMap_power", "mysteryMap_powerTele", "mysteryMap_labTele", "mysteryMap_garage", "mysteryMap_garageTele"]:
+		await _board_shots(x, n, "extras_board_" + n)
+	var ge: Vector3 = (x._gen_electric[0] as Node3D).global_position
+	await _shot("extras_genelectric_off", ge + Vector3(0, 0.5, 4.0), ge)
+	# SeeTeleporterTrigger: in the volume, looking at the Pack-a-Punch
+	var see: AABB = x._see_box
+	p.global_position = see.get_center() - Vector3(0, see.size.y * 0.5 - 0.05, 0)
+	p.velocity = Vector3.ZERO
+	await get_tree().physics_frame
+	_face(p, lv.entity_transform("packapunch").origin + Vector3.UP)
+	await get_tree().create_timer(0.4).timeout
+	_check(TAG, x.see_teleporter_done, "see_teleporter line in SeeTeleporterTrigger looking at the Pack-a-Punch")
+	# power: pa_power_on after 1 s, doors drop, Trap_power 4.3 s later
+	lv.turn_on_power()
+	var tp: Trap = null
+	for t in lv.traps:
+		if t.entity == "Trap_power":
+			tp = t
+	_check(TAG, tp != null and not tp.gen_on, "Trap_power not powered at once")
+	await get_tree().create_timer(0.4).timeout
+	var d0: Dictionary = x.drop_doors[0]
+	await _shot("extras_%s_dropping" % d0["entity"], mids[0][0] + mids[0][1] * 5.0 + Vector3.UP * 0.6, mids[0][0])
+	await get_tree().create_timer(1.0).timeout
+	_check(TAG, x.tele_map_state == "tele", "teleporter boards powered: %s" % x.tele_map_state)
+	_check(TAG, x._gen_electric.all(func(n): return n.visible), "genElectric6-11 shown")
+	for i in x.drop_doors.size():
+		var d: Dictionary = x.drop_doors[i]
+		var mid: Vector3 = mids[i][0]
+		var nrm: Vector3 = mids[i][1]
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(mid + nrm * 2.0, mid - nrm * 2.0, 1))
+		_check(TAG, d["open"] and hit.is_empty(), "%s dropped, the way is clear (%s)" % [d["entity"], "clear" if hit.is_empty() else hit["collider"].name])
+		await _shot("extras_%s_open_front" % d["entity"], mid + nrm * 5.0 + Vector3.UP * 0.6, mid)
+		await _shot("extras_%s_open_side" % d["entity"], mid + nrm * 3.5 + (d["holder"] as Node3D).global_basis.x * 3.5 + Vector3.UP * 1.0, mid)
+	await _shot("extras_genelectric_on", ge + Vector3(0, 0.5, 4.0), ge)
+	await get_tree().create_timer(3.2).timeout
+	_check(TAG, tp != null and tp.gen_on, "Trap_power powered after 4.3 s")
+	# walk through the Lab door's opening once the navmesh is rebuilt
+	await lv.wait_navigation()
+	p.global_position = mids[0][0] + mids[0][1] * 1.2 + Vector3.DOWN * 0.9
+	p.velocity = Vector3.ZERO
+	for i in 5:
+		await get_tree().physics_frame
+	var through := await _walk(p, -mids[0][1], 2.0)
+	_check(TAG, (through - mids[0][0]).dot(mids[0][1]) < -0.5, "walked through %s (%.2f m)" % [d0["entity"], (through - mids[0][0]).dot(mids[0][1])])
+	# teleporter boards: linking blinks, a link shows the peer
+	var pad: TeleporterNetwork.Pad = net.pads[0]
+	net.interact_with(pad, p)
+	await get_tree().create_timer(0.7).timeout
+	_check(TAG, x.tele_map_blinking and x.tele_map_state == "tele", "peer A linking: boards blink (%s)" % x.tele_map_state)
+	await _board_shots(x, "TeleporterMapA", "extras_telemap_linking")
+	net.interact_with(net.mainframe, p)
+	await get_tree().create_timer(0.7).timeout
+	_check(TAG, x.tele_map_state == "tele1" and not x.tele_map_blinking, "peer A linked: %s" % x.tele_map_state)
+	await _board_shots(x, "TeleporterMapA", "extras_telemap_tele1")
+	await _shot("extras_mainframe_first_open", mf_from, mf + Vector3.UP * 1.5)
+	_check(TAG, absf(net._door.position.y - (net._door_closed_y - TeleporterNetwork.DOOR_DROP[1])) < 0.01, "firstOpen: the door sinks %.2f m" % TeleporterNetwork.DOOR_DROP[1])
+	# mystery boards follow the box
+	var before := x.mystery_map_pose
+	box._warp()
+	_check(TAG, x.mystery_map_pose == DerrieseExtras.BOX_MAP_ANIMS.get(box.entity, "?") and x.mystery_map_pose != before, "box moved to %s: boards %s" % [box.entity, x.mystery_map_pose])
+	await _board_shots(x, "mysteryMap_lab", "extras_mysterymap_moved")
+	# mainframe steam: 3 s after arriving, for 8 s
+	net.arrived.emit()
+	await get_tree().create_timer(2.7).timeout
+	_check(TAG, not x.steam_on(), "no steam before 3 s")
+	await get_tree().create_timer(0.6).timeout
+	_check(TAG, x.steam.size() == 5 and x.steam_on(), "mainframe steam on at 3 s (%d vents)" % x.steam.size())
+	await get_tree().create_timer(1.5).timeout
+	await _shot("extras_mainframe_steam", mf + Vector3(0, 6.0, -12.0), mf + Vector3(0, 6.0, 2.0))
+	await get_tree().create_timer(6.7).timeout
+	_check(TAG, not x.steam_on(), "steam off after 8 s")
+	print("[%s] %s (%d failures)" % [TAG, "OK" if fails == 0 else "FAIL", fails])
+	get_tree().quit()
+
+
+# A board from the front (both faces tried: +z and -z of its frame) and from a side.
+func _board_shots(x: DerrieseExtras, entity: String, prefix: String) -> void:
+	var b := x.get_node_or_null("Board_" + entity) as Node3D
+	if b == null:
+		_check("extras", false, "board %s" % entity)
+		return
+	var c := b.global_transform * Vector3(0, 0.6 if entity.begins_with("mystery") else 1.3, 0)
+	var z := b.global_basis.z.normalized()
+	await _shot(prefix + "_z", c + z * 2.5, c)
+	await _shot(prefix + "_side", c + z * 1.8 + b.global_basis.x.normalized() * 1.8, c)

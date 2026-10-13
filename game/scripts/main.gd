@@ -71,10 +71,14 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_trap_test(game)
 	if args.has("--tele-test"):
 		_tele_test(game)
-	if args.has("--bridge-test") or args.has("--flytrap-test"):
+	if args.has("--bridge-test") or args.has("--flytrap-test") or args.has("--extras-test"):
 		DerrieseTests.start(self, game, args)   # derriese_tests.gd
 	if args.has("--achievement-test") or args.has("--footstep-test"):
 		AchievementTests.start(self, game, args)   # achievement_tests.gd
+	if args.has("--save-test") or args.has("--gameover-test") or args.has("--hud-test"):
+		SaveTests.start(self, game, args)   # save_tests.gd
+	if args.has("--wave-test"):
+		preload("res://scripts/wave_tests.gd").start(self, game)   # wave_tests.gd
 	if args.has("--photo-test"):
 		_photo_test(game)
 	if args.has("--pap-test"):
@@ -134,6 +138,28 @@ func _weapon_shots(game: Game, names: PackedStringArray) -> void:
 				await get_tree().create_timer(0.02 * f).timeout   # f = 0: muzzle light still on
 				await RenderingServer.frame_post_draw
 				get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/fire_%s_%d.png" % [w, f]))
+			continue
+		if n.begins_with("aim="):
+			# aim=<weapon>: halfway into the sights, aimed, 3 frames firing aimed, sights lowered
+			var aw := n.get_slice("=", 1)
+			game.player.give_weapon(aw)
+			await get_tree().create_timer(0.5).timeout
+			game.player.aim_wanted = true
+			await get_tree().create_timer(0.15).timeout
+			await RenderingServer.frame_post_draw
+			get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/aim_%s_in.png" % aw))
+			await get_tree().create_timer(0.6).timeout
+			await RenderingServer.frame_post_draw
+			get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/aim_%s.png" % aw))
+			print("[aim] %s fov %.1f aiming %s speed %.2f" % [aw, get_viewport().get_camera_3d().fov, game.player.aiming, game.player.move_speed(Vector2(0, -1))])
+			for f in 3:
+				game.player._fire(game.player.weapon(), Weapons.stats_of(game.player.weapon()))
+				await get_tree().create_timer(0.03 * f).timeout
+				await RenderingServer.frame_post_draw
+				get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/aim_%s_fire%d.png" % [aw, f]))
+				await get_tree().create_timer(0.3).timeout
+			game.player.aim_wanted = false
+			await get_tree().create_timer(0.8).timeout
 			continue
 		if n.begins_with("knife"):
 			# knife@0.2 = mid-swing screenshot 0.2 s after the slash starts
@@ -571,7 +597,45 @@ func _perk_test(game: Game) -> void:
 			t.interact(p)
 		check.call(lv.power_on, "power on")
 		await get_tree().create_timer(1.0).timeout
+	var hut_shots := true
 	for m in machines:
+		if m.hut != PerkMachine.Hut.NONE:
+			# Shi No Numa: hidden and not for sale until the hut's door is bought; then it
+			# hovers cycling the perks (130 ms), drops the pre-selected one and is for sale
+			place.call(m)
+			await get_tree().physics_frame
+			await get_tree().physics_frame
+			var tgt = p._interaction_target()
+			check.call(not m.visible and not (tgt is PerkMachine and tgt == m), "%s hidden before its hut opens" % m.entity)
+			var front := p.global_transform
+			var side := p.global_transform
+			var to_p: Vector3 = (p.global_position - m._centre).rotated(Vector3.UP, PI / 2)
+			side.origin = m._centre + to_p
+			side.basis = Basis(Vector3.UP, atan2(to_p.x, to_p.z))
+			var pool_n := PerkMachine.hut_pool.size()   # the last hut has only its own perk left
+			if m._door:
+				m._door.open()
+			var t0 := Time.get_ticks_msec()
+			var shown := {}
+			var marks := [0.3, 1.0, 2.8, 4.5, 6.5, 7.3, 8.3] if hut_shots else [8.3]
+			for k in marks.size():
+				while (Time.get_ticks_msec() - t0) / 1000.0 < marks[k]:
+					for v in m._variants:
+						if m._variants[v].visible and m.hut == PerkMachine.Hut.HOVER:
+							shown[v] = true
+					await get_tree().process_frame
+				if hut_shots:
+					for view in [["front", front], ["side", side]]:
+						p.global_transform = view[1]
+						await RenderingServer.frame_post_draw
+						get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path(
+							"res://../analysis/preview/perk_hut_%d_%s.png" % [k, view[0]]))
+					p.global_transform = front
+			hut_shots = false
+			var landed := (m._variants.keys() as Array).filter(func(v): return m._variants[v].visible)
+			check.call(shown.size() == pool_n, "%s cycled %s while hovering (%d available)" % [m.entity, shown.keys(), pool_n])
+			check.call(m.hut == PerkMachine.Hut.READY and landed == [m.kind] and not m.kind in PerkMachine.hut_pool,
+				"%s landed %s (pool left %s)" % [m.entity, landed, PerkMachine.hut_pool])
 		place.call(m)
 		await get_tree().physics_frame
 		await get_tree().physics_frame
@@ -760,6 +824,14 @@ func _trap_test(game: Game) -> void:
 	check.call(not lv.traps.is_empty(), "%d traps" % lv.traps.size())
 	if not lv.power_on:
 		lv.turn_on_power()
+		# Der Riese's Trap_power gets "genTurnOn" 4.3 s after the switch (derriese.lua 611)
+		for tr: Trap in lv.traps:
+			var delayed: bool = lv.level_name == "derriese" and Trap.GEN_DELAY.has(tr.entity)
+			check.call(tr.gen_on != delayed, "%s powered %s" % [tr.entity, "4.3 s later" if delayed else "at once"])
+		var t_gen := Time.get_ticks_msec()
+		while lv.traps.any(func(t): return not t.gen_on) and Time.get_ticks_msec() - t_gen < 6000:
+			await get_tree().physics_frame
+		check.call(lv.traps.all(func(t): return t.gen_on), "every trap powered after %.1f s" % ((Time.get_ticks_msec() - t_gen) / 1000.0))
 	for tr: Trap in lv.traps:
 		check.call(tr.kind == "flogger" or not tr.volumes.is_empty(), "%s %s volumes %s" % [tr.entity, tr.kind, tr.volumes])
 		p.global_position = tr.use_point + Vector3.DOWN * 0.3
@@ -768,6 +840,13 @@ func _trap_test(game: Game) -> void:
 		p.points = 10000
 		await get_tree().physics_frame
 		await get_tree().physics_frame
+		if not tr.door_open():
+			# Shi No Numa's flogger: locked until Link_DwnSt_FshSw is bought ("doorOpen")
+			tr.interact(p)
+			check.call(tr.prompt(p) == "" and tr.state == Trap.State.IDLE and p.points == 10000, "%s locked before its door opens" % tr.entity)
+			tr._door.open()
+			await get_tree().physics_frame
+			check.call(tr.door_open(), "%s unlocked by its door" % tr.entity)
 		var target = p._interaction_target()
 		# a closed door right next to the switch takes precedence (Der Riese lab): fine once bought
 		check.call(target == tr or target is Debris, "%s is the interaction target (prompt '%s'%s)" % [tr.entity, tr.prompt(p), "" if target == tr else ", a door in front"])
@@ -1104,8 +1183,7 @@ func _walk_test(game: Game) -> void:
 			var target = p._interaction_target()
 			print("[walk] stuck at %s, target %s prompt '%s'" % [p.global_position.snapped(Vector3(0.01, 0.01, 0.01)), target.get("entity") if target is Object else target, str(target)])
 			Input.action_press("interact")
-			for k in 3:
-				await get_tree().process_frame
+			await get_tree().create_timer(Player.INTERACT_TIME + 0.15).timeout   # InteractTime hold
 			Input.action_release("interact")
 			print("[walk] points after buying: %d" % p.points)
 			await get_tree().create_timer(4.0).timeout

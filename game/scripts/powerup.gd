@@ -4,12 +4,14 @@
 class_name Powerup
 extends Node3D
 
+# "label": the pickup message (localisation "Max. Ammo!", "Insta-Kill!", "Double Points!",
+# "Atomic Bomb!", "Carpenter!"; the Italian table keeps the English text)
 const KINDS := {
-	"maxammo":      {"model": "7c941e6f", "voice": "maxammo",      "label": "MAX AMMO"},
-	"instakill":    {"model": "105caeb0", "voice": "instakill",    "label": "INSTA-KILL"},
-	"doublepoints": {"model": "005979ef", "voice": "doublepoints", "label": "DOPPI PUNTI"},
-	"nuke":         {"model": "7c94b345", "voice": "nuke",         "label": "NUKE"},
-	"carpenter":    {"model": "0190717f", "voice": "carpenter",    "label": "CARPENTER"},
+	"maxammo":      {"model": "7c941e6f", "voice": "maxammo",      "label": "Max Ammo!"},
+	"instakill":    {"model": "105caeb0", "voice": "instakill",    "label": "Insta-Kill!"},
+	"doublepoints": {"model": "005979ef", "voice": "doublepoints", "label": "Doppi punti!"},
+	"nuke":         {"model": "7c94b345", "voice": "nuke",         "label": "Bomba atomica!"},
+	"carpenter":    {"model": "0190717f", "voice": "carpenter",    "label": "Carpentiere!"},
 }
 const LIFETIME := 30.0
 const PICK_RADIUS := 1.2

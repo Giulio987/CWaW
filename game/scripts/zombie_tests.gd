@@ -32,6 +32,10 @@ static func run(at: Node) -> void:
 			await _drop(at, game)
 		"speedup":
 			await _speedup(at, game)
+		"variants":
+			await _variants(at, game)
+		"antiflock":
+			await _antiflock(at, game)
 		"lifecycle":   # lifecycle_tests.gd
 			await load("res://scripts/lifecycle_tests.gd").run(at)
 	at.get_tree().quit()
@@ -109,6 +113,11 @@ static func _arm(at: Node, game: Game) -> void:
 	# real hitscan from the player: aim at the zombie's left arm until it comes off
 	_look(p, z.to_global(Vector3(0.2, 1.25, 0.1)))
 	await _snap(at, "arm_0")
+	# limbs as for a 150 hp zombie (CDismembermentSpec: arms 0.026 x max health), with a
+	# rifle: the starting colt45 (damage type 1) never takes limbs off
+	z.max_health = 150.0
+	z._init_limbs()
+	p.give_weapon("thompson")
 	var w := p.weapon()
 	var shots := 0
 	while not z._arms_lost.has("left") and shots < 60:
@@ -418,3 +427,96 @@ static func watch(at: Node) -> void:
 			var s := times.duplicate()
 			s.sort()
 			print("[zwatch] t=%.0f round=%d reached=%d median=%.1fs max=%.1fs" % [t, game.round_number, s.size(), s[s.size() / 2], s[-1]])
+
+
+# The 8 templates (zombie, zombie_var1..7) side by side, then the same row with the
+# dismemberment blocks switched (head, arms, chest, legs), from the front and the side.
+# --model ger|jap|riese picks the model group (default: the level's).
+static func _variants(at: Node, game: Game) -> void:
+	var p := game.player
+	p.health = 1e9
+	var args := OS.get_cmdline_user_args()
+	var ms: String = args[args.find("--model") + 1] if args.has("--model") else ""
+	var fwd := -p.global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var right := fwd.cross(Vector3.UP)
+	var zs := []
+	for v in 8:
+		var z := Zombie.new()
+		z.variant = v
+		z.model_set = ms
+		z.setup(p.global_position + fwd * 5.0 + right * (v - 3.5) * 1.1, game.level.windows[0], p, 1e6, false, 1)
+		game.add_child(z)
+		z.state = Zombie.State.ATTACK
+		z.set_physics_process(false)
+		z.look_at(p.global_position, Vector3.UP, true)
+		z._anim.play(Zombie.IDLE)
+		zs.append(z)
+	var mid: Vector3 = p.global_position + fwd * 5.0
+	_look(p, mid + Vector3.UP * 0.6)
+	p.get_viewport().get_camera_3d().fov = 80.0
+	await _wait(at, 0.5)
+	await _snap(at, "variants_%s" % (ms if ms != "" else game.level_name))
+	if args.has("--no-shadow-shot"):
+		for z in zs:
+			(z as Node).get_node("Shadow").visible = false
+		await _wait(at, 0.2)
+		await _snap(at, "variants_noshadow")
+		for z in zs:
+			(z as Node).get_node("Shadow").visible = true
+	for i in zs.size():
+		var z: Zombie = zs[i]
+		match i % 4:
+			0:
+				z.lose_head()
+			1:
+				z.lose_arm("left")
+				z.lose_arm("right")
+			2:
+				z.open_chest()
+			3:
+				z.become_crawler()
+				z._anim.play(Zombie.IDLE)
+		print("[ztest] variant %d head %s visible blocks %s" % [z.variant, z.head_block,
+			z._blocks.keys().filter(func(b): return z._block_visible(b))])
+	await _wait(at, 0.6)
+	await _snap(at, "variants_gibs_%s" % (ms if ms != "" else game.level_name))
+	# side view
+	p.global_position += right * 4.0 + fwd * 4.0
+	_look(p, mid + Vector3.UP * 0.9)
+	await _wait(at, 0.3)
+	await _snap(at, "variants_side_%s" % (ms if ms != "" else game.level_name))
+	print("[ztest] variants OK")
+
+
+# A crowd of 8 zombies 10 m from the player: some take antiflock detours.
+static func _antiflock(at: Node, game: Game) -> void:
+	var p := game.player
+	p.health = 1e9
+	var fwd := -p.global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+	var map := game.get_world_3d().navigation_map
+	var zs := []
+	for v in 8:
+		var pos := NavigationServer3D.map_get_closest_point(map, p.global_position + fwd * 10.0 + Vector3(randf_range(-0.8, 0.8), 0, randf_range(-0.8, 0.8)))
+		var z := Zombie.new()
+		z.setup(pos, game.level.windows[0], p, 1e6, false, 5)
+		z.state = Zombie.State.CHASE
+		game.add_child(z)
+		zs.append(z)
+	p.set_physics_process(false)
+	await _wait(at, 0.2)
+	var d0 := zs.map(func(z): return snappedf((z as Zombie).global_position.distance_to(p.global_position), 0.1))
+	print("[ztest] antiflock start distances %s" % [d0])
+	await _wait(at, 3.0)
+	for z: Zombie in zs:
+		print("[ztest]   state=%s vel=%.2f finished=%s path_len=%.1f af=%s" % [Zombie.State.keys()[z.state], Vector2(z.velocity.x, z.velocity.z).length(), z._agent.is_navigation_finished(), _plen(z._agent.get_current_navigation_path()), z.antiflock_on])
+	await _wait(at, 3.0)
+	var n := 0
+	for z in zs:
+		n += (z as Zombie).antiflock_count
+	print("[ztest] antiflock detours %d by %d zombies, positions %s" % [n, zs.size(), zs.map(func(z): return (z as Zombie).global_position.distance_to(p.global_position)).map(func(d): return snappedf(d, 0.1))])
+	print("[ztest] antiflock %s" % ("OK" if n > 0 else "FAIL"))
+

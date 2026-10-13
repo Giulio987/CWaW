@@ -15,6 +15,20 @@ const COST := 1500
 const COOLDOWN := 30.0
 const DOOR_MODEL := "750ed528"
 const USE_RANGE := 2.6
+# mainframe_door CIsAnimStateMachine (750ed528): one-bone root offsets of its poses (anim
+# root y 0 / -1428 / -3064 / -4700 x 0.25 units): the door sinks into the floor.
+#   S0 "open" (a772b3f7, down) -"start"-> S1 "Closing" (0ce02df9 at rate 2048: 2000 ms,
+#   sound 99d29ce6) -> S2 closed (94ee06db) -"firstOpen"-> S3 (c476cb64, 485 ms, sound
+#   d4a114a6) -> S4 (9522b80d) -"secondOpen"-> S5 (9c1cd258, 555 ms) -> S6 (577c1cc1)
+#   -"thirdOpen"-> S7 (96a709f0, 555 ms) -> S8 renderChild(0): the door is hidden.
+const DOOR_DROP := [0.0, 357.0 * Level.UNITS, 766.0 * Level.UNITS, 1175.0 * Level.UNITS]
+const DOOR_OPEN_TIME := [0.0, 0.485, 0.555, 0.555]
+const DOOR_CLOSE_TIME := 2.0
+const DOOR_CLOSE_SOUND := "99d29ce6"
+const DOOR_OPEN_SOUND := "d4a114a6"
+
+signal peer_state_changed   # derriese.lua TeleporterPeerStateChanged (teleporter maps)
+signal arrived              # derriese.lua Teleport(..., true): the player reached the mainframe
 
 
 class Pad:
@@ -39,10 +53,12 @@ var level: Level
 var pads := []        # peers
 var mainframe: Pad
 var cooldown := 0.0
-var teleports := 0    # Script.TeleportsOccured
+var teleports := 0    # teleports made (stats)
+var teleports_occured := 0   # Script.TeleportsOccured: pick-up rolls made (derriese.lua 729-730)
 var _door: Node3D
 var _door_body: StaticBody3D
 var _door_closed_y := 0.0
+var _door_tween: Tween
 var _flash: ColorRect
 
 
@@ -94,6 +110,9 @@ func _build_door() -> void:
 		var c: Array = e["children"][-1]["pos"]
 		_door.position = Vector3(c[0], c[1], c[2]) * Level.UNITS
 	_door_closed_y = _door.position.y
+	# ASM S0 "open": the level starts with the door down; derriese.lua Begin closes it
+	# (Timeout 500 "doorClose" -> SetASMTrigger("mainframe_door", "start"), close_at_start)
+	_door.position.y = _door_closed_y - DOOR_DROP[3]
 	# seen from the mainframe side too: draw both faces
 	for mi in _door.find_children("*", "MeshInstance3D", true, false) + ([_door] if _door is MeshInstance3D else []):
 		for i in (mi as MeshInstance3D).mesh.get_surface_count():
@@ -148,6 +167,7 @@ func interact_with(pad: Pad, player: Player) -> void:
 				p.state = "linked"
 				Sfx.instance.play_at(Sfx.iw_hash("tele_gone_peer"), mainframe.centre + Vector3.UP)
 				_update_door()
+				peer_state_changed.emit()
 				if level.pack_a_punch:
 					level.pack_a_punch._refresh()
 		return
@@ -156,6 +176,7 @@ func interact_with(pad: Pad, player: Player) -> void:
 			if not pads.any(func(p): return p.state == "linking"):
 				pad.state = "linking"
 				Sfx.instance.play_at(Sfx.iw_hash("tele_tinitus"), pad.centre + Vector3.UP)
+				peer_state_changed.emit()
 		"linked":
 			if cooldown > 0.0:
 				return
@@ -179,21 +200,25 @@ func teleport(pad: Pad, player: Player) -> void:
 	Sfx.instance.play(Sfx.iw_hash("tele_gone_wormhole"))
 	teleports += 1
 	get_tree().create_timer(8.0, false).timeout.connect(_spawn_pickup)
+	arrived.emit()
 	var game := level.get_parent() as Game
 	if game:
 		game.player_moved()
 
 
-# TeleporterSpawnPickUp: random 1..14 (1..17 after four teleports, 1..25 from
-# round 30); 14 and up is a "bad teleport" with two dogs, else a power-up.
+# TeleporterSpawnPickUp (derriese.lua 640-731): RandomNumber(1, top), upper bound
+# exclusive (Game.lua_random), top 17, 25 from round 30, 14 while TeleportsOccured < 4;
+# 14 and up is a "bad teleport" with two dogs, else a power-up. TeleportsOccured
+# grows after the roll: no dogs in the first four, then 3/16, 11/24 from round 30.
 func _spawn_pickup() -> void:
 	var game := level.get_parent() as Game
 	if game == null:
 		return
-	var top := 14
-	if teleports >= 4:
-		top = 25 if game.round_number >= 30 else 17
-	var r := randi_range(1, top)
+	var top := 25 if game.round_number >= 30 else 17
+	if teleports_occured < 4:
+		top = 14
+	var r := Game.lua_random(1, top)
+	teleports_occured += 1
 	if r >= 14:
 		Sfx.instance.play(Sfx.iw_hash("tele_uhoh"))
 		for i in 2:
@@ -219,9 +244,16 @@ func _spawn_pickup() -> void:
 
 func _update_door() -> void:
 	var n := linked_count()
-	if _door:
-		var tw := create_tween()
-		tw.tween_property(_door, "position:y", _door_closed_y + 2.9 * n / 3.0, 2.0)
+	if _door and n >= 1:
+		# UpdatePackAPunch: firstOpen / secondOpen / thirdOpen sink the door a step
+		if _door_tween:
+			_door_tween.kill()
+		var i := mini(n, 3)
+		_door_tween = create_tween()
+		_door_tween.tween_property(_door, "position:y", _door_closed_y - DOOR_DROP[i], DOOR_OPEN_TIME[i])
+		if i >= 3:
+			_door_tween.tween_callback(func(): _door.visible = false)   # S8 renderChild(0)
+		Sfx.instance.play_at(DOOR_OPEN_SOUND, _door.global_position + Vector3.UP)
 	if n >= 3:
 		if _door_body:
 			_door_body.queue_free()
@@ -229,6 +261,18 @@ func _update_door() -> void:
 		var game := level.get_parent() as Game
 		if game:
 			game.open_area("packAPunch")
+
+
+# derriese.lua Timeout "doorClose": SetASMTrigger("mainframe_door", "start") - the door
+# rises out of the floor (ASM S1 "Closing", 2000 ms, sound 99d29ce6).
+func close_at_start() -> void:
+	if _door == null or linked_count() > 0:
+		return
+	if _door_tween:
+		_door_tween.kill()
+	_door_tween = create_tween()
+	_door_tween.tween_property(_door, "position:y", _door_closed_y, DOOR_CLOSE_TIME)
+	Sfx.instance.play_at(DOOR_CLOSE_SOUND, _door.global_position + Vector3.UP)
 
 
 func _white_flash(duration: float) -> void:

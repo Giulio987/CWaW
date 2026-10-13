@@ -3,7 +3,26 @@
 class_name Game
 extends Node3D
 
-const DIFFICULTY := 3   # index into the Lua tables (1..5)
+# Game.GetDifficulty() (waves.lua 384/608/696): the column of the Lua Zombies tables
+# (and of DogNumberCalculation, which ignores it). The engine's getter (kiwi 0x37f88)
+# returns the profile difficulty: toggleDifficulty (kiwi 0x17bd1c) flips it between
+# 1 = Recruit and 2 = Regular (the default); co-op games store players + 1 (kiwi
+# 0x18aac8), so columns 3..5 are 2..4 players. Set at the start of a game (Settings
+# "recruit", or --recruit); Recruit counts no achievements or stats (as the original,
+# which skips them when the difficulty is 1, e.g. kiwi 0x10bcc4).
+const RECRUIT := 1
+const REGULAR := 2
+static var difficulty := REGULAR
+
+
+static func recruit() -> bool:
+	return difficulty == RECRUIT
+
+
+# Achievements and stats are off in the debug start and on Recruit.
+static func no_achievements() -> bool:
+	return debug_start or recruit()
+
 
 var max_alive := 24     # Script.Level.MaxZombiesAmount
 
@@ -24,13 +43,14 @@ var level_name := ""
 
 var _to_spawn := 0
 var _spawned := 0
+var spawn_count := 0   # Game.GetSpawnCount: zombies spawned in the game (template = count % 8)
 var _alive := 0          # living enemies of the round: _live + dogs still on their way in
 var _live := {}          # tracked zombie/dog -> true, until it dies or leaves the tree
 var _dogs_pending := 0   # dogs whose lightning has struck but which are not in the tree yet
 var _spawn_timer := 0.0
 var _spawn_interval := 4.0
-var _initial_left := 0
-var _initial_interval := 5.0
+var _initial_times := []   # round times of the pending "WaveSpawnZombieInitial" timeouts
+var _round_time := 0.0
 var _hp := Vector2(40, 80)
 var _between_rounds := true
 var _links := {}   # debris entity -> area it opens
@@ -56,6 +76,45 @@ const TRIGGER_OPENS := {
 }
 const LOCAL_SPAWNING := ["shinonuma"]   # Script.Level.UseLocalSpawning
 const COURTYARD_SPAWNS := {"verruckt": 8}  # Script.NumberOfCourtyardSpawns
+# Script.FastWaves (shinonuma.lua:14, derriese.lua:12): "waveEnd" 0.5 s after the
+# last kill instead of 2 s (waves.lua EnemyKilled)
+const FAST_WAVES := ["shinonuma", "derriese"]
+
+# Level Begin/Resume: Game.StopAmbience + AddAmbienceChannel (nacht.lua 59-62,
+# verruckt.lua 195-198, shinonuma.lua 315-325, derriese.lua 282-285). On dog waves
+# ("dogWaveStart", shinonuma/derriese Timeout) only "zombies" is dropped.
+const AMBIENCE := {"nacht": ["zombies", "world", "wind"], "verruckt": ["zombies", "verrucktAmbience", "wind"],
+	"shinonuma": ["zombies", "jungleChatter", "jungleBackground"], "derriese": ["zombies", "derrieseAmbience", "wind"]}
+# Game.SetUsingPlayerVox / SetUsingImpactEffects of the level Begin/Resume
+# (nacht.lua 66-67, verruckt.lua 203-204, shinonuma.lua 351-354, derriese.lua 295-296)
+const USING_VOX := ["shinonuma", "derriese"]
+const IMPACT_EFFECTS := ["shinonuma", "derriese"]
+const IMPACT_MAX_RANGE := 25.0   # console ImpactEffectsMaxRange 10000 units (kiwi 0x20eadc)
+# CFogConfig resources (ingame/misc/misc.group.bin) set by SetDefaultFogConfig("<map>", 1000)
+# and, on dog waves, SetFogConfig(Script.Level.DogConfigName or "dogs", 4000) (waves.lua 576-583):
+# colour, then (near, far) per detail level; index 0 = high detail (iPad, kiwi 0x1a6f60).
+# CFogManager (kiwi 0x10faac): linear fog from ClipPlaneNearZ (64) + near * FogBaseZRange
+# (12256) to 64 + far * 12256 units, the far clip plane at the fog end; the clear colour is
+# the fog colour. Values here: [colour, start m, end m].
+const FOG := {
+	"nacht": [Color8(38, 38, 38), 12.41, 27.73],
+	"verruckt": [Color8(124, 112, 81), 6.29, 23.96],
+	"shinonuma": [Color8(158, 163, 158), 20.07, 27.73],
+	"derriese": [Color8(48, 58, 66), 20.07, 33.86],
+	"dogs": [Color8(158, 163, 158), 3.22, 15.48],
+	"derriese_dogs": [Color8(48, 58, 66), 3.22, 15.48],
+}
+const DOG_FOG := {"derriese": "derriese_dogs"}   # Script.Level.DogConfigName (derriese.lua 217)
+# Default fog of the remake (user's choice): the original's map configs (FOG above) were there
+# to keep the 2010 iPhones' draw distance short. Here the fog only hides the far edges of
+# the open maps: none near the player or indoors, the map's fog colour far away.
+# [colour (the original map config's), start m, end m]; dog rounds still roll in FOG's dog config.
+const DEFAULT_FOG := {
+	"nacht": [Color8(38, 38, 38), 45.0, 110.0],
+	"verruckt": [Color8(124, 112, 81), 30.0, 80.0],
+	"shinonuma": [Color8(158, 163, 158), 40.0, 90.0],
+	"derriese": [Color8(48, 58, 66), 45.0, 100.0],
+}
 
 # Dog rounds (waves.lua; Script.DogSpawns on Shi No Numa and Der Riese)
 var dog_rounds := false
@@ -67,18 +126,43 @@ var _dogs_spawned := 0
 var _dog_timer := 0.0
 var _dog_health := 0.0
 
-# power-ups (World at War): random drops from kills, at most MAX_DROPS per round
-const DROP_CHANCE := 0.03
-const MAX_DROPS := 4
-const TIMED := 30.0
+# Power-up drops: CPickupManager::OnEnemyKilled (kiwi 0xf36b8; its CVars are
+# registered at 0xf3c8c with the code defaults in brackets, values from console.bin).
+const DROP_CHANCE := 78.0 / 4096.0   # PickupDropOnDeathProbability 0.019 [0.02], rolled as rand(4096) < 78
+const MAX_DROPS := 4                 # MaxPickupsPerWave [4]
+const DROP_POINTS := 3000            # PickupPointsThreshold [100]: points earned since the last drop force one
+const DROP_KILLS := 10               # PickupKillThreshold [10]: kills between drops, only with
+const DIFFICULTY_TWEAKS := ["derriese"]   # Game.SetUsingDifficultyTweaks(true) (derriese.lua 298)
+const NO_DROP_RADIUS := 1.0          # PickupNoSpawnCheckRadius [400 units]: no drop next to another pickup
+const TIMED := 30.0                  # DoublePointsTime / InstaKillTime 30000 ms
 var points_multiplier := 1
 var insta_kill := false
 var _drops_this_round := 0
-var _timers := {}          # "instakill"/"doublepoints" -> seconds left
-var _pu_label: Label
+var _drop_kills := 0       # kills since the last drop (CPickupManager +0x24)
+var _drop_points := 0      # points earned since the last drop (+0x20, added at kiwi 0xcbc80)
+var _timers := {}          # "instakill"/"doublepoints" -> seconds left (read by PowerupFrame)
+
+# game over screen / leaderboard (ig_gameover: gos_points, gos_kills, gos_headshots)
+var kills := 0
+var headshots := 0
+var score := 0             # points earned in the game (spending does not lower it)
+var _resume := {}          # save_game.gd: the saved game being resumed
 
 
 func start(level_name_: String) -> void:
+	# difficulty of this game (fixed until the next one, as the original's profile setting)
+	difficulty = RECRUIT if bool(Settings.get_value("recruit")) or OS.get_cmdline_user_args().has("--recruit") else REGULAR
+	# resumed game (menu Riprendi, or --resume): save_game.gd
+	_resume = SaveGame.pending
+	SaveGame.pending = {}
+	if _resume.is_empty() and OS.get_cmdline_user_args().has("--resume"):
+		_resume = SaveGame.load_save()
+		print("[save] resuming: %s" % ("round %d" % int(_resume["round"]) if not _resume.is_empty() else "no valid save at " + SaveGame.path()))
+	if not _resume.is_empty() and String(_resume["map"]) != level_name_:
+		_resume = {}
+	if not _resume.is_empty():
+		difficulty = int(_resume.get("difficulty", difficulty))
+		Level.forced_perk_order = _resume.get("perk_order", [])
 	_setup_input()
 	_setup_environment(level_name_)
 	level = Level.new()
@@ -126,7 +210,9 @@ func start(level_name_: String) -> void:
 
 	var sfx := Sfx.new()
 	add_child(sfx)
-	sfx.start_ambience(["zombies", "world", "wind"])
+	sfx.level_name = level_name_
+	sfx.using_vox = level_name_ in USING_VOX
+	sfx.start_ambience(AMBIENCE.get(level_name_, AMBIENCE["nacht"]))
 	player = Player.new()
 	player.game = self
 	add_child(player)
@@ -136,10 +222,15 @@ func start(level_name_: String) -> void:
 	RadioEggs.create(self)   # shootable radios/phone easter eggs (radio_egg.gd)
 	Bridge.create(level)     # Der Riese drawbridge (bridge.gd)
 	FlyTrap.create(self)     # Der Riese fly trap easter egg (flytrap.gd)
+	DerrieseExtras.create(self)   # Der Riese start sequence, dropping doors, map boards (derriese_extras.gd)
 
 	hud = Hud.new()
 	add_child(hud)
 	hud.bind(self)
+	if not _resume.is_empty():
+		SaveGame.apply_world(self, _resume)
+		SaveGame.apply_player(self, _resume)
+	add_child(SaveGame.Watcher.new(self))   # round-start saves, app background, auto-pause
 
 	# collision exists only after a physics frame; then orient windows and bake the navmesh
 	await get_tree().physics_frame
@@ -166,8 +257,21 @@ func _exit_tree() -> void:
 
 func _begin() -> void:
 	hud.message("")
+	if not _resume.is_empty():
+		SaveGame.begin_rounds(self, _resume)
+		hud.show_message("Round %d" % (round_number + 1), 4.0)   # the round about to start
+		return
 	if OS.get_cmdline_user_args().has("--debug-start"):
 		debug_start = true
+	if level_name == "verruckt":
+		# verruckt.lua Begin (bytecode, lost by the decompiler): RandomNumber(1, 3,
+		# RAND_MYSTBOX) == 1 -> Timeout(6000, "PowerStart1") else "PowerStart2"; Timeout
+		# plays it. RandomNumber's upper bound is exclusive (shinonuma.lua picks perk
+		# machines with RandomNumber(1, PerkMachineCount + 1)): one in two.
+		var line := "PowerStart1" if randi_range(1, 2) == 1 else "PowerStart2"
+		get_tree().create_timer(6.0, false).timeout.connect(func(): Sfx.instance.play(line))
+	# waves.lua Begin: Game.ShowStartGameMessage(4000) shows LS_ROUND_1 "Round 1" (kiwi 0x63974)
+	hud.show_message("Round %d" % (DEBUG_ROUND if debug_start else 1), 4.0)
 	if debug_start:
 		round_number = DEBUG_ROUND - 1   # _next_round starts DEBUG_ROUND
 		player.points = DEBUG_POINTS
@@ -192,17 +296,24 @@ func _setup_input() -> void:
 		InputMap.action_add_event("fire", mb)
 
 
-func _setup_environment(_level: String) -> void:
+func _setup_environment(level_id: String) -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.05, 0.06, 0.08)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.85, 0.85, 0.9)
 	env.ambient_light_energy = 1.0
+	# SetDefaultFogConfig("<map>", 1000): linear depth fog of the map's CFogConfig (FOG)
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.12, 0.13, 0.16)
-	env.fog_density = 0.025
+	env.fog_mode = Environment.FOG_MODE_DEPTH
+	env.fog_density = 1.0
+	env.fog_depth_curve = 1.0
+	env.fog_sky_affect = 1.0
 	_env = env
+	_apply_fog(DEFAULT_FOG.get(level_id, DEFAULT_FOG["nacht"]))
+	var fc := OS.get_cmdline_user_args().find("--fog-config")   # debug: an original config (FOG), e.g. nacht, dogs
+	if fc >= 0 and FOG.has(OS.get_cmdline_user_args()[fc + 1]):
+		_apply_fog(FOG[OS.get_cmdline_user_args()[fc + 1]])
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
@@ -215,19 +326,50 @@ func _next_round() -> void:
 	round_number += 1
 	dog_round = false
 	# dog rounds take a round number but not a wave of the table (RecalculateWaveInfo)
-	var w: Dictionary = waves[clampi(round_number - dog_wave_counter, 1, waves.size()) - 1]
-	var counts: Array = w["Zombies"][DIFFICULTY - 1]
+	var w := wave_info(round_number - dog_wave_counter)
+	var counts: Array = _wave_counts(w)
 	_to_spawn = 0
 	for c in counts:
 		_to_spawn += int(c[0])
 	_spawned = 0
 	_hp = Vector2(w["ZombieHealth"][0], w["ZombieHealth"][1])
 	_spawn_interval = w["SpawnSpeed"] / 1000.0
-	_initial_left = int(w["InitialSpawns"])
-	_initial_interval = w["InitialSpawnSpeed"] / 1000.0
-	_spawn_timer = 1.0
+	# StartWave (waves.lua 502-519): initial zombie i at i x InitialSpawnSpeed (only
+	# while i <= the wave total), the regular "WaveSpawnZombie" chain from
+	# (InitialSpawns + 3) x InitialSpawnSpeed, then every SpawnSpeed
+	var iss: float = w["InitialSpawnSpeed"] / 1000.0
+	_initial_times.clear()
+	for i in range(1, int(w["InitialSpawns"]) + 1):
+		if i <= _to_spawn:
+			_initial_times.append(i * iss)
+	_round_time = 0.0
+	_spawn_timer = (int(w["InitialSpawns"]) + 3) * iss
 	_between_rounds = false
 	hud.round_changed(round_number)
+	if _wave_log:
+		print("[wave] round %d start: difficulty %d, %d zombies, initial %s, chain from %.1f s every %.2f s" % [
+			round_number, difficulty, _to_spawn, _initial_times, _spawn_timer, _spawn_interval])
+
+
+# GetWaveInfo(n) (nacht.lua 95-101): the level's table, then ZombieWaveEquationFull.
+# waves.json holds rounds 1..40 (tools/lua/dump_waves.lua); from round 11 they are
+# already the equation, whose counts and spawn speeds do not depend on the round,
+# so later rounds reuse the last entry with the equation's health
+# (n^2 x 10 - 150, half of it as the low value; zombie.gd sets the real health).
+func wave_info(n: int) -> Dictionary:
+	n = maxi(n, 1)
+	if n <= waves.size():
+		return waves[n - 1]
+	var w: Dictionary = (waves[-1] as Dictionary).duplicate()
+	var hi := n * n * 10.0 - 150.0
+	w["ZombieHealth"] = [hi / 2.0, hi]
+	return w
+
+
+# Zombies[GetDifficulty()] (RecalculateWaveInfo clamps the index to the table)
+static func _wave_counts(w: Dictionary) -> Array:
+	var cols: Array = w["Zombies"]
+	return cols[clampi(difficulty, 1, cols.size()) - 1]
 
 
 func _process(delta: float) -> void:
@@ -237,31 +379,60 @@ func _process(delta: float) -> void:
 	if dog_round:
 		_process_dog_round(delta)
 		return
+	_round_time += delta
+	while not _initial_times.is_empty() and _round_time >= _initial_times[0]:
+		_initial_times.pop_front()
+		_timed_spawn()   # "WaveSpawnZombieInitial": no new timeout
 	_spawn_timer -= delta
-	if _spawn_timer <= 0.0 and _spawned < _to_spawn and _alive < max_alive:
-		_spawn_zombie()
-		if _initial_left > 0:
-			_initial_left -= 1
-			_spawn_timer = _initial_interval / 4.0
-		else:
-			_spawn_timer = _spawn_interval
+	if _spawn_timer <= 0.0:
+		# "WaveSpawnZombie": at the MaxZombiesAmount cap this tick is skipped, the
+		# next one is SpawnSpeed later anyway (waves.lua 323-327, 409-418)
+		_timed_spawn()
+		_spawn_timer += _spawn_interval
 	if _spawned >= _to_spawn and alive_count() <= 0:
 		_between_rounds = true
-		Sfx.instance.play("end_wave")
-		_wave_end()
+		if _wave_log:
+			print("[wave] round %d cleared at %d ms" % [round_number, Time.get_ticks_msec()])
+		# EnemyKilled: "waveEnd" 2 s after the last kill, 0.5 s with FastWaves
+		get_tree().create_timer(0.5 if level_name in FAST_WAVES else 2.0, false).timeout.connect(_wave_end)
 
 
-# waves.lua "waveEnd": on dog maps a dog round can follow (more than two rounds
-# since the last one, then 1 in 3, always after four), FastWaves start sooner.
+# One spawn timeout: a zombie unless the wave is complete (IsSpawnLimitReached)
+# or MaxZombiesAmount are alive (IsPopulationLimitReached).
+func _timed_spawn() -> void:
+	if _spawned < _to_spawn and _alive < max_alive:
+		_spawn_zombie()
+		if _wave_log:
+			print("[wave] round %d t=%.2f spawn %d/%d alive %d" % [round_number, _round_time, _spawned, _to_spawn, _alive])
+
+
+var _wave_log := OS.get_cmdline_user_args().has("--wave-log")   # round timing log (tests)
+
+
+# waves.lua "waveEnd" (bytecode 74-117): end_wave, then on DogSpawns maps a dog round
+# after more than two rounds since the last one when RandomNumber(1, 3) == 1 or
+# after more than four, the next round 5 s later; other maps 6 s later.
 func _wave_end() -> void:
+	if not is_inside_tree() or player == null or player.dead:
+		return
+	Sfx.instance.play("end_wave")
+	if _wave_log:
+		print("[wave] round %d end_wave at %d ms" % [round_number, Time.get_ticks_msec()])
 	if not dog_rounds:
-		get_tree().create_timer(8.0, false).timeout.connect(_next_round)
+		get_tree().create_timer(6.0, false).timeout.connect(_next_round)
 		return
 	waves_since_dog += 1
-	var dogs := waves_since_dog > 2 and (randi_range(1, 3) == 1 or waves_since_dog > 4)
+	var dogs := waves_since_dog > 2 and (lua_random(1, 3) == 1 or waves_since_dog > 4)
 	if OS.get_cmdline_user_args().has("--dogs-next"):
 		dogs = true
-	get_tree().create_timer(5.5, false).timeout.connect(_start_dog_round if dogs else _next_round)
+	get_tree().create_timer(5.0, false).timeout.connect(_start_dog_round if dogs else _next_round)
+
+
+# Game.RandomNumber(lo, hi): the upper bound is exclusive (the scripts index lists
+# with RandomNumber(1, n + 1): ingame.lua:682 and SelectRandomArea, waves.lua:457), so
+# RandomNumber(1, 3) is 1 or 2.
+static func lua_random(lo: int, hi: int) -> int:
+	return randi_range(lo, maxi(hi - 1, lo))
 
 
 # One spawn candidate per Lua AvailableSpawns entry of the open areas:
@@ -298,13 +469,29 @@ const GROUND_SPAWNS := {"derriese": ["outerLabCourtyardZombieSpawn2", "powerCour
 
 
 var last_spawn := ""   # spawn entity of the last zombie (tests)
+var _last_spawn_key := ""   # Script.LastSpawnNumber
+
+
+# PickRandomSpawnNumber (ingame.lua 636-649): a random AvailableSpawns entry, drawn
+# again (up to 20 times) while it is the same as the previous pick.
+func _pick_random_spawn(cands: Array) -> Dictionary:
+	var c: Dictionary = cands.pick_random()
+	for i in 20:
+		if cands.size() < 2 or _cand_key(c) != _last_spawn_key:
+			break
+		c = cands.pick_random()
+	_last_spawn_key = _cand_key(c)
+	return c
+
+
+static func _cand_key(c: Dictionary) -> String:
+	return "%s|%s" % [c["spawn"], c["window"]]
 
 
 func _wave_speed() -> int:
 	if _spawned == 0 or _wave_speeds.size() != _to_spawn:
 		_wave_speeds.clear()
-		var w: Dictionary = waves[clampi(round_number - dog_wave_counter, 1, waves.size()) - 1]
-		for pair in w["Zombies"][DIFFICULTY - 1]:
+		for pair in _wave_counts(wave_info(round_number - dog_wave_counter)):
 			for i in int(pair[0]):
 				_wave_speeds.append(int(pair[1]))
 		_wave_speeds.shuffle()
@@ -317,7 +504,7 @@ func _spawn_zombie() -> void:
 	var cands := _spawn_candidates(open_areas)
 	if cands.is_empty():
 		return
-	var c: Dictionary = cands.pick_random()
+	var c := {}
 	if level_name in LOCAL_SPAWNING:
 		# PickLocalSpawnpoint: the player's area or an open neighbour, one of its 4 closest spawns
 		var near := _spawn_candidates(_local_areas())
@@ -326,6 +513,8 @@ func _spawn_zombie() -> void:
 			near = near.filter(func(x): return x["area"] == area)
 			near.sort_custom(func(a, b): return _cand_pos(a).distance_to(player.global_position) < _cand_pos(b).distance_to(player.global_position))
 			c = near.slice(0, 4).pick_random()
+	if c.is_empty():
+		c = _pick_random_spawn(cands)
 	var origin: Vector3
 	if c["spawn"] == "COURTYARD":
 		# SupplyCourtyardSpawn: cycles CourtyardZombieSpawn1..N from a random start
@@ -356,6 +545,9 @@ func _make_zombie(c: Dictionary, origin: Vector3) -> Zombie:
 		wins.sort_custom(func(a, b): return a.outside.distance_to(origin) < b.outside.distance_to(origin))
 		win = wins[0]
 	var z := Zombie.new()
+	# waves.lua: template "zombie" or "zombie_var<n>" with n = GetSpawnCount() % 8
+	z.variant = spawn_count % 8
+	spawn_count += 1
 	z.setup(origin, win, player, randf_range(_hp.x, _hp.y), false, _wave_speed())
 	if direct and c["window"] == "":
 		z.state = Zombie.State.CHASE
@@ -525,21 +717,25 @@ func _start_dog_round() -> void:
 	dog_round = true
 	_between_rounds = false
 	_dog_health = dog_wave_counter * 300.0       # RecalculateDogWaveInfo
-	_dogs_total = _dog_number(dog_wave_counter, DIFFICULTY)
+	_dogs_total = _dog_number(dog_wave_counter, difficulty)
 	_dogs_spawned = 0
 	_dog_timer = 7.0
 	hud.round_changed(round_number)
+	Sfx.instance.vox("dog_round")   # PlayMultiplayerSound("dog_round", true) (waves.lua 542-544)
 	Sfx.instance.play("dog_fog")
-	Sfx.instance.ambience = []
+	# the level's "dogWaveStart" Timeout keeps its ambience without "zombies"
+	# (derriese.lua 407-411, shinonuma Timeout bytecode 140-163)
+	Sfx.instance.start_ambience(AMBIENCE.get(level_name, []).filter(func(c): return c != "zombies"))
 	_fog(true)
 	get_tree().create_timer(7.5, false).timeout.connect(func(): Sfx.instance.play("dog_start_vox"))
 
 
-# DogNumberCalculation(dogWaveCounter, difficulty)
-static func _dog_number(counter: int, difficulty: int) -> int:
-	if counter < 3:
-		return [6, 6, 6, 12, 16, 18][clampi(difficulty, 0, 5)]
-	return [8, 8, 8, 16, 18, 20][clampi(difficulty, 0, 5)]
+# DogNumberCalculation(dogWaveCounter, difficulty) (waves.lua 616-650): the shipped
+# bytecode (waves.luac, function at line 441) jumps past its per-difficulty branches
+# (12/16/18 and 16/18/20 are dead code), so every difficulty gets 6 dogs in the
+# first two dog rounds and 8 from the third on.
+static func _dog_number(counter: int, _difficulty: int) -> int:
+	return 6 if counter < 3 else 8
 
 
 func _process_dog_round(delta: float) -> void:
@@ -551,12 +747,14 @@ func _process_dog_round(delta: float) -> void:
 			spawn_dog(false)
 
 
-# Script.SpawnDog: the player's area or an open neighbour, one of its two dog
-# spawns closest to the player; a lightning strike, then the dog.
+# Script.SpawnDog: one of the two dog spawns of the player's area closest to the
+# player; a lightning strike, then the dog.
 func spawn_dog(untracked: bool) -> void:
 	var spots := []
-	var areas := _local_areas()
-	areas.shuffle()
+	# PickLocalSpawnpoint(player, true, false, 2) (ingame.lua:765): no neighbours,
+	# only the area the player stands in (every area of the dog maps has dog spawns)
+	var here := player_area()
+	var areas := [here] if here != "" else []
 	for an in areas:
 		var a: Dictionary = _areas.get(an, {})
 		for i in range(1, int(a.get("NumberOfDogSpawns", 0)) + 1):
@@ -589,14 +787,19 @@ func spawn_dog(untracked: bool) -> void:
 		_track(d)
 	d.untracked = untracked
 	d.flame = Dog.roll_flame()   # "flame_dogSpawn" or "normal_dogSpawn"
-	d.setup_dog(at + Vector3.UP * 0.1, player, _dog_health if _dog_health > 0.0 else 300.0, level.windows[0])
+	# SpawnDog (ingame.lua 788-791): Script.Mode.DogHealth, which stays at the last dog
+	# round's value (teleporter dogs too); 50 when it has none (before the first dog round)
+	d.setup_dog(at + Vector3.UP * 0.1, player, _dog_health if _dog_health > 0.0 else 50.0, level.windows[0])
 	d.killed.connect(_on_dog_killed)
 	add_child(d)
 
 
 func _on_dog_killed(d: Zombie, headshot: bool, knife: bool) -> void:
+	# dogs have no CDismembermentSpec: no head to take off, no headshot points
 	if not suppress_kill_points:
-		player.add_points((120 if knife else (90 if headshot else 50)) * points_multiplier)
+		player.add_points((120 if knife else 50) * points_multiplier)
+	kills += 1
+	headshots += int(headshot)
 	if (d as Dog).untracked:
 		return
 	_untrack(d)
@@ -611,17 +814,35 @@ func _on_dog_killed(d: Zombie, headshot: bool, knife: bool) -> void:
 # dogWaveEnd: music, fog lifts, next zombie round 6 s later
 func _dog_round_end() -> void:
 	Sfx.instance.play("dog_end_music")
-	Sfx.instance.start_ambience(["zombies", "world", "wind"])
+	Sfx.instance.start_ambience(AMBIENCE.get(level_name, AMBIENCE["nacht"]))
 	_fog(false)
 	get_tree().create_timer(6.0, false).timeout.connect(_next_round)
 
 
+# Dog wave fog: SetFogConfig(DogConfigName or "dogs", 4000) at StartDogWave; at
+# "dogWaveEnd" SetFogMappingEnabled(true) goes back to the default config with its
+# SetDefaultFogConfig time, 1000 ms (CFogManager 0x10f77c / 0x10f4c0).
+var _fog_tween: Tween
+
 func _fog(on: bool) -> void:
 	if _env == null:
 		return
-	var tw := create_tween().set_parallel()
-	tw.tween_property(_env, "fog_density", 0.07 if on else 0.025, 4.0)
-	tw.tween_property(_env, "fog_light_color", Color(0.25, 0.22, 0.2) if on else Color(0.12, 0.13, 0.16), 4.0)
+	var cfg: Array = FOG[DOG_FOG.get(level_name, "dogs")] if on else DEFAULT_FOG.get(level_name, DEFAULT_FOG["nacht"])
+	if _fog_tween:
+		_fog_tween.kill()
+	_fog_tween = create_tween().set_parallel()
+	var t := 4.0 if on else 1.0
+	_fog_tween.tween_property(_env, "fog_light_color", cfg[0], t)
+	_fog_tween.tween_property(_env, "background_color", cfg[0], t)
+	_fog_tween.tween_property(_env, "fog_depth_begin", cfg[1], t)
+	_fog_tween.tween_property(_env, "fog_depth_end", cfg[2], t)
+
+
+func _apply_fog(cfg: Array) -> void:
+	_env.fog_light_color = cfg[0]
+	_env.background_color = cfg[0]
+	_env.fog_depth_begin = cfg[1]
+	_env.fog_depth_end = cfg[2]
 
 
 # a white bolt from the sky and a flash where a dog appears
@@ -659,11 +880,54 @@ func _lightning(at: Vector3) -> void:
 func _on_zombie_killed(z: Zombie, headshot: bool, knife: bool) -> void:
 	if not _untrack(z):
 		return   # not one of the round's, or already counted
-	# World at War: 130 knife kill, 100 headshot, 60 other (plus 10 per hit)
+	# Original (kiwi 0x1315a0): PlayerKillPointsMelee 130, PlayerKillPoints 60, a kill that
+	# took the head off PlayerHeadShotPoints[streak] (100..140, Player.headshot_points), all
+	# including the 10 of the hit (PlayerHitPoints, added by take_damage)
 	if not suppress_kill_points:
-		player.add_points((120 if knife else (90 if headshot else 50)) * points_multiplier)
-	if _drops_this_round < MAX_DROPS and randf() < DROP_CHANCE and not _nuking:
-		spawn_powerup(Powerup.KINDS.keys().pick_random(), z.global_position)
+		player.add_points((120 if knife else (player.headshot_points() - 10 if headshot else 50)) * points_multiplier)
+	kills += 1
+	headshots += int(headshot)
+	if not _nuking:
+		_roll_drop(z.global_position)
+
+
+# CPickupManager::OnEnemyKilled (kiwi 0xf36b8): count the kill; below MaxPickupsPerWave
+# (and, with the difficulty tweaks, after more than PickupKillThreshold kills since the
+# last drop) a drop comes with probability PickupDropOnDeathProbability, or anyway once
+# more than PickupPointsThreshold points were earned since the last one. The kill count
+# restarts at every drop, the points when they forced it (always with the tweaks). No
+# drop within PickupNoSpawnCheckRadius of another pickup.
+func _roll_drop(at: Vector3) -> void:
+	_drop_kills += 1
+	if _drops_this_round >= MAX_DROPS:
+		return
+	var tweaks := level_name in DIFFICULTY_TWEAKS
+	if tweaks and _drop_kills <= DROP_KILLS:
+		return
+	if not (randi() % 4096 < int(DROP_CHANCE * 4096.0) or _drop_points > DROP_POINTS):
+		return
+	_drop_kills = 0
+	if tweaks or _drop_points > DROP_POINTS:
+		_drop_points = 0
+	for n in get_children():
+		if n is Powerup and n.global_position.distance_to(at + Vector3.UP * 0.6) < NO_DROP_RADIUS:
+			return
+	spawn_powerup(_drop_kind(), at)
+
+
+# Kind choice (kiwi 0xf39e4): a random one of the five, without Double Points or
+# Insta-Kill while it is running. The original offers the Carpenter only where the
+# level calls Game.SetUseCarpenter(true) (Der Riese); here it stays on every map.
+func _drop_kind() -> String:
+	var kinds := Powerup.KINDS.keys().filter(func(k): return not _timers.has(k))
+	return kinds.pick_random() if not kinds.is_empty() else "maxammo"
+
+
+# Player.add_points: earned points move the drop threshold and the game score.
+func points_earned(n: int) -> void:
+	if n > 0:
+		_drop_points += n
+		score += n
 
 
 func spawn_powerup(kind: String, at: Vector3) -> void:
@@ -709,24 +973,10 @@ func apply_powerup(kind: String) -> void:
 			player.add_points(200 * points_multiplier)
 
 
+# PickupMessageTimeMs: the pickup's message, then its CGuiFramePowerup icon (hud_powerups.gd)
 func _show_powerup(text: String) -> void:
-	if _pu_label == null:
-		_pu_label = Label.new()
-		_pu_label.add_theme_font_size_override("font_size", 26)
-		_pu_label.add_theme_color_override("font_color", Color(0.5, 1.0, 0.4))
-		_pu_label.add_theme_color_override("font_outline_color", Color.BLACK)
-		_pu_label.add_theme_constant_override("outline_size", 4)
-		_pu_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-		_pu_label.offset_top = 40
-		_pu_label.offset_left = -200
-		_pu_label.offset_right = 200
-		_pu_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		var layer := CanvasLayer.new()
-		layer.layer = 2
-		add_child(layer)
-		layer.add_child(_pu_label)
-	_pu_label.text = text
-	_pu_label.set_meta("flash", 3.0)
+	if hud:
+		hud.pickup_message(text)
 
 
 func _update_powerups(delta: float) -> void:
@@ -738,15 +988,6 @@ func _update_powerups(delta: float) -> void:
 				insta_kill = false
 			elif k == "doublepoints":
 				points_multiplier = 1
-	if _pu_label:
-		var flash: float = _pu_label.get_meta("flash", 0.0) - delta
-		_pu_label.set_meta("flash", flash)
-		var parts := []
-		if flash > 0.0:
-			parts.append(_pu_label.text.split("\n")[0])
-		for k in _timers:
-			parts.append("%s %d" % [Powerup.KINDS[k]["label"], ceili(_timers[k])])
-		_pu_label.text = "\n".join(parts) if not parts.is_empty() else ""
 
 
 func _on_debris_opened(d: Debris) -> void:
@@ -765,6 +1006,7 @@ func _on_debris_opened(d: Debris) -> void:
 func _on_player_died() -> void:
 	Sfx.instance.ambience = []
 	Sfx.instance.play("gameover_intro")
+	SaveGame.clear()   # the saved game is over
 	hud.game_over(round_number)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
@@ -786,6 +1028,12 @@ func muzzle_flash(cam: Camera3D, muzzle: Vector3) -> void:
 
 
 func spawn_impact(pos: Vector3, normal: Vector3) -> void:
+	# Game.SetUsingImpactEffects(false) on Nacht and Verrückt: the impact routine (kiwi
+	# 0x20eadc) returns at once; elsewhere only within ImpactEffectsMaxRange of the camera
+	if not level_name in IMPACT_EFFECTS:
+		return
+	if player and player.global_position.distance_to(pos) > IMPACT_MAX_RANGE:
+		return
 	var m := MeshInstance3D.new()
 	var q := QuadMesh.new()
 	q.size = Vector2(0.06, 0.06)

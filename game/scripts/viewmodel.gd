@@ -81,7 +81,7 @@ func set_weapon(name: String) -> void:
 			var own: String = _anims[act][0] if _anims.has(act) else ""
 			_anims[act] = [own, d[act][1]]
 	if not drinking and _item == null:
-		_play("idle", true)
+		_play(_rest_action(), true)
 
 
 func _no_shadows(n: Node) -> void:
@@ -130,7 +130,34 @@ func _back_to_idle(action: String) -> void:
 	if drinking or _item != null:
 		return
 	if not _arms_anim.is_playing() or _arms_anim.current_animation == "" or _arms_anim.current_animation == _anims.get(action, ["", ""])[1]:
-		_play("idle", true)
+		_play(_rest_action(), true)
+
+
+# Aiming down the sights (player.gd): the gun state machine's states 32 (raise to the
+# sights), 34 "aiming" (<gun>_aimidle), 35 fire while aiming (<gun>_aimshoot) and 33
+# (lower the sights), paired by tools/pair_arms.py as aim_in / aim / aim_shoot / aim_out.
+var aiming := false
+
+
+func set_aim(on: bool) -> void:
+	if on == aiming:
+		return
+	aiming = on
+	if drinking or _item != null or _slash >= 0.0:
+		return
+	var t := "aim_in" if on else "aim_out"
+	if _anims.has(t):
+		_play(t)
+	else:
+		_play(_rest_action(), true)
+
+
+func _rest_action() -> String:
+	return "aim" if aiming and _anims.has("aim") else "idle"
+
+
+func slashing() -> bool:   # knife in progress (player movement cap MaxKnifeMoveSpeed)
+	return _slash >= 0.0
 
 
 # Knife slash: none of the original arms animations matches the iOS knife, so it is
@@ -313,8 +340,8 @@ func muzzle_flash() -> void:
 
 
 func kick() -> void:
-	_kick = 1.0
-	_play("shoot")
+	_kick = 0.3 if aiming else 1.0
+	_play("aim_shoot" if aiming and _anims.has("aim_shoot") else "shoot")
 
 
 func reload(duration: float) -> void:
@@ -326,7 +353,7 @@ func _process(delta: float) -> void:
 	var player := get_parent().get_parent() as CharacterBody3D
 	var moving := player != null and Vector2(player.velocity.x, player.velocity.z).length() > 0.5
 	_bob += delta * (9.0 if moving else 2.0)
-	var amp := 0.008 if moving else 0.002
+	var amp := (0.008 if moving else 0.002) * (0.25 if aiming else 1.0)   # steady sights
 	_kick = move_toward(_kick, 0.0, delta * 6.0)
 	var dip: float = clamp(-_kick, 0.0, 1.0) * 0.25
 	var base := Transform3D(Basis(Vector3.UP, PI), Vector3(sin(_bob) * amp, abs(cos(_bob)) * amp - dip, max(_kick, 0.0) * 0.02))

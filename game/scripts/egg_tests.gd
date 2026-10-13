@@ -104,12 +104,21 @@ static func eggs(at: Node, game: Game) -> void:
 					await _wait(at, 2.0)   # static (1.3 s) then the song
 					_check(_on(eggs, "RadioTrack1") and eggs.emitters["RadioTrack1"]._step == 1, "track 1 past the static")
 		"derriese":
-			_check(eggs.triggers.size() == 8 and eggs.emitters.size() == 8, "8 radios")
+			_check(eggs.triggers.size() == 11 and eggs.emitters.size() == 14, "8 radios + 3 spinal columns")
 			for i in range(1, 9):
 				await _shoot(at, game, eggs, "Radio%dTrigger" % i)
 				await _wait(at, 0.2)
 				_check(_on(eggs, "Radio%dSound" % i), "Radio%dSound playing" % i)
 				_check(not eggs.triggers["Radio%dTrigger" % i].enabled, "Radio%dTrigger disabled" % i)
+			# SpinalColumnUpdate: Confirm for each, the song only with the third
+			for i in [2, 3, 1]:
+				await _shoot(at, game, eggs, "SpinalColumn%dTrigger" % i)
+				await _wait(at, 0.1)
+				_check(_on(eggs, "SpinalColumn%dConfirm" % i) and not eggs.triggers["SpinalColumn%dTrigger" % i].enabled,
+					"SpinalColumn%d confirms, trigger off" % i)
+				var music: bool = ["SpinalColumn1Music", "SpinalColumn2Music", "SpinalColumn3Music"].any(func(m): return _on(eggs, m))
+				_check(music == (i == 1), "song %s after %d columns" % ["on" if music else "off", eggs.spinal_columns_used.size()])
+			_check(_on(eggs, "SpinalColumn1Music"), "the third column plays its Music emitter")
 		"shinonuma":
 			_check(eggs.triggers.size() == 7, "7 triggers")
 			_check(eggs.emitters["TelephoneOffHookEmitter"].enabled and eggs.emitters["TelephoneNoiseEmitter1"].enabled, "phone off-hook and meteor hum at start")

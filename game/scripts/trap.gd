@@ -63,6 +63,13 @@ var _bolts: MeshInstance3D
 var _bolt_timer := 0.0
 var _loop: AudioStreamPlayer3D
 var _lights := []
+var gen_on := false           # the switch got "genTurnOn" (power, maybe delayed: GEN_DELAY)
+const GEN_DELAY := {"Trap_power": 4.3}
+# Shi No Numa: buying Link_DwnSt_FshSw_Trigger sends the flogger "doorOpen"
+# (shinonuma.lua Trigger, bytecode 212-225); until then the trap is not for sale.
+# The door counts as open once it has left level.debris (bought, or freed by a resumed save).
+const FLOGGER_DOOR := "Link_DwnSt_FshSw_Trigger"
+var _door: Node = null
 
 
 func setup(level_: Level, entity_: String) -> void:
@@ -78,6 +85,12 @@ func setup(level_: Level, entity_: String) -> void:
 		use_point = root * _box_centre(cols[0])
 	else:
 		use_point = root.origin
+	gen_on = level.power_on
+	level.power_changed.connect(_gen_turn_on)
+	if kind == "flogger":
+		for d in level.debris:
+			if PerkMachine.same_name(d.entity, FLOGGER_DOOR):
+				_door = d
 	if kind == "electric":
 		_place_lever(e)
 		var fx := []
@@ -124,8 +137,21 @@ func _place_lever(_e: Dictionary) -> void:
 	if _lever.has_animation(LEVER_ACTIVE):
 		_lever.get_animation(LEVER_ACTIVE).loop_mode = Animation.LOOP_LINEAR
 	_lever_pose(LEVER_READY if level.power_on else LEVER_OFF)
-	# ASM "off" -genTurnOn-> "READY"
-	level.power_changed.connect(func(on: bool): if on and state == State.IDLE: _lever_pose(LEVER_READY))
+	# ASM "off" -genTurnOn-> "READY" (_gen_turn_on)
+
+
+# "genTurnOn" from TurnOnGenerator. Der Riese's Trap_power gets it 4.3 s after the
+# switch (derriese.lua 611: Timeout(4300, "TrapPowerTurnOn") -> SetASMTrigger
+# ("Trap_power", "genTurnOn")); the other traps at once (612-613).
+func _gen_turn_on(on: bool) -> void:
+	if not on or gen_on:
+		return
+	var delay: float = GEN_DELAY.get(entity, 0.0) if level.level_name == "derriese" else 0.0
+	if delay > 0.0:
+		await get_tree().create_timer(delay, false).timeout
+	gen_on = true
+	if state == State.IDLE:
+		_lever_pose(LEVER_READY)
 
 
 func _lever_pose(a: String) -> void:
@@ -263,8 +289,14 @@ func usable_from(p: Vector3) -> bool:
 	return Vector2(p.x - use_point.x, p.z - use_point.z).length() < USE_RANGE and absf(p.y - use_point.y) < 2.0
 
 
+func door_open() -> bool:
+	return _door == null or not level.debris.has(_door)
+
+
 func prompt(_player: Player) -> String:
-	if not level.power_on:
+	if not door_open():
+		return ""
+	if not gen_on:
 		return "Serve la corrente"
 	match state:
 		State.ACTIVE:
@@ -275,7 +307,7 @@ func prompt(_player: Player) -> String:
 
 
 func interact(player: Player) -> void:
-	if state != State.IDLE or not level.power_on:
+	if state != State.IDLE or not gen_on or not door_open():
 		return
 	if player.points < cost:
 		Sfx.instance.play("buy_fail")

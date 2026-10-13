@@ -6,8 +6,44 @@ extends CharacterBody3D
 
 signal killed(zombie: Zombie, headshot: bool, knife: bool)
 
-const MODEL := "res://assets/characters/ingame/zombiesmodelsger/fee5ccda.glb"
-const HIDDEN_PARTS := ["headb", "980daf40"]
+# Each level's shared group loads one zombie model group (nacht_shared / verruckt_shared:
+# zombiesModelsGer, shinonuma_shared: zombiesModelsJap, derriese_shared: zombiesModelsRiese).
+# Their CRenderableModelSetLODQuotaSpec (b0c61ea8 / b0c62ae5 / fb917fa2) never uses the
+# first model (fee5ccda / 4009f754): the top LOD the game draws is the second one.
+const MODELS := {
+	"ger": "res://assets/characters/ingame/zombiesmodelsger/fee5ccdb.glb",
+	"jap": "res://assets/characters/ingame/zombiesmodelsjap/4009f755.glb",
+	"riese": "res://assets/characters/ingame/zombiesmodelsriese/fee5ccdb.glb",
+}
+const LEVEL_MODELS := {"shinonuma": "jap", "derriese": "riese"}
+# The 8 templates zombie, zombie_var1..zombie_var7 (waves.lua 370-378 cycles them by
+# spawn count % 8) are the same model with two component lists of zombiesbase:
+#  - CMatAnimSetterSpec 320775bb (frame 0) / 320775bc (frame 4): the cel of the animated
+#    body material (771bc860 / 392ad35a: cel 128 texels wide, 8 per row of the 1024 atlas),
+#    so frame 4 moves the UVs half the texture across (the other uniform);
+#  - CModelBlockSwitcherSpec b762e213 / 7217bdf7 / a4ceb1d6 / af97215a: which blocks
+#    (triangle lists, the mesh parts) each switch shows. Switch = [blocks, on at start]:
+#    head_on {neck, 25d19111, head, helmet} 1, head_off {94c24809} 1, spare head 0,
+#    left_arm_on {leftarm | sleevel} 1, left_arm_off {e1f1c9f3} 1, right_arm_on {rightarm |
+#    sleever} 1, right_arm_off {75a47286} 1, legs_on {legs} 1, legs_off {acf2ab46} 0,
+#    body_on {body} 1, body_off {980daf40} 1, sleeves (unused arms) 0, hat {a3eaf623} 0.
+#    The "_off" blocks drawn at start are the gore inside the limb (hidden by it); here
+#    they stay hidden until the limb comes off.
+# variant -> [material frame, head block, arm blocks, helmet / hat block (jap model)]
+const VARIANTS := [
+	[0, "3f7355a5", "arms", "01d84724"], [4, "3f7355a5", "arms", "01d84724"],   # b762e213
+	[0, "headb", "arms", "01d84724"], [4, "headb", "arms", "01d84724"],         # 7217bdf7
+	[0, "3f7355a5", "sleeves", "a3eaf623"], [4, "3f7355a5", "sleeves", "a3eaf623"],  # a4ceb1d6
+	[0, "headb", "sleeves", "a3eaf623"], [4, "headb", "sleeves", "a3eaf623"],   # af97215a
+]
+const ANIM_MATERIALS := ["771bc860", "392ad35a"]   # the materials with the cel animation
+const ALL_BLOCKS := ["neck", "25d19111", "3f7355a5", "headb", "01d84724", "a3eaf623", "94c24809",
+	"leftarm", "sleevel", "e1f1c9f3", "rightarm", "sleever", "75a47286", "legs", "acf2ab46",
+	"body", "980daf40", "89513fe2"]
+var variant := -1         # 0..7 (set before add_child; -1 = random)
+var model_set := ""       # "ger" / "jap" / "riese" (set before add_child; "" = by level)
+var head_block := "3f7355a5"
+var _blocks := {}         # block name -> [MeshInstance3D] (all its materials)
 # body animation -> speed (m/s) of its root-motion partner
 const WALKS := {"fbe7b3da": 0.96, "fbe7b3db": 0.95, "fbe7b3dc": 1.0, "fbe7b3dd": 1.21,
 	"fbe7b3de": 0.57, "fbe7b3df": 0.58, "fbe7b3e0": 0.65, "9a1f4265": 0.69}
@@ -42,8 +78,6 @@ const CRAWL := "4b64cfc6"         # root-motion partner a429672c: 0.52 m/s
 const CRAWL_SPEED := 0.52
 const CRAWL_ATTACK := "dddede7a"  # zombie_crawl_attack
 const CRAWL_DEATH := "bd4b9b0a"
-const CRAWL_CHANCE := 0.08
-const CRAWL_CHANCE_LOW_HIT := 0.15   # heavy hit on the legs (hit position known)
 var crawler := false
 var max_health := 100.0
 var _shape: CollisionShape3D
@@ -89,6 +123,52 @@ var _hit_done := false
 var _repath := 0.0
 var _best_dist := INF
 var _stall := 0.0
+
+# Turning (console.bin, angles 4096 = 360 degrees per second, a random value of the range
+# per zombie): ZombieTurnSpeedRangeMove {2000,5000} turns the walking direction,
+# ZombieTurnSpeedRangeRender {1000,2000} the body drawn on top of it.
+const TURN_SPEED_MOVE := Vector2(2000, 5000)
+const TURN_SPEED_RENDER := Vector2(1000, 2000)
+const MAX_BODY_LAG := deg_to_rad(45.0)   # remake: the body never trails further behind
+var _turn_move := 5.0
+var _turn_render := 3.0
+var _heading := 0.0      # walking direction (yaw); rotation.y is the drawn body
+
+# Target prediction (ZombiePredictionEnabled 1): farther than ZombiePredictionProximity
+# (750 units = 1.875 m) a zombie heads for the player's predicted position, the point
+# ZombiePredictionDist ahead along his movement, clipped by the navmesh (kiwi 0x209ee8:
+# the raw value 1228, written as the fixed 0.3, is passed as a distance in units = 3.07 m).
+const PREDICTION := true
+const PREDICTION_PROXIMITY := 750.0 / 400.0
+const PREDICTION_DIST := 1228.0 / 400.0
+
+# Antiflock (ZombieAntiflockEnabled 1, kiwi 0x138c4c decision / 0x13936c state): every
+# ZombieAntiflockInterval (1 s) a chasing zombie between ZombieAntiflockMinRange and
+# MaxRange (2000..10000 units = 5..25 m) from the player counts the zombies after the same
+# player within ZombieAntiflockRadius (800 = 2 m). With at least ZombieAntiflockCrowdSize (4)
+# of them, pressing on it by more than ZombieAntiflockCrowdPushThreshold (sum of 2^36/d^2,
+# d in units), it steps away from the crowd: the direction away from them, turned towards the
+# player to at most ZombieAntiflockAngleHeading (796 = 70 degrees) off the line to him (not
+# at all when it is within ZombieAntiflockAngleTolerance, 20 = 1.8 degrees, of that line),
+# ZombieAntiflockDist ahead (1200 = 3 m). The detour lasts ZombieAntiflockTime (2 s), until
+# it is within ZombieAntiflockTolerance (500 = 1.25 m) of the point or the player is nearer
+# than MinRange.
+const ANTIFLOCK := true
+const AF_INTERVAL := 1.0
+const AF_TIME := 2.0
+const AF_MIN := 2000.0 / 400.0
+const AF_MAX := 10000.0 / 400.0
+const AF_RADIUS := 800.0 / 400.0
+const AF_CROWD := 4
+const AF_PUSH := 1000000.0
+const AF_ANGLE_TOL := 20.0 * TAU / 4096.0
+const AF_HEADING := 796.0 * TAU / 4096.0
+const AF_DIST := 1200.0 / 400.0
+const AF_TOLERANCE := 500.0 / 400.0
+var antiflock_on := false
+var antiflock_count := 0      # detours taken (tests)
+var _af_goal := Vector3.ZERO
+var _af_timer := -1.0
 
 
 func setup(spawn: Vector3, win: Barricade, player: Player, hp: float, runner: bool, speed_idx := 0) -> void:
@@ -142,10 +222,11 @@ func _ready() -> void:
 	shape.shape = cap
 	shape.position.y = 0.9
 	add_child(shape)
-	_model = (load(MODEL) as PackedScene).instantiate()
-	add_child(_model)
-	for mi in _model.find_children("*", "MeshInstance3D"):
-		mi.visible = not (mi.name in HIDDEN_PARTS or mi.name.ends_with("_m1"))
+	_setup_model(g)
+	_add_shadow(self, SHADOW_SIZE)
+	_turn_move = deg_to_rad(randf_range(TURN_SPEED_MOVE.x, TURN_SPEED_MOVE.y) * 360.0 / 4096.0)
+	_turn_render = deg_to_rad(randf_range(TURN_SPEED_RENDER.x, TURN_SPEED_RENDER.y) * 360.0 / 4096.0)
+	_heading = rotation.y
 	_anim = _model.find_children("*", "AnimationPlayer")[0]
 	for a in WALKS.keys() + RUNS.keys() + [IDLE] + ATTACKS:
 		if _anim.has_animation(a):
@@ -165,12 +246,107 @@ func _ready() -> void:
 			_start_entry()
 
 
+# ------------------------------------------------------------------ model / template
+static var _scenes := {}
+static var _cel_copies := {}   # material -> its copy on another cel
+
+
+# The level's zombie model with the blocks and the material cel of template `variant`.
+func _setup_model(g: Game) -> void:
+	if model_set == "":
+		model_set = LEVEL_MODELS.get(g.level_name if g else "", "ger")
+	var path: String = MODELS.get(model_set, MODELS["ger"])
+	if not _scenes.has(path):
+		_scenes[path] = load(path)
+	_model = (_scenes[path] as PackedScene).instantiate()
+	add_child(_model)
+	if variant < 0:
+		variant = randi() % VARIANTS.size()
+	var v: Array = VARIANTS[variant % VARIANTS.size()]
+	head_block = v[1]
+	var on := ["neck", "25d19111", head_block, v[3], "legs", "body", "89513fe2"]
+	on += ["leftarm", "rightarm"] if v[2] == "arms" else ["sleevel", "sleever"]
+	_blocks.clear()
+	for mi: MeshInstance3D in _model.find_children("*", "MeshInstance3D"):
+		var base := _block_of(mi.name)
+		if not _blocks.has(base):
+			_blocks[base] = []
+		_blocks[base].append(mi)
+		mi.visible = base in on or not base in ALL_BLOCKS
+		mi.layers = CHAR_LAYER
+		if int(v[0]) != 0:
+			_set_cel(mi, int(v[0]))
+
+
+# "neck_m1" -> "neck": the exporter splits a block per material
+static func _block_of(n: String) -> String:
+	var i := n.rfind("_m")
+	return n.substr(0, i) if i > 0 and n.substr(i + 2).is_valid_int() else n
+
+
+# CMatAnimSetterSpec frame: cel `frame` of the animated material (128 of 1024 texels per
+# cel horizontally, 8 per row).
+func _set_cel(mi: MeshInstance3D, frame: int) -> void:
+	for s in mi.mesh.get_surface_count():
+		var m := mi.mesh.surface_get_material(s) as BaseMaterial3D
+		if m == null or not m.resource_name in ANIM_MATERIALS:
+			continue
+		var key := "%d:%d" % [m.get_instance_id(), frame]
+		if not _cel_copies.has(key):
+			var c := m.duplicate() as BaseMaterial3D
+			c.uv1_offset.x += float(frame % 8) * 0.125
+			c.uv1_offset.y += float(frame / 8) * 0.125
+			_cel_copies[key] = c
+		mi.set_surface_override_material(s, _cel_copies[key])
+
+
+func _show_block(base: String, on: bool) -> void:
+	for mi in _blocks.get(base, []):
+		(mi as MeshInstance3D).visible = on
+
+
+func _block_visible(base: String) -> bool:
+	for mi in _blocks.get(base, []):
+		if (mi as MeshInstance3D).visible:
+			return true
+	return false
+
+
+# Blob shadow (CRenderableShadowSpec of the zombie and dog spec lists): model 6375f9db of
+# the effects group, a flat quad of +-229 units (1.15 m) textured with the soft blob
+# 1bb1226b (material 1220d7c3, alpha blended), kept on the ground under the character.
+const SHADOW_SIZE := 458.0 / 400.0
+const CHAR_LAYER := 4   # render layer 3: zombie / dog meshes (not darkened by the shadows)
+const SHADOW_TEX := "res://assets/textures/ingame/effects/1bb1226b.png"
+static var _shadow_tex: Texture2D
+
+
+static func _add_shadow(owner: Node3D, size: float) -> Decal:
+	if _shadow_tex == null and ResourceLoader.exists(SHADOW_TEX):
+		_shadow_tex = load(SHADOW_TEX)
+	if _shadow_tex == null:
+		return null
+	var d := Decal.new()
+	d.name = "Shadow"
+	d.texture_albedo = _shadow_tex
+	# projected down onto the ground from just above the feet (up to 1.5 m below them)
+	d.size = Vector3(size, 2.0, size)
+	d.position = Vector3.DOWN * 0.5
+	d.upper_fade = 0.1
+	d.lower_fade = 0.5
+	d.modulate = Color(0.3, 0.3, 0.3, 0.8)   # the blob is dark blue-grey: keep it neutral
+	d.cull_mask = 0xFFFFF & ~(CHAR_LAYER | Viewmodel.LAYER)   # the ground only
+	owner.add_child(d)
+	return d
+
+
 # Spawns behind the jungle backdrop (game.gd _spawn_entry): straight in to the navmesh.
 func _start_entry() -> void:
 	_unsticking = true
 	collision_mask = 0
 	var d := entry - global_position
 	rotation.y = atan2(d.x, d.z)
+	_heading = rotation.y
 	_unstick_tw = create_tween()
 	_unstick_tw.tween_property(self, "global_position", entry + Vector3.UP * 0.05, d.length() / maxf(speed, 0.5))
 	_unstick_tw.finished.connect(func():
@@ -276,6 +452,7 @@ func _physics_process(delta: float) -> void:
 	if state == State.DEAD:
 		return
 	_update_speed_up(delta)
+	_update_bleed(delta)
 	match state:
 		State.RISING:
 			_timer -= delta
@@ -334,9 +511,11 @@ func _physics_process(delta: float) -> void:
 				_play(CRAWL_ATTACK if crawler else ATTACKS.pick_random(), 0.1)
 				Sfx.instance.play_at("zombie_attack", global_position + Vector3.UP * 1.5)
 			else:
+				if ANTIFLOCK and _update_antiflock(delta, d):
+					_repath = 0.0
 				_repath -= delta
 				if _repath <= 0.0:
-					_agent.target_position = target.global_position
+					_agent.target_position = _chase_goal(d)
 					_repath = 0.4
 				_move_along_path(delta)
 		State.ATTACK:
@@ -360,11 +539,16 @@ func _move_along_path(delta: float) -> void:
 	var next := _agent.get_next_path_position()
 	var dir := next - global_position
 	dir.y = 0.0
+	var mv := Vector3.ZERO
 	if dir.length() > 0.05:
-		dir = dir.normalized()
-		_face(global_position + dir)
-	velocity.x = dir.x * speed
-	velocity.z = dir.z * speed
+		# the walking direction turns at most _turn_move per second; a sharp turn slows it
+		var want := atan2(dir.x, dir.z)
+		_heading = rotate_toward(_heading, want, _turn_move * delta)
+		var off := absf(angle_difference(_heading, want))
+		mv = Vector3(sin(_heading), 0.0, cos(_heading)) * speed * clampf(cos(off), 0.25, 1.0)
+		_turn_body(delta)
+	velocity.x = mv.x
+	velocity.z = mv.z
 	velocity.y = 0.0 if is_on_floor() else velocity.y - 12.0 * delta
 	if is_on_floor():
 		Stairs.step_up(self, delta)
@@ -410,6 +594,7 @@ func _try_drop() -> bool:
 	collision_mask = 0
 	_face(landing)
 	rotation.y = atan2(dir.x, dir.z)
+	_heading = rotation.y
 	_anim.get_animation(anim).loop_mode = Animation.LOOP_NONE
 	_anim.play(anim, 0.15)
 	var t: float = _anim.get_animation(anim).length
@@ -515,7 +700,111 @@ func _face(p: Vector3) -> void:
 	d.y = 0.0
 	if d.length() > 0.01:
 		# model faces +Z
-		rotation.y = lerp_angle(rotation.y, atan2(d.x, d.z), 0.2)
+		var dt := get_physics_process_delta_time()
+		_heading = rotate_toward(_heading, atan2(d.x, d.z), _turn_move * dt)
+		_turn_body(dt)
+
+
+# The drawn body follows the walking direction at ZombieTurnSpeedRangeRender.
+func _turn_body(dt: float) -> void:
+	rotation.y = rotate_toward(rotation.y, _heading, _turn_render * dt)
+	var lag := angle_difference(_heading, rotation.y)
+	if absf(lag) > MAX_BODY_LAG:
+		rotation.y = _heading + signf(lag) * MAX_BODY_LAG
+
+
+# Where a chasing zombie paths to: the player, his predicted position, or the antiflock
+# detour point.
+func _chase_goal(dist: float) -> Vector3:
+	var tp := target.global_position
+	if antiflock_on:
+		return _af_goal
+	if not PREDICTION or dist <= PREDICTION_PROXIMITY:
+		return tp
+	var v := target.velocity
+	v.y = 0.0
+	if v.length() < 0.5:
+		return tp
+	var ahead := tp + v.normalized() * PREDICTION_DIST
+	var hit := get_world_3d().direct_space_state.intersect_ray(
+		PhysicsRayQueryParameters3D.create(tp + Vector3.UP * 0.5, ahead + Vector3.UP * 0.5, 1))
+	if not hit.is_empty():
+		ahead = (hit["position"] as Vector3) - v.normalized() * 0.3
+		ahead.y = tp.y
+	return NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map, ahead)
+
+
+# Antiflock state; true when it changed (path again).
+func _update_antiflock(delta: float, dist: float) -> bool:
+	if crawler:
+		return false
+	if _af_timer < 0.0:
+		_af_timer = randf() * AF_INTERVAL   # spread the checks
+	_af_timer -= delta
+	if antiflock_on:
+		var off := _af_goal - global_position
+		off.y = 0.0
+		if _af_timer <= 0.0 or off.length() < AF_TOLERANCE or dist < AF_MIN:
+			antiflock_on = false
+			_af_timer = AF_INTERVAL
+			return true
+		return false
+	if _af_timer > 0.0:
+		return false
+	_af_timer = AF_INTERVAL
+	var g := _antiflock_point(dist)
+	if g == Vector3.INF:
+		return false
+	antiflock_on = true
+	antiflock_count += 1
+	_af_goal = g
+	_af_timer = AF_TIME
+	return true
+
+
+func _antiflock_point(dist: float) -> Vector3:
+	if dist < AF_MIN or dist > AF_MAX:
+		return Vector3.INF
+	var count := 0
+	var away := Vector3.ZERO
+	var push := 0.0
+	for n in get_tree().get_nodes_in_group("zombies"):
+		var z := n as Zombie
+		if z == null or z == self or z.target != target or not z.state in [State.CHASE, State.ATTACK]:
+			continue
+		var off := global_position - z.global_position
+		var dd := off.length()
+		if dd > AF_RADIUS or dd < 0.01:
+			continue
+		count += 1
+		away += off
+		push += 68719476736.0 / ((dd * 400.0) * (dd * 400.0))   # 2^36 / d^2
+	if count < AF_CROWD or push < AF_PUSH:
+		return Vector3.INF
+	away.y = 0.0
+	var to_p := target.global_position - global_position
+	to_p.y = 0.0
+	if away.length() < 0.01 or to_p.length() < 0.01:
+		return Vector3.INF
+	away = away.normalized()
+	var dirp := to_p.normalized()
+	var ang := dirp.angle_to(away)
+	if ang < AF_ANGLE_TOL:
+		return Vector3.INF
+	var dir := away
+	if ang > AF_HEADING:
+		# the line to the player turned by AngleHeading towards the side away from the crowd
+		var a := dirp.rotated(Vector3.UP, AF_HEADING)
+		var b := dirp.rotated(Vector3.UP, -AF_HEADING)
+		dir = a if a.dot(away) >= b.dot(away) else b
+	var from := global_position + Vector3.UP * 0.9
+	var goal := global_position + dir * AF_DIST
+	var hit := get_world_3d().direct_space_state.intersect_ray(
+		PhysicsRayQueryParameters3D.create(from, goal + Vector3.UP * 0.9, 1))
+	if not hit.is_empty():
+		goal = (hit["position"] as Vector3) - dir * 0.4
+		goal.y = global_position.y
+	return NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map, goal)
 
 
 func _start_tearing() -> void:
@@ -551,34 +840,108 @@ func _start_climb() -> void:
 		_play(move_anim))
 
 
-# hit_pos (world space, optional): where the shot landed; it picks which limb can
-# come off (legs only from low hits, the arm on the side and height that was hit).
-# Without it the old random choice is used (explosions, fire, traps).
+# hit_pos (world space, optional): where the shot landed; with it (or a head hit) the
+# hit has a location and can take a limb off (CDismembermentSpec, below). Without it
+# (explosions, fire, traps, knife) no limb is hurt.
+# `headshot` from the caller means the shot hit the head volume; the kill counts as a
+# headshot (points, stats) only when that hit took the head off, as in the original
+# (damage info byte 0x1e, set by the dismemberment handler kiwi 0x14fe94).
 func take_damage(amount: float, headshot: bool, by: Player, knife := false, hit_pos := Vector3.INF) -> void:
 	if state == State.DEAD:
 		return
 	var g := get_parent() as Game
-	if g and g.insta_kill:
+	var insta := g != null and g.insta_kill
+	if insta:
 		amount = health
 	health -= amount
 	if by:
 		by.add_points(10 * (g.points_multiplier if g else 1))
-	var located := hit_pos != Vector3.INF
-	var arm := ""
-	var legs_hit := true
-	if located:
-		arm = arm_at(hit_pos)
-		legs_hit = to_local(hit_pos).y < LEG_HIT_HEIGHT
-	elif randf() < ARM_GIB_CHANCE:
-		arm = ["left", "right"].pick_random()
-	if not crawler and health > 0.0 and not headshot and not knife and amount >= 50.0 and legs_hit \
-			and state in [State.CHASE, State.ATTACK] and randf() < (CRAWL_CHANCE_LOW_HIT if located else CRAWL_CHANCE):
-		become_crawler()
-	elif not headshot and not knife and amount >= 40.0 and arm != "" \
-			and (not located or randf() < ARM_GIB_CHANCE_ON_ARM):
-		lose_arm(arm)
+	var loc := -1
+	if headshot:
+		loc = Weapons.LOC_HEAD
+	elif hit_pos != Vector3.INF:
+		loc = Weapons.location(self, hit_pos, false)
+	var popped := false
+	if not knife and loc >= 0 and not _pistol(by):
+		popped = _damage_limb(loc, amount)
+	if insta and by != null:
+		lose_head()   # Insta-Kill (damage info byte 0x20) forces the head off
 	if health <= 0.0:
-		_die(headshot, knife)
+		_die(popped, knife)
+	elif popped and _bleed_left <= 0.0:
+		_bleed_left = BLEED_TIME   # headless and still standing: bleeds out
+		_bleed_t = BLEED_PERIOD
+		_bleed_by = by
+	if popped and by and by.has_method("head_popped"):
+		by.head_popped()
+
+
+# ------------------------------------------------------------------ dismemberment
+# CDismembermentSpec of the zombie (zombiesbase c9872545, serialiser kiwi 0x196510):
+# per entry u32 hit volume, u32 damage type mask, u32 CPeriodicDamage, i32 health
+# (fraction of the zombie's max health, 4096 = 1), u8 disable the volume, u32 block switch
+# name ("<name>_on" / "<name>_off"), u32 effect entity:
+#   0 head      0xc1  a8c8c6e1  3276 (0.8)    1  head      3e08391d
+#   1 left arm  0xc1  -          106 (0.026)  1  left_arm  34a75f56
+#   2 right arm 0xc1  -          106 (0.026)  1  right_arm 888d60e9
+#   3 chest     0xc1  -          106 (0.026)  0  body      -
+# A limb is a pool of health of its own (kiwi 0x150210: fraction x max health); bullet
+# damage on its hit volume drains it (kiwi 0x1505a0) and at 0 the limb comes off: the
+# "_on" blocks hide, the "_off" ones show. Mask 0xc1 = damage types 0 (guns), 6, 7: not
+# the starting pistol (type 1, colt45 only), explosives (2), the knife (3) or fire (5).
+# The chest only opens up (body_on -> body_off), it never flies off. No legs here: those
+# go with explosive damage (explosion.gd).
+const LIMB_HEALTH := {0: 3276.0 / 4096.0, 1: 106.0 / 4096.0, 2: 106.0 / 4096.0, 3: 106.0 / 4096.0}
+# CPeriodicDamage a8c8c6e1 (head): period 1000 ms, type 5, 100 damage, for 10000 ms
+const BLEED_DAMAGE := 100.0
+const BLEED_PERIOD := 1.0
+const BLEED_TIME := 10.0
+var _limbs := {}
+var _bleed_left := 0.0
+var _bleed_t := 0.0
+var _bleed_by: Player
+
+
+func _init_limbs() -> void:
+	for k in LIMB_HEALTH:
+		_limbs[k] = LIMB_HEALTH[k] * max_health
+
+
+func _pistol(by: Player) -> bool:
+	return by != null and String(by.weapon().get("name", "")) == "colt45"
+
+
+# Drains limb `loc`; true when this hit took the head off.
+func _damage_limb(loc: int, amount: float) -> bool:
+	if _limbs.is_empty():
+		_init_limbs()
+	if not _limbs.has(loc) or float(_limbs[loc]) <= 0.0:
+		return false
+	_limbs[loc] = maxf(float(_limbs[loc]) - amount, 0.0)
+	if _limbs[loc] > 0.0:
+		return false
+	match loc:
+		Weapons.LOC_HEAD:
+			var was := _block_visible("neck")
+			lose_head()
+			return was
+		Weapons.LOC_LEFT_ARM:
+			lose_arm("left")
+		Weapons.LOC_RIGHT_ARM:
+			lose_arm("right")
+		Weapons.LOC_CHEST:
+			open_chest()
+	return false
+
+
+func _update_bleed(delta: float) -> void:
+	if _bleed_left <= 0.0:
+		return
+	_bleed_left -= delta
+	_bleed_t -= delta
+	if _bleed_t <= 0.0:
+		_bleed_t += BLEED_PERIOD
+		take_damage(BLEED_DAMAGE, false, _bleed_by if is_instance_valid(_bleed_by) else null)
 
 
 # Which arm (if any) a hit at world position p lands on: the arm whose posed bones
@@ -624,16 +987,13 @@ func _skeleton() -> Skeleton3D:
 
 
 # ------------------------------------------------------------------ gibs
-# Parts of the zombie model (named in tools/export_characters.py): "neck" is the
-# attached head, "headb" the loose head, "sleevel/sleever" + "leftelbow/rightelbow"
-# the forearms, "e1f1c9f3"/"75a47286" the left/right arm stumps; "*_m1" are the
-# bloody stump caps (hidden while the part is attached).
-const ARM_GIB_CHANCE := 0.15          # random arm (no hit position)
-const ARM_GIB_CHANCE_ON_ARM := 0.35   # a heavy hit that lands on an arm
-const ARMS := {
-	"left": {"remove": ["sleevel", "leftelbow"], "show": ["e1f1c9f3_m1"]},
-	"right": {"remove": ["sleever", "rightelbow"], "show": ["75a47286_m1"]},
-}
+# Blocks of the zombie model (named in tools/export_characters.py, one mesh per block and
+# material, "neck_m1" = block "neck" with material 1), switched like the original's
+# CModelBlockSwitcherSpec (see VARIANTS): head_on = neck, 25d19111, the head (3f7355a5 or
+# headb) and the helmet / hat; head_off = 94c24809 (neck stump); left/right_arm_on = the
+# whole arm (leftarm / sleevel, rightarm / sleever), left/right_arm_off = the shoulder
+# stumps e1f1c9f3 / 75a47286; legs_on = legs, legs_off = acf2ab46 (waist stump);
+# body_on = body (the tunic front), body_off = 980daf40 (the open chest).
 var _arms_lost := {}
 
 
@@ -641,34 +1001,46 @@ func _part(n: String) -> MeshInstance3D:
 	return _model.find_child(n, true, false) as MeshInstance3D
 
 
+func _arm_block(side: String) -> String:
+	for b in (["leftarm", "sleevel"] if side == "left" else ["rightarm", "sleever"]):
+		if _block_visible(b):
+			return b
+	return ""
+
+
+func _first_mesh(block: String) -> MeshInstance3D:
+	var l: Array = _blocks.get(block, [])
+	return l[0] if not l.is_empty() else null
+
+
 func lose_head() -> void:
-	var head := _part("neck")
-	if head == null or not head.visible:
+	if not _block_visible("neck"):
 		return
-	head.visible = false
-	for n in ["neck_m1", "25d19111_m1"]:
-		var m := _part(n)
-		if m:
-			m.visible = true
-	_spawn_gib(_part("headb"), head)
+	var head := _first_mesh(head_block)
+	for b in ["neck", "25d19111", head_block, "01d84724", "a3eaf623"]:
+		_show_block(b, false)
+	_show_block("94c24809", true)
+	_spawn_gib(head, head)
 
 
 func lose_arm(side: String) -> void:
 	if _arms_lost.has(side):
 		return
 	_arms_lost[side] = true
-	var first: MeshInstance3D = null
-	for n in ARMS[side]["remove"]:
-		var m := _part(n)
-		if m and m.visible:
-			m.visible = false
-			first = m if first == null else first
-	for n in ARMS[side]["show"]:
-		var m := _part(n)
-		if m:
-			m.visible = true
+	var b := _arm_block(side)
+	var first := _first_mesh(b) if b != "" else null
+	_show_block(b, false)
+	_show_block("e1f1c9f3" if side == "left" else "75a47286", true)
 	if first:
 		_spawn_gib(first, first)
+
+
+# body_off: the tunic front goes, the open chest shows (no gib, no effect)
+func open_chest() -> void:
+	if not _block_visible("body"):
+		return
+	_show_block("body", false)
+	_show_block("980daf40", true)
 
 
 # A physics copy of a part flying off. The mesh is static (unskinned) so it is
@@ -681,6 +1053,8 @@ func _spawn_gib(src: MeshInstance3D, where: MeshInstance3D) -> void:
 	body.collision_mask = 1
 	var mi := MeshInstance3D.new()
 	mi.mesh = src.mesh
+	for i in src.get_surface_override_material_count():
+		mi.set_surface_override_material(i, src.get_surface_override_material(i))   # its cel
 	var bounds := src.mesh.get_aabb()
 	mi.position = -bounds.get_center()
 	body.add_child(mi)
@@ -730,13 +1104,11 @@ func become_crawler() -> void:
 	var g := get_parent() as Game
 	if max_health < 1e5:   # tests use huge health on purpose
 		health = crawler_health(health, max_health, g.level_name if g else "")
-	var legs := _part("legs")
-	if legs and legs.visible:
-		legs.visible = false
+	var legs := _first_mesh("legs")
+	if _block_visible("legs"):
+		_show_block("legs", false)   # legs_on off, legs_off (waist stump) on: kiwi 0x139be8
+		_show_block("acf2ab46", true)
 		_spawn_gib(legs, legs)
-	var cap := _part("acf2ab46_m1")  # bloody waist stump
-	if cap:
-		cap.visible = true
 	move_anim = CRAWL
 	speed = CRAWL_SPEED
 	_anim.get_animation(CRAWL).loop_mode = Animation.LOOP_LINEAR

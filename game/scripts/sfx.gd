@@ -9,7 +9,16 @@ static var instance: Sfx
 var _index: Dictionary
 var _cache := {}
 var _amb_timers := {}   # channel hash -> seconds to next sound
-var ambience := []      # active channel hashes
+var _amb_players := {}  # channel hash -> the channel's sound playing now
+var ambience := []      # active channel hashes (set to [] to silence them)
+# Game.SetUsingPlayerVox: the character's voice lines (vox) are on only where the level
+# script turns them on (shinonuma.lua / derriese.lua Begin+Resume: true; nacht.lua,
+# verruckt.lua and ingame.lua: false)
+var using_vox := false
+const VOX_CHARACTER := 0   # solo: kiwi 0x192184 formats "player%d_<line>" with 0
+var _vox_player: AudioStreamPlayer
+var _vox_priority := 0     # priority of the line playing or waiting for its delay
+var _vox_serial := 0
 var listener: Node3D
 var level_name := ""    # picks the level's variant of sounds that differ per level (index "levels")
 var _music: AudioStreamPlayer
@@ -110,13 +119,142 @@ func sequence(name: String) -> void:
 		get_tree().create_timer(float(st[0]) / 1000.0, false).timeout.connect(play.bind(String(st[1]), -4.0))
 
 
+# Game.StopAmbience + Game.AddAmbienceChannel(c) for each channel. Channels that stay
+# on keep playing (a dog round only drops "zombies"); the others are cut.
 func start_ambience(channels: Array) -> void:
-	ambience = []
+	var on := []
 	for c in channels:
 		var h := iw_hash(c)
-		if _index["ambience"].has(h):
-			ambience.append(h)
-			_amb_timers[h] = randf_range(2.0, 6.0)
+		if not _amb_channel(h).is_empty():
+			on.append(h)
+	for h in ambience:
+		if not h in on:
+			_amb_stop(h)
+	for h in on:
+		if not h in ambience:
+			_amb_timers[h] = _amb_gap(h)
+	ambience = on
+
+
+# CAmbienceChannel of the level's group (index "ambience_channels", tools/sound_index.py):
+# weighted sounds, then a random gap of min..max ms after each one ends
+func _amb_channel(h: String) -> Dictionary:
+	var all: Dictionary = _index.get("ambience_channels", {})
+	var c = all.get(level_name, {}).get(h, all.get("ingame", {}).get(h))
+	if c == null and _index["ambience"].has(h):
+		c = {"sounds": _index["ambience"][h].map(func(s): return [s, 1.0]), "min_ms": 5000, "max_ms": 14000, "flag": 1}
+	return c if c is Dictionary else {}
+
+
+func _amb_gap(h: String) -> float:
+	var c := _amb_channel(h)
+	return randf_range(float(c.get("min_ms", 5000)), float(c.get("max_ms", 14000))) / 1000.0
+
+
+func _amb_stop(h: String) -> void:
+	var p = _amb_players.get(h)
+	if p != null and is_instance_valid(p):
+		p.queue_free()
+	_amb_players.erase(h)
+
+
+func _amb_play(h: String) -> void:
+	var c := _amb_channel(h)
+	var sounds: Array = c.get("sounds", [])
+	if sounds.is_empty() or listener == null:
+		return
+	var total := 0.0
+	for s in sounds:
+		total += float(s[1])
+	var r := randf() * total
+	var pick: String = sounds[-1][0]
+	for s in sounds:
+		r -= float(s[1])
+		if r <= 0.0:
+			pick = s[0]
+			break
+	var st := _stream(pick)
+	if st == null:
+		return
+	var p: Node
+	if int(c.get("flag", 0)) == 1:
+		# "zombies" (flag 1): groans somewhere around the player, so they pan
+		var p3 := AudioStreamPlayer3D.new()
+		p3.stream = st
+		p3.volume_db = -6.0
+		p3.unit_size = 6.0
+		p3.max_distance = 40.0
+		add_child(p3)
+		p3.global_position = listener.global_position + \
+			Vector3(randf_range(-1, 1), 0.3, randf_range(-1, 1)).normalized() * randf_range(6.0, 14.0)
+		p3.play()
+		p = p3
+	else:
+		# wind, world, jungle and level beds: not placed
+		var p2 := AudioStreamPlayer.new()
+		p2.stream = st
+		p2.volume_db = -8.0
+		add_child(p2)
+		p2.play()
+		p = p2
+	_amb_players[h] = p
+
+
+func _update_ambience(delta: float) -> void:
+	for h in _amb_players.keys():
+		if not h in ambience:
+			_amb_stop(h)   # silenced from outside (ambience = [])
+	for h in ambience:
+		var p = _amb_players.get(h)
+		if p != null and is_instance_valid(p):
+			if p.playing:
+				continue
+			_amb_stop(h)
+			_amb_timers[h] = _amb_gap(h)   # the gap starts when the sound ends
+		_amb_timers[h] = _amb_timers.get(h, 0.0) - delta
+		if _amb_timers[h] <= 0.0:
+			_amb_play(h)
+
+
+# Game.PlayMultiplayerSound(line): a line of the player's character (vox table of the
+# player entity, index "vox"). As kiwi 0x191f78/0x192184: nothing unless the level uses
+# vox; the line's chance (%); skipped while a line of the same or higher priority is
+# playing; a random variant "player0_<line><k>", after the line's delay.
+func vox(line: String) -> bool:
+	if not using_vox:
+		return false
+	var e = _index.get("vox", {}).get(line)
+	if not e is Dictionary:
+		return false
+	if randi() % 100 > int(e["chance"]):
+		return false
+	var busy := (_vox_player != null and _vox_player.playing) or _vox_priority > 0
+	if busy and _vox_priority >= int(e["priority"]):
+		return false
+	var variants: Array = e["variants"]
+	var h: String = variants.pick_random()[VOX_CHARACTER]
+	_vox_priority = int(e["priority"])
+	_vox_serial += 1
+	var serial := _vox_serial
+	var go := func():
+		if serial != _vox_serial:
+			return   # replaced by a higher priority line
+		var s := _stream(h)
+		if s == null:
+			_vox_priority = 0
+			return
+		if _vox_player == null:
+			_vox_player = AudioStreamPlayer.new()
+			add_child(_vox_player)
+			_vox_player.finished.connect(func(): _vox_priority = 0)
+		_vox_player.stop()
+		_vox_player.stream = s
+		_vox_player.play()
+	if int(e["delay_ms"]) > 0:
+		get_tree().create_timer(float(e["delay_ms"]) / 1000.0, false).timeout.connect(go)
+	else:
+		go.call()
+	return true
 
 
 # Round music without hooks in game.gd: follow Game.round_number. waves.lua StartWave
@@ -152,13 +290,4 @@ func _follow_game() -> void:
 
 func _process(delta: float) -> void:
 	_follow_game()
-	for h in ambience:
-		_amb_timers[h] -= delta
-		if _amb_timers[h] <= 0.0:
-			_amb_timers[h] = randf_range(5.0, 14.0)
-			var list: Array = _index["ambience"][h]
-			if list.is_empty() or listener == null:
-				continue
-			# somewhere around the player, so it pans like distant noise
-			var off := Vector3(randf_range(-1, 1), 0.3, randf_range(-1, 1)).normalized() * randf_range(6.0, 14.0)
-			play_at(list.pick_random(), listener.global_position + off, -6.0)
+	_update_ambience(delta)

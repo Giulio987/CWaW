@@ -34,7 +34,7 @@ func _ready() -> void:
 		["Modalità foto (debug)", _photo_mode],
 		["Torna al menu principale", func(): _show("confirm")],
 	])
-	_pages["confirm"] = _page("Tornare al menu principale?\nI progressi andranno persi.", [
+	_pages["confirm"] = _page("Tornare al menu principale?\nLa partita viene salvata: si riprende dal menu.", [
 		["No", func(): _show("main")],
 		["Sì", _to_main_menu],
 	], 44)
@@ -151,6 +151,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _to_main_menu() -> void:
 	Settings.save()
+	if game is Game:
+		SaveGame.save(game)   # SaveProgress: "Riprendi" in the main menu (save_game.gd)
 	get_tree().paused = false
 	var main := get_tree().current_scene
 	if game and main and main.has_method("_show_menu"):
@@ -226,10 +228,19 @@ func _settings_page() -> VBoxContainer:
 	_slider(grid, "Sensibilità mouse", "mouse_sens", 0.2, 3.0, 0.05, "×%.2f")
 	_slider(grid, "Sensibilità touch", "touch_sens", 0.2, 3.0, 0.05, "×%.2f")
 	_check(grid, "Inverti asse Y", "invert_y")
-	_slider(grid, "Campo visivo", "fov", 55.0, 100.0, 1.0, "%d°")
+	# SensitivityYDefault / SensitivityXDefault = 0.375 / 0.5 in the original
+	_slider(grid, "Sensibilità verticale", "look_y_ratio", 0.3, 1.5, 0.05, "×%.2f")
+	# original ViewportFOV 50 (across the average screen dimension, settings.gd)
+	_slider(grid, "Campo visivo", "fov", 40.0, 100.0, 1.0, "%d°")
+	# toggleAim: the original's aim button is a toggle; on desktop the right button is held
+	_check(grid, "Mirino: clic per attivare", "aim_toggle")
+	# toggleAutoaim ("Auto-Aim:")
+	_check(grid, "Mira assistita", "auto_aim")
 	_slider(grid, "Volume generale", "master_volume", 0.0, 1.0, 0.05, "pct")
 	_slider(grid, "Volume effetti", "effects_volume", 0.0, 1.0, 0.05, "pct")
 	_slider(grid, "Volume musica", "music_volume", 0.0, 1.0, 0.05, "pct")
+	# toggleDifficulty: Recruit / Regular, used from the next game (Game.difficulty)
+	_check(grid, "Difficoltà Recluta (prossima partita)", "recruit")
 	var back := _button("Indietro", func():
 		Settings.save()
 		_show("main"))

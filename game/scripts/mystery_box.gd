@@ -18,8 +18,16 @@ var ANIM_IDLE_CLOSED := "b4bcad2c"
 const CYCLE_TIME := 5.0     # box_music is loud for ~5.5 s
 const TEDDY_MODEL := "6e3f6288"   # second model of the CMysteryBoxSpec entities (ingame dynamics)
 const TEDDY_YAW := PI / 2           # faces the front of the box
-const TEDDY_MIN_USES := 4
-const TEDDY_CHANCE := 1.0 / 3.0
+# Teddy rules from console.bin, per map (CMysteryBoxSpec reads
+# MysteryUsedCountTeddy%s, MysteryResetUsedCountTeddy%s, MysteryTeddyBearPercent%s
+# at kiwi 0xb9204-0xb92c8). Every purchase counts one use (kiwi 0xb8d4c, a counter of
+# the game, not of the location); when the box opens with more than UsedCount uses,
+# the bear comes with Percent % (kiwi 0xb8034-0xb8078: Random(100) < Percent) and the
+# counter drops to UsedCount - ResetUsedCount.
+#   map: [UsedCount, ResetUsedCount, Percent]
+const TEDDY_RULES := {"nacht": [10, 10, 10], "verruckt": [10, 3, 10], "shinonuma": [3, 2, 20],
+	"derriese": [3, 2, 20]}
+const TEDDY_DEFAULT := [10, 5, 10]   # engine defaults when a variable is missing
 const TEDDY_LAUGH := 2.0     # teddy floats and laughs
 const RISE_TIME := 4.5       # box rises and shakes (box_flyaway)
 const GONE_TIME := 2.0
@@ -46,6 +54,7 @@ var level: Level
 var entity := ""
 var locations := []       # every MysteryBox entity of the map (set by level.gd)
 var uses := 0             # purchases at this location
+var used_count := 0       # purchases for the teddy rule (whole game, lowered by the bear)
 var _memory := []         # last locations (WarpMysteryBox does not go back to them)
 var _model: Node3D
 var _body: StaticBody3D
@@ -185,6 +194,7 @@ func interact(player: Player) -> void:
 			player.add_points(-COST)
 			_buyer = player
 			uses += 1
+			used_count += 1
 			_open()
 		State.OFFERED:
 			if player == _buyer:
@@ -272,7 +282,11 @@ func _teddy_roll() -> bool:
 	if _teddy_next or OS.get_cmdline_user_args().has("--teddy"):
 		_teddy_next = false
 		return true
-	return uses >= TEDDY_MIN_USES and randf() < TEDDY_CHANCE
+	var rule: Array = TEDDY_RULES.get(level.level_name if level else "", TEDDY_DEFAULT)
+	if used_count > int(rule[0]) and randi_range(0, 99) < int(rule[2]):
+		used_count = int(rule[0]) - int(rule[1])
+		return true
+	return false
 
 
 func _teddy() -> void:

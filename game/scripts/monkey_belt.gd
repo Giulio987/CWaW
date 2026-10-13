@@ -31,7 +31,7 @@ static func give(p: Player) -> MonkeyBelt:
 		p.add_child(b)
 	b.count = MAX
 	b._refresh()
-	Sfx.instance.play(Sfx.iw_hash("player1_weapon_monkey"))
+	Sfx.instance.vox("weapon_monkey")   # player vox line (Sfx.vox: character 0 in solo)
 	return b
 
 

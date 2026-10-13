@@ -1,7 +1,11 @@
 # Radius damage (frag grenades, Ray Gun splash) and the explosion visuals.
 # World at War: damage falls off with distance, zombies near the centre die,
-# survivors caught in the blast often lose their legs (crawlers) or an arm,
 # and the player is hurt by his own explosives when very close.
+# Legs: the zombie's damage handler (kiwi 0x110708) takes the legs off every zombie hit
+# by explosive damage (damage type 2: grenade, monkey bomb, betty, barrels), dead or alive;
+# it is the only way to make a crawler. Explosions take no arms or heads: the
+# CDismembermentSpec limbs only take bullet damage on a hit location (see zombie.gd).
+# The Ray Gun splash is damage type 0 without a hit location: no legs, no gibs.
 class_name Explosion
 
 # Frag grenade, original values (effects group CSplashEffectSpec 925f425b, see
@@ -12,13 +16,13 @@ class_name Explosion
 # until it goes off in hand kills him (Grenade.in_hand; 250 > PlayerHealth 20/40).
 const FRAG := {
 	"radius": 3.0, "max_damage": 250.0, "min_damage": 250.0, "kill_radius": 0.0, "los_free": 2.4,
-	"crawl_chance": 0.5, "gib_chance": 0.4, "head_chance": 0.25,
+	"crawl_chance": 1.0, "gib_chance": 0.0, "head_chance": 0.0,
 	"player_radius": 0.0, "player_damage": 0.0, "shake": 1.0, "shake_radius": 14.0,
 }
 # Monkey bomb: same splash volume, 10000 damage (CSplashEffectSpec 9cede4f8)
 const MONKEY := {
 	"radius": 3.0, "max_damage": 10000.0, "min_damage": 10000.0, "kill_radius": 0.0, "los_free": 2.4,
-	"crawl_chance": 0.5, "gib_chance": 0.4, "head_chance": 0.25,
+	"crawl_chance": 1.0, "gib_chance": 0.0, "head_chance": 0.0,
 	"player_radius": 0.0, "player_damage": 0.0, "shake": 1.0, "shake_radius": 14.0,
 }
 # Ray Gun splash; max/min damage are fractions of the gun's damage. Original: the
@@ -26,7 +30,7 @@ const MONKEY := {
 # within 900 units = 2.25 m, no falloff (tools/weapon_stats.py)
 const RAYGUN := {
 	"radius": 2.25, "max_damage": 1.0, "min_damage": 1.0, "kill_radius": 0.0,
-	"crawl_chance": 0.25, "gib_chance": 0.3, "head_chance": 0.0,
+	"crawl_chance": 0.0, "gib_chance": 0.0, "head_chance": 0.0,
 	"player_radius": 1.6, "player_damage": 40.0, "shake": 0.35, "shake_radius": 4.0,
 }
 
@@ -59,9 +63,8 @@ static func blast(game: Node3D, pos: Vector3, by: Player, cfg: Dictionary, exclu
 		res["hit"] += 1
 		if not z is Dog:
 			var standing := not z.crawler and z.state in [Zombie.State.CHASE, Zombie.State.ATTACK]
-			# legs blown off: dead or alive, the closer the likelier
-			var near := 1.0 - clampf(d / radius, 0.0, 1.0)
-			if standing and randf() < float(cfg["crawl_chance"]) * (0.5 + near):
+			# legs blown off: dead or alive (explosive damage, see the top)
+			if standing and randf() < float(cfg["crawl_chance"]):
 				z.become_crawler()
 				res["crawlers"] += 1
 			if randf() < float(cfg["gib_chance"]):

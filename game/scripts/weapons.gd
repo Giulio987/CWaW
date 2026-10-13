@@ -206,3 +206,55 @@ static func location(z: Zombie, p: Vector3, head: bool) -> int:
 		"right":
 			return LOC_RIGHT_ARM
 	return LOC_PELVIS if y < 1.15 else LOC_CHEST
+
+
+# Aiming down the sights, per gun (CItemGun fields, tools/weapon_stats.py):
+#   0xc4  aim FOV in iwangle units (4096 = 360 deg), across the average screen dimension
+#         like ViewportFOV (kiwi 0xcb340: AimModeFOV is "0" = use the gun's 0xc4).
+#         512 = 45 deg (SMGs), 386 = 33.9 deg (bolt actions), 364 = 32 deg (PTRS)
+#   0x94..0xa8  six angles, read here as bullet spread (full cone, iwangle units):
+#         [hip max, hip min, 0, hip max (moving?), aimed max, aimed min]. Inferred, not
+#         confirmed in the code: zero for the shotguns (their cone replaces it) and the
+#         flamethrower, small for the projectile guns (Ray Gun, Mustang & Sally), large
+#         for bolt actions from the hip and the PTRS, ~1 deg aimed for every gun.
+const AIM := {
+	"colt45": [534, [125, 68, 0, 125, 22, 11]],
+	"kar98": [386, [159, 147, 0, 159, 0, 11]],
+	"arisaka": [386, [159, 147, 0, 159, 0, 11]],
+	"springfield": [386, [159, 147, 0, 159, 0, 11]],
+	"carbine": [409, [113, 45, 0, 113, 0, 11]],
+	"garand": [409, [113, 34, 0, 113, 34, 22]],
+	"g43": [409, [113, 45, 0, 113, 0, 11]],
+	"thompson": [512, [125, 68, 0, 125, 22, 11]],
+	"mp40": [512, [125, 56, 0, 125, 22, 11]],
+	"type100": [512, [125, 68, 0, 125, 22, 11]],
+	"stg44": [512, [125, 56, 0, 125, 22, 11]],
+	"ppsh": [512, [125, 68, 0, 125, 22, 11]],
+	"bar": [512, [136, 68, 0, 136, 22, 11]],
+	"fg42": [432, [159, 147, 0, 170, 22, 11]],
+	"mg42": [512, [147, 91, 0, 147, 22, 11]],
+	"browning": [512, [147, 91, 0, 147, 22, 11]],
+	"shotgun": [477, [0, 0, 0, 0, 0, 0]],
+	"sawnoff": [477, [0, 0, 0, 0, 0, 0]],
+	"trenchgun": [477, [0, 0, 0, 0, 0, 0]],
+	"ptrs": [364, [193, 182, 0, 193, 22, 11]],
+	"flamethrower": [546, [0, 0, 0, 0, 0, 0]],
+	"raygun": [534, [45, 34, 0, 45, 11, 11]],
+}
+const AIM_UPGRADED := {"colt45": [534, [45, 34, 0, 45, 11, 11]]}   # colt45_upgrade (Mustang & Sally)
+
+
+# Aim FOV in degrees (original ViewportFOV units) of a held weapon.
+static func aim_fov(w: Dictionary) -> float:
+	var a: Array = AIM_UPGRADED.get(w["name"]) if w.get("upgraded", false) and AIM_UPGRADED.has(w["name"]) else AIM.get(w["name"], AIM["colt45"])
+	return float(a[0]) * 360.0 / 4096.0
+
+
+# Bullet spread (full cone, degrees) of a held weapon: heat 0..1 goes from the minimum
+# to the maximum (continuous fire), aimed or from the hip.
+static func spread(w: Dictionary, aimed: bool, heat: float) -> float:
+	var a: Array = AIM_UPGRADED.get(w["name"]) if w.get("upgraded", false) and AIM_UPGRADED.has(w["name"]) else AIM.get(w["name"], AIM["colt45"])
+	var v: Array = a[1]
+	var lo: float = v[5] if aimed else v[1]
+	var hi: float = maxf(v[4], v[5]) if aimed else v[0]
+	return lerpf(lo, hi, clampf(heat, 0.0, 1.0)) * 360.0 / 4096.0

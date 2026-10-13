@@ -3,6 +3,8 @@
 #  - Nacht (nacht.lua Trigger "RadioVolume"): each hit cycles RadioTrack1 -> 2 -> 3 -> off.
 #  - Der Riese (derriese.lua Trigger "Radio<n>Trigger" -> RadioUpdate(name, ms)): the trigger
 #    is disabled, Radio<n>Sound plays and a Timeout "Radio<n>Off" stops it after ms.
+#    "SpinalColumn<n>Trigger" -> SpinalColumnUpdate: each column confirms once, the third
+#    different one starts the song (<col>Music).
 #  - Shi No Numa (shinonuma.lua Trigger, read from the bytecode: the decompile lost it):
 #    the telephone (TelephoneNoiseTrigger) rings, then plays the song; afterwards each hit
 #    toggles the song. StartRadio1..3: first two hit play static, the third the message.
@@ -30,6 +32,11 @@ const EMITTERS := {
 		"Radio3Sound": [["870e1c5d"], "once", 400], "Radio4Sound": [["870e1c5e"], "once", 400],
 		"Radio5Sound": [["870e1c5f"], "once", 400], "Radio6Sound": [["870e1c60"], "once", 400],
 		"Radio7Sound": [["870e1c61"], "once", 400], "Radio8Sound": [["870e1c62"], "once", 400],
+		# spinal columns (entity names only known by hash, found by _ent): a short
+		# confirmation per column, the song (27 s) at the third
+		"SpinalColumn1Confirm": [["5fef1d91"], "once", 400], "SpinalColumn1Music": [["28744727"], "once", 1000],
+		"SpinalColumn2Confirm": [["5fef1d91"], "once", 400], "SpinalColumn2Music": [["28744727"], "once", 1000],
+		"SpinalColumn3Confirm": [["5fef1d91"], "once", 400], "SpinalColumn3Music": [["28744727"], "once", 1000],
 	},
 	"shinonuma": {
 		"TelephoneOffHookEmitter": [["57c899b3"], "ambient", 400],
@@ -70,6 +77,7 @@ var meteor_shot := false
 var start_radio_used := []
 var storage_radio_used := false
 var doctors_radio_used := false
+var spinal_columns_used := []   # derriese.lua Script.SpinalColumnsUsed
 var log_hits := []      # trigger names in hit order (tests)
 
 
@@ -107,6 +115,8 @@ func _build() -> void:
 		"derriese":
 			for i in range(1, 9):
 				names.append("Radio%dTrigger" % i)
+			for i in range(1, 4):
+				names.append("SpinalColumn%dTrigger" % i)
 		"shinonuma":
 			names = ["TelephoneNoiseTrigger", "StartRadio1Trigger", "StartRadio2Trigger", "StartRadio3Trigger",
 				"StorageRadioTrigger", "DoctorsRadioTrigger", "MeteorTrigger"]
@@ -196,8 +206,9 @@ func _timeout(ms: int, f: Callable) -> void:
 
 
 func _vox(line: String) -> void:
-	# Game.PlayMultiplayerSound(line): the character's "player%d_<line>" (player 1 in solo)
-	Sfx.instance.play(Sfx.iw_hash("player1_" + line))
+	# Game.PlayMultiplayerSound(line): Sfx.vox plays a variant of the line ("power_out1"
+	# -> "power_out": "player0_power_out1/2" in solo) with its chance, priority and delay
+	Sfx.instance.vox(line.rstrip("0123456789"))
 
 
 # Script.Level.Trigger(name, player) of the level's Lua
@@ -238,6 +249,8 @@ func trigger(n: String, _by: Player) -> void:
 			if not meteor_shot:
 				_vox("meteor1")
 				meteor_shot = true
+		"SpinalColumn1Trigger", "SpinalColumn2Trigger", "SpinalColumn3Trigger":
+			_spinal_column(n.trim_suffix("Trigger"))
 		_:
 			if n.begins_with("Radio") and n.ends_with("Trigger"):
 				var i := int(n.trim_prefix("Radio").trim_suffix("Trigger"))
@@ -245,6 +258,18 @@ func trigger(n: String, _by: Player) -> void:
 				_disable_trigger(n)
 				_enable(radio + "Sound")
 				_timeout(DERRIESE_RADIO_MS[i - 1], _disable.bind(radio + "Sound"))
+
+
+# derriese.lua SpinalColumnUpdate (899-917): each of the three columns, once: its trigger
+# is disabled and <col>Confirm plays; the third different column also starts <col>Music.
+func _spinal_column(c: String) -> void:
+	if c in spinal_columns_used or spinal_columns_used.size() >= 3:
+		return
+	spinal_columns_used.append(c)
+	_disable_trigger(c + "Trigger")
+	_enable(c + "Confirm")
+	if spinal_columns_used.size() == 3:
+		_enable(c + "Music")
 
 
 func _telephone() -> void:

@@ -35,9 +35,15 @@ WEAPONS = ["colt45", "kar98", "carbine", "thompson", "mp40", "stg44", "trenchgun
 # other model family on that skeleton (50f... contains shotgun_lod1, b5c... is the sawed-off)
 ANIM_ALIAS = {"sawnoff": "shotgun"}
 MODEL_OVERRIDE = {"sawnoff": 0xB5C21000}
-# state index -> action (11 raise, 12 idle loop, 16 fire, 21 reload, 32 put away,
-# 53 rechamber; 50 is the Perk-a-Cola drink, see viewmodel.gd)
-STATE_ACTIONS = {12: "idle", 16: "shoot", 21: "reload", 53: "rechamber", 11: "pullout", 32: "putaway"}
+# state index -> action (11 raise, 12 idle loop, 16 fire, 21 reload, 53 rechamber; 50 is
+# the Perk-a-Cola drink, see viewmodel.gd). Aiming down the sights (transitions of the
+# state machine: idle --toggleAim--> 32 --> 34 "aiming" --toggleAim--> 33 --> idle):
+# 32 raise to the sights (outputs aim, aimfov and the "lockon" pulse; arms only, the
+# weapon keeps <gun>_idle; was labelled "putaway" before), 33 lower the sights (outputs
+# walk, reticle), 34 "aiming" (iw_hash; weapon <gun>_aimidle, output adsRender), 35 fire
+# while aiming (36 the same, 37/38 Double Tap at double speed; weapon <gun>_aimshoot)
+STATE_ACTIONS = {12: "idle", 16: "shoot", 21: "reload", 53: "rechamber", 11: "pullout",
+                 32: "aim_in", 33: "aim_out", 34: "aim", 35: "aim_shoot"}
 ACTIONS = ["idle", "shoot", "reload", "rechamber", "putaway", "pullout", "raise", "sprint", "melee"]
 
 

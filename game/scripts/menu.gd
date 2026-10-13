@@ -7,9 +7,9 @@ signal play(level: String)
 const TEX := "res://assets/textures/frontend/"
 const MAPS := [
 	{"id": "nacht", "name": "Nacht der Untoten", "preview": "0ffc6b53", "note": ""},
-	{"id": "verruckt", "name": "Verrückt", "preview": "d3023ebb", "note": "versione base"},
-	{"id": "shinonuma", "name": "Shi No Numa", "preview": "dc131b97", "note": "versione base"},
-	{"id": "derriese", "name": "Der Riese", "preview": "365abbd8", "note": "versione base"},
+	{"id": "verruckt", "name": "Verrückt", "preview": "d3023ebb", "note": ""},
+	{"id": "shinonuma", "name": "Shi No Numa", "preview": "dc131b97", "note": ""},
+	{"id": "derriese", "name": "Der Riese", "preview": "365abbd8", "note": ""},
 ]
 const RED := Color(0.62, 0.04, 0.03)
 
@@ -70,6 +70,7 @@ func _ready() -> void:
 	play_btn.offset_bottom = -40
 	play_btn.pressed.connect(func(): play.emit(MAPS[_selected]["id"]))
 	add_child(play_btn)
+	_add_resume()
 	var ach_btn := Button.new()
 	ach_btn.text = "OBIETTIVI"
 	ach_btn.add_theme_font_override("font", UiArt.font())
@@ -97,7 +98,60 @@ func _ready() -> void:
 	dbg.offset_top = -80
 	dbg.offset_bottom = -36
 	add_child(dbg)
+	# toggleDifficulty (single player screen, si_difficultytoggle): Regular or Recruit
+	var diff := CheckButton.new()
+	diff.text = "Difficoltà: Recluta"
+	diff.tooltip_text = "Più facile; obiettivi e statistiche disattivati (come l'originale)"
+	diff.add_theme_font_size_override("font_size", 18)
+	diff.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	diff.button_pressed = bool(Settings.get_value("recruit"))
+	diff.toggled.connect(func(on: bool):
+		Settings.set_value("recruit", on)
+		Settings.save())
+	diff.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	diff.offset_left = 24
+	diff.offset_right = 420
+	diff.offset_top = -124
+	diff.offset_bottom = -80
+	add_child(diff)
 	_select(0)
+
+
+# "Resume Carnage" (original resumegame button): continue the saved game (save_game.gd).
+func _add_resume() -> void:
+	var s := SaveGame.load_save()
+	if s.is_empty():
+		return
+	var box := VBoxContainer.new()
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	box.offset_left = -300
+	box.offset_right = 300
+	box.offset_top = 286
+	box.offset_bottom = 372
+	box.add_theme_constant_override("separation", -6)
+	add_child(box)
+	var b := Button.new()
+	b.text = "RIPRENDI LA CARNEFICINA"
+	b.flat = true
+	b.add_theme_font_override("font", UiArt.font())
+	b.add_theme_font_size_override("font_size", 40)
+	b.add_theme_color_override("font_color", Color(0.9, 0.9, 0.9))
+	b.add_theme_color_override("font_hover_color", Color(1, 0.2, 0.1))
+	b.pressed.connect(func():
+		SaveGame.pending = s
+		play.emit(String(s["map"])))
+	box.add_child(b)
+	var note := Label.new()
+	var map_name := String(s["map"])
+	for m in MAPS:
+		if m["id"] == map_name:
+			map_name = m["name"]
+	note.text = "%s · round %d · %d punti" % [map_name, int(s["round"]), int(s["points"])]
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	note.add_theme_font_size_override("font_size", 17)
+	note.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	box.add_child(note)
 
 
 # Original textures are padded to powers of two: show only the used part.

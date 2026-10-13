@@ -21,7 +21,21 @@ const DOG_RUNS := ["0b0e1cce", "6d4c918e"]
 const DOG_BITE := "fe591198"
 const DOG_IDLE := "90866617"
 const DOG_DEATHS := ["773dd671", "8c7140e3", "8c7140e4", "41af9c33", "7811ea46"]
-const DOG_SPEED := 5.2       # faster than walking (4.2), a sprinting player (6.0) can still outrun them
+# Speeds from the dog's CIsAnimStateMachine "dog" (same layout as the zombie's): movement
+# state 7 (speed 1, DogWalkTrigger) c97dad92 at rate 1.0, state 8 (speed 2, DogRunsTrigger)
+# fe591198 at rate 0.7; ground speed = their root-motion partners (707d4778: 5.80 m in
+# 4.50 s, 81ab28be: 6.37 m in 1.00 s) x rate. DogRunRadius 12000 units = 30 m: farther
+# than that from the player a dog walks, nearer it runs. The gallop loops below are kept
+# for the look; the run speed is the original one.
+const DOG_SPEED := 6.37 * 0.7      # 4.46 m/s
+const DOG_WALK_SPEED := 5.8 / 4.5  # 1.29 m/s
+const DOG_WALK := "c97dad92"
+const DOG_RUN_RADIUS := 12000.0 / 400.0
+# DogTurnSpeedRangeMove {30000,30000}, DogTurnSpeedRangeRender {10000,10000}
+# (4096 = 360 degrees per second): the walking direction turns almost at once, the body
+# at 879 degrees per second.
+const DOG_TURN_MOVE := 30000.0 * TAU / 4096.0
+const DOG_TURN_RENDER := 10000.0 * TAU / 4096.0
 const DOG_RANGE := 1.35      # bite reach (m)
 const DOG_DAMAGE := 35.0     # three bites down a player without Juggernog
 const DOG_BITE_TIME := 0.9
@@ -66,8 +80,12 @@ func _ready() -> void:
 	add_child(shape)
 	_d_model = (load(DOG_MODEL) as PackedScene).instantiate()
 	add_child(_d_model)
+	for mi: MeshInstance3D in _d_model.find_children("*", "MeshInstance3D"):
+		mi.layers = CHAR_LAYER
+	_add_shadow(self, SHADOW_SIZE)   # CRenderableShadowSpec: the same blob as the zombies'
+	_heading = rotation.y
 	_d_anim = _d_model.find_children("*", "AnimationPlayer")[0]
-	for a in DOG_RUNS + [DOG_IDLE]:
+	for a in DOG_RUNS + [DOG_IDLE, DOG_WALK]:
 		if _d_anim.has_animation(a):
 			_d_anim.get_animation(a).loop_mode = Animation.LOOP_LINEAR
 	_d_run = DOG_RUNS.pick_random()
@@ -163,7 +181,9 @@ func _physics_process(delta: float) -> void:
 	if _d_repath <= 0.0:
 		_d_agent.target_position = target.global_position
 		_d_repath = 0.3
-	_d_play(_d_run)
+	var walking := flat.length() > DOG_RUN_RADIUS
+	_d_play(DOG_WALK if walking else _d_run)
+	_d_anim.speed_scale = 1.0 if walking else 1.15
 	var next := _d_agent.get_next_path_position()
 	var dir := next - global_position
 	dir.y = 0.0
@@ -172,8 +192,9 @@ func _physics_process(delta: float) -> void:
 	if dir.length() > 0.05:
 		dir = dir.normalized()
 		_d_face(global_position + dir)
-	velocity.x = dir.x * DOG_SPEED
-	velocity.z = dir.z * DOG_SPEED
+	var v := DOG_WALK_SPEED if walking else DOG_SPEED
+	velocity.x = dir.x * v
+	velocity.z = dir.z * v
 	_d_gravity(delta)
 
 
@@ -191,7 +212,9 @@ func _d_face(p: Vector3) -> void:
 	var d := p - global_position
 	d.y = 0.0
 	if d.length() > 0.01:
-		rotation.y = lerp_angle(rotation.y, atan2(d.x, d.z), 0.25)
+		var dt := get_physics_process_delta_time()
+		_heading = rotate_toward(_heading, atan2(d.x, d.z), DOG_TURN_MOVE * dt)
+		rotation.y = rotate_toward(rotation.y, _heading, DOG_TURN_RENDER * dt)
 
 
 func take_damage(amount: float, headshot: bool, by: Player, knife := false, _hit_pos := Vector3.INF) -> void:

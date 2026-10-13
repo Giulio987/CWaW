@@ -316,7 +316,7 @@ func _unlock_id(id: String) -> void:
 
 func _unlock(num: int) -> void:
 	var e: Dictionary = by_num.get(num, {})
-	if e.is_empty() or unlocked.has(String(e["id"])) or not _allowed(e) or Game.debug_start:
+	if e.is_empty() or unlocked.has(String(e["id"])) or not _allowed(e) or Game.no_achievements():
 		return
 	unlocked[String(e["id"])] = int(Time.get_unix_time_from_system())
 	_dirty = true
@@ -332,7 +332,7 @@ func _c(num: int, cond: bool) -> void:
 
 
 func _add(key: String, amount := 1.0, overall := true) -> void:
-	if overall and not Game.debug_start:   # the debug start (round 5, Ray Gun) counts nothing
+	if overall and not Game.no_achievements():   # debug start (round 5, Ray Gun) and Recruit count nothing
 		stats[key] = stats.get(key, 0) + amount
 		_dirty = true
 	session[key] = session.get(key, 0) + amount
