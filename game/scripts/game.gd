@@ -764,8 +764,11 @@ func muzzle_flash(cam: Camera3D) -> void:
 	l.light_color = Color(1.0, 0.8, 0.4)
 	l.light_energy = 3.0
 	l.omni_range = 6.0
+	# lights the surroundings only: right next to the gun it burnt the first-person
+	# model to flat yellow, constantly with fast guns (the PPSh fires every 0.041 s)
+	l.light_cull_mask = ~Viewmodel.LAYER
 	cam.add_child(l)
-	l.position = Vector3(0.2, -0.15, -0.6)
+	l.position = Vector3(0.2, -0.15, -1.0)
 	get_tree().create_timer(0.05).timeout.connect(l.queue_free)
 
 

@@ -18,6 +18,7 @@ var _weapon_anim: AnimationPlayer
 var _attach: BoneAttachment3D
 var _anims := {}   # action -> [weapon anim, arms anim]
 var _bob := 0.0
+const LAYER := 2   # render layer of the first-person models (Game.muzzle_flash skips it)
 var _kick := 0.0
 
 
@@ -78,6 +79,7 @@ func set_weapon(name: String) -> void:
 func _no_shadows(n: Node) -> void:
 	for mi in n.find_children("*", "MeshInstance3D"):
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.layers = LAYER   # out of the muzzle light
 
 
 func _play(action: String, loop := false) -> float:
