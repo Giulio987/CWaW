@@ -8,8 +8,6 @@ extends Node3D
 const DIR := "res://assets/characters/ingame/player/"
 
 static var _pairs: Dictionary
-const ARM_DONOR := {"ppsh": "thompson", "type100": "thompson", "fg42": "bar", "raygun": "colt45",
-	"flamethrower": "bar", "wunderwaffe": "mg42"}
 
 var _arms: Node3D
 var _arms_anim: AnimationPlayer
@@ -61,12 +59,22 @@ func set_weapon(name: String) -> void:
 	_attach.add_child(_weapon)
 	_no_shadows(_weapon)
 	_weapon.visible = not drinking and _item == null
+	var sk := _weapon.find_children("*", "Skeleton3D")
+	_wskel = sk[0] if sk.size() > 0 else null
+	_flash_bone = -1
+	if _wskel:
+		for b in _wskel.get_bone_count():
+			if _wskel.get_bone_name(b).ends_with(FLASH_BONE):
+				_flash_bone = b
 	var wap := _weapon.find_children("*", "AnimationPlayer")
 	_weapon_anim = wap[0] if wap.size() > 0 else null
 	_anims = info.get("anims", {}).duplicate(true)
-	# weapons whose arms animations could not be paired reliably borrow the arms of a
-	# similar weapon (their own weapon animations are kept)
-	var donor: String = ARM_DONOR.get(name, "")
+	# debug: --arms-donor raygun=colt45 plays another gun's arms animations with this
+	# gun's own weapon animations (the pairs come from the original state machines)
+	var donor := ""
+	var di := OS.get_cmdline_user_args().find("--arms-donor")
+	if di >= 0 and OS.get_cmdline_user_args()[di + 1].get_slice("=", 0) == name:
+		donor = OS.get_cmdline_user_args()[di + 1].get_slice("=", 1)
 	if donor != "":
 		var d: Dictionary = pairs()["weapons"][donor]["anims"]
 		for act in d:
@@ -87,7 +95,7 @@ func _play(action: String, loop := false) -> float:
 		return 0.0
 	# The idle arms poses were paired by timing alone and some are wrong (FG42, PPSh):
 	# hold the first frame of the shoot animation instead, which always starts in the grip pose.
-	if action == "idle" and _anims.has("shoot"):
+	if action == "idle" and _anims.has("shoot") and OS.get_cmdline_user_args().has("--idle-from-shoot"):
 		_hold_first_frame("shoot")
 		return 0.0
 	if not _anims.has(action):
@@ -201,8 +209,10 @@ func _orient_knife() -> void:
 # model and both animations are from the player group: the weapon state machines'
 # drinkPerkCola state plays them with the perk_drink sound sequence), then the
 # weapon comes back. The bottle hangs from the weapon tag bone like a weapon; the
-# original has one bottle model for every perk.
+# original has one bottle model for every perk, recoloured by the perk's CIsMaterialSet
+# ("<perk>_perkbottle" in the player group: one material swapped, only its texture differs).
 const BOTTLE_MODEL := "fbd2a17d"
+const BOTTLE_TEX := {"jugga": "d04e29e2", "revive": "d21a1e26", "speed": "e1fbb245", "dbtap": "e8f9e5ac"}
 const BOTTLE_ANIM := "a0ab314d"
 const DRINK_ARMS := "a239daae"   # 2.54 s like the bottle animation (d926090d, same timing, lights the molotov)
 var drinking := false
@@ -211,7 +221,7 @@ var _bottle_anim: AnimationPlayer
 var _drink_id := 0
 
 
-func drink() -> float:
+func drink(perk := "jugga") -> float:
 	if _bottle == null:
 		if not ResourceLoader.exists(DIR + BOTTLE_MODEL + ".glb"):
 			return 0.0
@@ -230,6 +240,7 @@ func drink() -> float:
 	if _weapon:
 		_weapon.visible = false
 	_bottle.visible = true
+	_paint_bottle(perk)
 	var arms := DRINK_ARMS
 	var ai := OS.get_cmdline_user_args().find("--drink-arms")
 	if ai >= 0:
@@ -251,6 +262,17 @@ func drink() -> float:
 	return length
 
 
+func _paint_bottle(perk: String) -> void:
+	var tex := load("res://assets/textures/ingame/player/%s.png" % BOTTLE_TEX.get(perk, BOTTLE_TEX["jugga"])) as Texture2D
+	for mi: MeshInstance3D in _bottle.find_children("*", "MeshInstance3D", true, false):
+		for s in mi.mesh.get_surface_count():
+			var mat := mi.mesh.surface_get_material(s) as StandardMaterial3D
+			if mat and tex:
+				var m := mat.duplicate() as StandardMaterial3D
+				m.albedo_texture = tex
+				mi.set_surface_override_material(s, m)
+
+
 func _end_drink() -> void:
 	drinking = false
 	if _bottle:
@@ -259,6 +281,35 @@ func _end_drink() -> void:
 		_weapon.visible = true
 	_kick = -0.6  # weapon comes up from below
 	_play("idle", true)
+
+
+# Muzzle flash (original SpawnMuzzleFlash): a sprite at the gun's tag_flash bone with
+# one of the muzzleflash1..6 textures (effects folder, names matched by hash).
+const FLASH_BONE := "1d2c95ee"   # iw_hash("tag_flash"), on every gun skeleton
+const FLASH_TEX := ["943ed6eb", "943ed6ec", "943ed6ed", "943ed6ee", "943ed6ef", "943ed6f0"]
+const FLASH_SIZE := 0.3
+const FLASH_TIME := 0.05
+var _wskel: Skeleton3D
+var _flash_bone := -1
+
+
+func muzzle_position() -> Vector3:
+	if _weapon and _weapon.visible and _wskel and _flash_bone >= 0:
+		return _wskel.global_transform * _wskel.get_bone_global_pose(_flash_bone).origin
+	return (get_parent() as Node3D).global_transform * Vector3(0.12, -0.1, -0.5)
+
+
+func muzzle_flash() -> void:
+	var m := MeshInstance3D.new()
+	var q := QuadMesh.new()
+	q.size = Vector2.ONE * FLASH_SIZE * randf_range(0.8, 1.2)
+	q.material = WeaponFx.sprite_mat(FLASH_TEX.pick_random(), true, false)
+	m.mesh = q
+	m.layers = LAYER
+	m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	get_parent().add_child(m)
+	m.global_position = muzzle_position()
+	get_tree().create_timer(FLASH_TIME).timeout.connect(m.queue_free)
 
 
 func kick() -> void:

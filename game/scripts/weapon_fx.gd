@@ -37,7 +37,7 @@ static func fire(player: Player, w: Dictionary, s: Dictionary, cam: Camera3D) ->
 
 static func _fire_raygun(player: Player, w: Dictionary, s: Dictionary, cam: Camera3D) -> void:
 	var dir := -cam.global_basis.z
-	var muzzle := cam.global_position + cam.global_basis * Vector3(0.12, -0.1, -0.5)
+	var muzzle: Vector3 = player._viewmodel.muzzle_position()
 	var bolt := RaygunBolt.new()
 	bolt.player = player
 	bolt.damage = float(s["damage"])

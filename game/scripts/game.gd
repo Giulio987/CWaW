@@ -771,7 +771,7 @@ func _on_player_died() -> void:
 
 # ------------------------------------------------------------------ effects
 
-func muzzle_flash(cam: Camera3D) -> void:
+func muzzle_flash(cam: Camera3D, muzzle: Vector3) -> void:
 	var l := OmniLight3D.new()
 	l.light_color = Color(1.0, 0.8, 0.4)
 	l.light_energy = 3.0
@@ -780,7 +780,8 @@ func muzzle_flash(cam: Camera3D) -> void:
 	# model to flat yellow, constantly with fast guns (the PPSh fires every 0.041 s)
 	l.light_cull_mask = ~Viewmodel.LAYER
 	cam.add_child(l)
-	l.position = Vector3(0.2, -0.15, -1.0)
+	l.global_position = muzzle - cam.global_basis.z * 0.3   # just past the barrel
+
 	get_tree().create_timer(0.05).timeout.connect(l.queue_free)
 
 

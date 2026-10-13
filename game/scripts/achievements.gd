@@ -17,7 +17,7 @@
 # List: frontend "achievements" (CFrontendStateAchievements: overall + per map,
 # LS_ACHIEVEMENT_OVERALL_TEXT), locked/unlocked icons from the HUD atlas (padlock,
 # red tick). Unlocks and the overall stats persist in user://achievements.cfg
-# (tests use user://achievements_test.cfg).
+# (tests and debug captures use user://achievements_test.cfg).
 #
 # Most events are observed (zombie kills/gibs/states, perks, weapons, points of the
 # player, rounds, areas, teleporters, traps, grenades); a few game scripts call
@@ -211,7 +211,9 @@ func _init() -> void:
 	instance = self
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	var args := OS.get_cmdline_user_args()
-	test_mode = args.has("--autotest") or Array(args).any(func(a: String): return a.ends_with("-test") or a.ends_with("-look"))
+	# tests and debug captures (--shots, --view, --walk, --look...) keep their own save
+	test_mode = args.has("--autotest") or Array(args).any(func(a: String): return a.ends_with("-test") or a.ends_with("-look") \
+			or a in ["--shots", "--view", "--walk", "--look", "--orient-probe", "--perk-reach", "--probe", "--menu-shot"])
 	_path = SAVE_TEST if test_mode else SAVE
 	_load_data()
 	if args.has("--achievement-test"):
@@ -330,7 +332,7 @@ func _c(num: int, cond: bool) -> void:
 
 
 func _add(key: String, amount := 1.0, overall := true) -> void:
-	if overall:
+	if overall and not Game.debug_start:   # the debug start (round 5, Ray Gun) counts nothing
 		stats[key] = stats.get(key, 0) + amount
 		_dirty = true
 	session[key] = session.get(key, 0) + amount

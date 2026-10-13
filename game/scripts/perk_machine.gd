@@ -170,12 +170,12 @@ func interact(player: Player) -> void:
 	# the BuyPerk* entity's use sound is the perk's jingle (perkjingle<perk>)
 	Sfx.instance.play_at("jingle_" + kind, _centre + Vector3.UP, -2.0)
 	player.give_perk(kind)
-	drink(player)
+	drink(player, kind)
 
 
 # First-person drink (viewmodel.gd); no firing until the weapon is back.
-static func drink(player: Player) -> void:
+static func drink(player: Player, perk := "jugga") -> void:
 	var vm = player.get("_viewmodel")
 	if vm is Viewmodel:
-		var t: float = vm.drink()
+		var t: float = vm.drink(perk)
 		player.set("_cooldown", maxf(float(player.get("_cooldown")), t + 0.2))

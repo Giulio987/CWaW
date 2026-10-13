@@ -58,6 +58,7 @@ func _build() -> void:
 	l.light_color = col
 	l.light_energy = 2.0
 	l.omni_range = 3.0
+	l.light_cull_mask = ~Viewmodel.LAYER   # leaves the muzzle inside the gun: it would paint it green
 	glow.add_child(l)
 
 

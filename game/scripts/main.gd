@@ -102,6 +102,26 @@ func _weapon_shots(game: Game, names: PackedStringArray) -> void:
 				get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/swing_%s_%d.png" % [n.get_slice("=", 1), f]))
 			await get_tree().create_timer(1.0).timeout
 			continue
+		if n.begins_with("drink="):
+			# drink=<perk>: the bottle 1.2 s into the drink
+			PerkMachine.drink(game.player, n.get_slice("=", 1))
+			await get_tree().create_timer(1.2).timeout
+			await RenderingServer.frame_post_draw
+			get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/drink_%s.png" % n.get_slice("=", 1)))
+			await get_tree().create_timer(1.6).timeout
+			continue
+		if n.begins_with("reload="):
+			# reload=<weapon>: 4 frames of a reload
+			var rw := n.get_slice("=", 1)
+			game.player.give_weapon(rw)
+			await get_tree().create_timer(0.5).timeout
+			game.player.weapon()["mag"] = 0
+			game.player.reload()
+			for f in 4:
+				await get_tree().create_timer(0.45).timeout
+				await RenderingServer.frame_post_draw
+				get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/reload_%s_%d.png" % [rw, f]))
+			continue
 		if n.begins_with("fire="):
 			# fire=<weapon>: 6 frames while shooting that weapon
 			var w := n.get_slice("=", 1)

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Pair each first-person weapon animation with the arms animation played with it.
 
-Arms animation names are unknown, so candidates with the same keyframe times are
-posed together with the weapon and the one whose hands touch the weapon mesh wins.
+The pairs come from the gun's CIsAnimStateMachine (CItemGun anim_state_machine):
+every state names the arms and weapon animations it plays, in a fixed state order
+shared by all guns (STATE_ACTIONS). Actions missing there fall back to a guess:
+arms candidates with the same keyframe times are posed together with the weapon and
+the one whose hands touch the weapon mesh wins.
 Writes game/assets/characters/ingame/player/arms_pairs.json:
   {weapon: {"model": hex, "anims": {"idle": [weaponAnim, armsAnim], ...}}}
 """
@@ -20,6 +23,7 @@ from anim import Anim, Skeleton, Skin
 from export_characters import qmat
 from group import Group
 from iwhash import iw_hash
+from weapon_stats import STATE_TAG, parse_gun
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ARMS_MODEL = 0x7C9433B8
@@ -31,6 +35,9 @@ WEAPONS = ["colt45", "kar98", "carbine", "thompson", "mp40", "stg44", "trenchgun
 # other model family on that skeleton (50f... contains shotgun_lod1, b5c... is the sawed-off)
 ANIM_ALIAS = {"sawnoff": "shotgun"}
 MODEL_OVERRIDE = {"sawnoff": 0xB5C21000}
+# state index -> action (11 raise, 12 idle loop, 16 fire, 21 reload, 32 put away,
+# 53 rechamber; 50 is the Perk-a-Cola drink, see viewmodel.gd)
+STATE_ACTIONS = {12: "idle", 16: "shoot", 21: "reload", 53: "rechamber", 11: "pullout", 32: "putaway"}
 ACTIONS = ["idle", "shoot", "reload", "rechamber", "putaway", "pullout", "raise", "sprint", "melee"]
 
 
@@ -85,6 +92,26 @@ def skinned(skin_body, skel, anim, frame):
     return np.array(out)
 
 
+def state_pairs(body, arms, weapon):
+    """{action: (weapon anim, arms anim)} from a CIsAnimStateMachine body."""
+    offs, i = [], body.find(STATE_TAG)
+    while i >= 0:
+        offs.append(i)
+        i = body.find(STATE_TAG, i + 1)
+    out = {}
+    for k, o in enumerate(offs):
+        idx = struct.unpack_from("<I", body, o + 20)[0]
+        if idx not in STATE_ACTIONS:
+            continue
+        e = offs[k + 1] if k + 1 < len(offs) else len(body)
+        hs = [struct.unpack_from("<I", body, q)[0] for q in range(o, e - 3)]
+        a = next((h for h in hs if h in arms), None)
+        w = next((h for h in hs if h in weapon), None)
+        if a is not None and w is not None:
+            out[STATE_ACTIONS[idx]] = (w, a)
+    return out
+
+
 def main():
     g = Group(os.path.join(ROOT, "extracted/main/ingame/player/player.group.bin"))
     kf = iw_hash("CIwAnimKeyFrame")
@@ -105,6 +132,11 @@ def main():
         if cls == iw_hash("CIwAnimSkin"):
             skins_by_skel.setdefault(Skin(body).skel, []).append(h)
     verts = {h: struct.unpack_from("<H", body, 4)[0] for (cls, h), body in res.items() if cls == iw_hash("CIwModel")}
+    machines = {}
+    for r in g.resources:
+        if r.cls == iw_hash("CItemGun"):
+            gun = parse_gun(r.body)
+            machines.setdefault(gun["name"], res.get((iw_hash("CIsAnimStateMachine"), int(gun["anim_state_machine"], 16))))
     for w in WEAPONS:
         anim_name = ANIM_ALIAS.get(w, w)
         idle = res.get((iw_hash("CIwAnim"), iw_hash(f"{anim_name}_idle")))
@@ -121,7 +153,14 @@ def main():
         wskin = res[(iw_hash("CIwAnimSkin"), model)]
         wskel = skels[Skin(wskin).skel]
         entry = {"model": f"{model:08x}", "anims": {}}
+        machine = machines.get(w) or machines.get(anim_name)
+        known = state_pairs(machine, arms_anims, anims.get(Skin(wskin).skel, {})) if machine else {}
+        for act, (wa, aa) in known.items():
+            entry["anims"][act] = [f"{wa:08x}", f"{aa:08x}"]
+            print(f"{w}_{act}: arms {aa:08x} (state machine)")
         for act in ACTIONS:
+            if act in known:
+                continue
             h = iw_hash(f"{anim_name}_{act}")
             a = anims.get(Skin(wskin).skel, {}).get(h)
             if a is None:
@@ -143,7 +182,7 @@ def main():
         # closest to where the shoot/reload animation starts
         ref = next((entry["anims"][k][1] for k in ("shoot", "reload") if k in entry["anims"]), None)
         h = iw_hash(f"{anim_name}_idle")
-        if ref is not None and h in anims.get(Skin(wskin).skel, {}):
+        if "idle" not in known and ref is not None and h in anims.get(Skin(wskin).skel, {}):
             ref_pose = np.array([t for _, t in pose(arms_skel, arms_anims[int(ref, 16)], 0)])
             idle = anims[Skin(wskin).skel][h]
             cands = [ah for ah, aa in arms_anims.items() if len(aa.times) == len(idle.times)]

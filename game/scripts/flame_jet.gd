@@ -30,6 +30,7 @@ func _ready() -> void:
 	_light.omni_range = 7.0
 	_light.light_energy = 0.0
 	_light.position = Vector3(0, 0, -1.5)
+	_light.light_cull_mask = ~Viewmodel.LAYER   # not on the gun itself (see Game.muzzle_flash)
 	add_child(_light)
 	_set_on(false)
 

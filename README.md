@@ -32,6 +32,9 @@ Senza argomenti parte il menu principale (texture originali) per scegliere la ma
 Comandi: WASD, mouse, clic sinistro spara, V coltello, R ricarica, Q cambia arma, E compra/ripara, Shift corre, Spazio salta, Esc pausa.
 Su touch (iPhone): stick virtuale a sinistra, trascina a destra per guardare, pulsanti FUOCO/E/R/⇄/🔪.
 Debug: `-- nacht --look <entità,...>`, `-- nacht --shots <armi,...>`, `-- nacht --spin` salvano screenshot in `analysis/preview`;
+in `--shots` anche `fire=<arma>`, `reload=<arma>`, `drink=<perk>` (fotogrammi di sparo, ricarica, bevuta);
+`--arms-donor arma=altra` prova le braccia di un'altra arma. `--debug-start` (o l'interruttore DEBUG nel menu) parte dal
+round 5 con Ray Gun e 10000 punti, senza obiettivi né statistiche. Le catture di debug usano il salvataggio obiettivi di test.
 `-- nacht --stairs-test` apre le macerie e fa salire il giocatore al piano di sopra (stampa OK/FAIL);
 con `--no-open` verifica che saltando non si superino le macerie. `--look Entità@gradi` inquadra di lato:
 le viste frontali nascondono gli errori di rotazione. `tools/run_godot.sh <secondi> -- ...` esegue con un limite di tempo.

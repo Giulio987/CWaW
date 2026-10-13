@@ -293,7 +293,9 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 	# Ray Gun bolt / flamethrower cone (weapon_fx.gd) replace the hitscan
 	if not WeaponFx.fire(self, w, s, _camera):
 		_fire_bullet(s, space)
-	game.muzzle_flash(_camera)
+	if not w["name"] in ["raygun", "flamethrower", "wunderwaffe"]:   # these have their own effects
+		_viewmodel.muzzle_flash()
+		game.muzzle_flash(_camera, _viewmodel.muzzle_position())
 	if w["mag"] == 0:
 		reload()
 	changed.emit()
