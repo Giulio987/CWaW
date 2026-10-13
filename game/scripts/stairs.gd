@@ -14,19 +14,30 @@ static func step_up(body: CharacterBody3D, delta: float) -> void:
 	var xf := body.global_transform
 	if not body.test_move(xf, move):
 		return  # nothing in the way
-	var up := Vector3.UP * STEP_HEIGHT
+	# try the full step height first, then lower lifts: a low step under a low roof
+	# edge (Shi No Numa's Doctor's hut porch) fails the full lift on head room
+	for lift in [STEP_HEIGHT, 0.3, 0.2, 0.17, 0.12]:
+		var rise := _rise(body, xf, move, lift)
+		if rise > 0.0:
+			# only lift and nudge forward by this frame's move; the next frames walk onto the tread
+			body.global_position += Vector3.UP * (rise + 0.01) + move
+			body.velocity.y = 0.0
+			return
+
+
+# Height of the tread reached by lifting `lift` and moving forward, or 0 if none.
+static func _rise(body: CharacterBody3D, xf: Transform3D, move: Vector3, lift: float) -> float:
+	var up := Vector3.UP * lift
 	if body.test_move(xf, up):
-		return  # no head room
+		return 0.0  # no head room
 	var raised := xf.translated(up)
 	var reach := move.normalized() * REACH
 	if body.test_move(raised, reach):
-		return  # a wall, not a step
+		return 0.0  # a wall, not a step
 	var col := KinematicCollision3D.new()
 	if not body.test_move(raised.translated(reach), -up, col):
-		return  # nothing to stand on
-	var rise := STEP_HEIGHT - col.get_travel().length()
-	if rise < 0.05 or rise > STEP_HEIGHT - 0.01 or col.get_normal().y < 0.7:
-		return  # not a flat tread at step height
-	# only lift and nudge forward by this frame's move; the next frames walk onto the tread
-	body.global_position += Vector3.UP * (rise + 0.01) + move
-	body.velocity.y = 0.0
+		return 0.0  # nothing to stand on
+	var rise := lift - col.get_travel().length()
+	if rise < 0.05 or rise > lift - 0.01 or col.get_normal().y < 0.7:
+		return 0.0  # not a flat tread at step height
+	return rise

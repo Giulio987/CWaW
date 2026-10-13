@@ -12,6 +12,10 @@ const UNITS := 1.0 / 400.0
 # visible geometry has none: Shi No Numa spawns just past the shore and the plank
 # bridges to the balconies. Only zombies and dogs stand on it (and the navmesh bake).
 const NAV_FLOOR_LAYER := 64   # layer 7
+# cut-out surfaces (window grids, nets, plank edges): the player only. Zombies follow
+# the navmesh, which is baked around them, and need no body against them: the low
+# board at the Doctor's hut porch (Shi No Numa) stopped them otherwise.
+const SEE_THROUGH_LAYER := 8   # layer 4
 const NAV_FLOOR_LEVELS := ["shinonuma"]
 # Swamp water (Shi No Numa): flat planes at y = 0 with texture 72339cb6. In the original
 # the walking surface is the navmesh, which runs 0.3-1 m under the surface (flag 2 and
@@ -66,7 +70,7 @@ func load_level(name: String) -> void:
 	var nm := NavigationMesh.new()
 	nm.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
 	nm.agent_radius = 0.25
-	nm.agent_height = 1.7
+	nm.agent_height = 1.6   # 1.7 found no way under the Doctor's hut porch board (1.72 m)
 	nm.agent_max_climb = 0.45
 	nm.agent_max_slope = 50.0
 	nm.cell_size = 0.1
@@ -79,6 +83,7 @@ func load_level(name: String) -> void:
 	nav_region.add_child(static_root)
 	_setup_lods(base)
 	_prepare_meshes(static_root)
+	_setup_animators(base)
 
 	player_spawn = entity_transform("Player1Spawn")
 	_build_windows()
@@ -111,6 +116,7 @@ func load_level(name: String) -> void:
 func bake_navigation() -> void:
 	if not _nav_floor_done:
 		_nav_floor_done = true
+		_solid_leftover_floors()   # before the nav floor, which fills only what is still a hole
 		_build_nav_floor()
 	if nav_region.is_baking():
 		# a bake is running: bake again once it finishes so the latest geometry is used
@@ -427,10 +433,221 @@ func _setup_lods(base: String) -> void:
 				for mi in node.find_children("*", "MeshInstance3D", true, false) + ([node] if node is MeshInstance3D else []):
 					_no_collision[mi] = true
 		_lod_groups.append({"sectors": lod["sectors"], "nodes": nodes, "best": nodes.find(best)})
+		if best != null and not ORIG_LODS and not OS.get_cmdline_user_args().has("--no-leftovers"):
+			_add_lod_leftovers(best, nodes)
 	_update_lods(Vector3(INF, INF, INF))
 
 
+# The variants are cut per sector, not nested: the most detailed one can miss pieces
+# another one has (Shi No Numa's fishing hut: part of the floor and the outer walls).
+# Their triangles missing from the shown variant are added to it as extra meshes;
+# triangles already covered by the shown variant (same corners
+# to 1 cm, or centre lying on one of its triangles) are skipped.
+func _add_lod_leftovers(best: Node3D, nodes: Array) -> void:
+	var seen := {}
+	var cells := {}   # 2 m cell -> shown triangles [a, b, c]
+	var key := func(a: Vector3, b: Vector3, c: Vector3) -> String:
+		var ks := [a.snapped(Vector3.ONE * 0.01), b.snapped(Vector3.ONE * 0.01), c.snapped(Vector3.ONE * 0.01)].map(func(v): return str(v))
+		ks.sort()
+		return "|".join(ks)
+	var meshes := func(n: Node3D) -> Array:
+		return n.find_children("*", "MeshInstance3D", true, false) + ([n] if n is MeshInstance3D else [])
+	for mi: MeshInstance3D in meshes.call(best):
+		for sfc in mi.mesh.get_surface_count():
+			var arr := mi.mesh.surface_get_arrays(sfc)
+			var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+			for k in range(0, idx.size(), 3):
+				var a := mi.global_transform * vs[idx[k]]
+				var b := mi.global_transform * vs[idx[k + 1]]
+				var c := mi.global_transform * vs[idx[k + 2]]
+				seen[key.call(a, b, c)] = true
+				var lo := (a.min(b).min(c) / 2.0).floor()
+				var hi := (a.max(b).max(c) / 2.0).floor()
+				for x in range(lo.x, hi.x + 1):
+					for y in range(lo.y, hi.y + 1):
+						for z in range(lo.z, hi.z + 1):
+							var cell := Vector3i(x, y, z)
+							if not cells.has(cell):
+								cells[cell] = []
+							cells[cell].append([a, b, c])
+	var covered := func(p: Vector3) -> bool:
+		for t in cells.get(Vector3i((p / 2.0).floor()), []):
+			var n: Vector3 = (t[1] - t[0]).cross(t[2] - t[0])
+			if n.length_squared() < 1e-10 or absf((p - t[0]).dot(n.normalized())) > 0.03:
+				continue
+			var hit = Geometry3D.ray_intersects_triangle(p + n.normalized() * 0.05, -n.normalized(), t[0], t[1], t[2])
+			if hit != null:
+				return true
+		return false
+	var added := 0
+	for node in nodes:
+		if node == null or node == best:
+			continue
+		for mi: MeshInstance3D in meshes.call(node):
+			# floors the original navmesh walks on collide (the fishing hut floor); the rest
+			# is only drawn: the variants for far sectors also close openings (doorways,
+			# Verrückt's stairwell) with walls and lids
+			var parts := [ArrayMesh.new(), ArrayMesh.new()]   # [floors, other]
+			for sfc in mi.mesh.get_surface_count():
+				var arr := mi.mesh.surface_get_arrays(sfc)
+				var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+				var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+				var floors := PackedInt32Array()
+				var other := PackedInt32Array()
+				for k in range(0, idx.size(), 3):
+					var a := mi.global_transform * vs[idx[k]]
+					var b := mi.global_transform * vs[idx[k + 1]]
+					var c := mi.global_transform * vs[idx[k + 2]]
+					var kk: String = key.call(a, b, c)
+					if seen.has(kk) or covered.call((a + b + c) / 3.0):
+						continue
+					seen[kk] = true
+					var nrm := (b - a).cross(c - a).normalized()
+					if absf(nrm.y) > 0.7 and _on_orig_navmesh((a + b + c) / 3.0):
+						floors.append_array([idx[k], idx[k + 1], idx[k + 2]])
+					else:
+						other.append_array([idx[k], idx[k + 1], idx[k + 2]])
+				for part in 2:
+					var keep := floors if part == 0 else other
+					if keep.is_empty():
+						continue
+					var sub_arr := arr.duplicate()
+					sub_arr[Mesh.ARRAY_INDEX] = keep
+					var m: ArrayMesh = parts[part]
+					m.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, sub_arr)
+					m.surface_set_material(m.get_surface_count() - 1, mi.get_active_material(sfc))
+					added += keep.size() / 3
+			for part in 2:
+				var extra: ArrayMesh = parts[part]
+				if extra.get_surface_count() == 0:
+					continue
+				var emi := MeshInstance3D.new()
+				emi.name = String(mi.name) + ("_leftover_floor" if part == 0 else "_leftover")
+				if part == 0:
+					_leftover_floors.append(emi)
+				emi.mesh = extra
+				emi.cast_shadow = mi.cast_shadow
+				_no_collision[emi] = true   # floors: _solid_leftover_floors() once physics is up
+				if OS.get_cmdline_user_args().has("--debug-lod"):
+					print("[lod]   %s/%s aabb %s" % [best.name, emi.name, mi.global_transform * extra.get_aabb()])
+				best.add_child(emi)
+				emi.global_transform = mi.global_transform
+	if added > 0 and OS.get_cmdline_user_args().has("--debug-lod"):
+		print("[lod] %s: %d triangles from the other variants" % [best.name, added])
+
+
+var _leftover_floors := []   # MeshInstance3D: floors added from other variants
+
+
+# Leftover floors become solid only over holes: where the world has no floor within
+# 0.3 m of some part of the triangle (the fishing hut), and never above an existing
+# floor: they double floors a few cm off and would make invisible steps (Verrückt).
+func _solid_leftover_floors() -> void:
+	var space := get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.new()
+	q.collision_mask = 1
+	var faces := PackedVector3Array()
+	for emi: MeshInstance3D in _leftover_floors:
+		for sfc in emi.mesh.get_surface_count():
+			var fs := _surface_faces(emi.mesh, sfc)
+			for k in range(0, fs.size() - 2, 3):
+				var a := emi.global_transform * fs[k]
+				var b := emi.global_transform * fs[k + 1]
+				var c := emi.global_transform * fs[k + 2]
+				# sampled every ~0.5 m (one triangle can be a whole hut floor, mostly under
+				# planks): solid if some sample is a hole and none lies above a floor
+				var n := clampi(ceili(maxf(a.distance_to(b), maxf(b.distance_to(c), c.distance_to(a))) / 0.5), 1, 40)
+				var hole := false
+				var above := false
+				for i in n + 1:
+					for j in n + 1 - i:
+						var pt := a + (b - a) * (float(i) + 0.33) / (n + 1) + (c - a) * (float(j) + 0.33) / (n + 1)
+						q.from = pt + Vector3.UP * 0.3
+						q.to = pt + Vector3.DOWN * 0.3
+						var hit := space.intersect_ray(q)
+						if hit.is_empty():
+							hole = true
+						elif (hit["position"] as Vector3).y < pt.y - 0.03:
+							above = true
+				if hole and not above:
+					faces.append_array([a, b, c])
+	if OS.get_cmdline_user_args().has("--debug-lod"):
+		print("[lod] leftover floors: %d meshes, %d triangles over holes" % [_leftover_floors.size(), faces.size() / 3])
+	if not faces.is_empty():
+		_add_floor_body("LeftoverFloor", faces, 1)
+
+
+var _nav_cells := {}   # 2 m xz cell -> original navmesh triangles (tools/navmesh.py)
+var _nav_loaded := false
+
+
+# True when the original navmesh has a floor within 0.4 m of `p`.
+func _on_orig_navmesh(p: Vector3) -> bool:
+	if not _nav_loaded:
+		_nav_loaded = true
+		var path := "res://assets/levels/%s/navmesh.json" % level_name
+		if FileAccess.file_exists(path):
+			for t in JSON.parse_string(FileAccess.get_file_as_string(path))["tris"]:
+				var tri := [Vector3(t[0], t[1], t[2]), Vector3(t[3], t[4], t[5]), Vector3(t[6], t[7], t[8])]
+				var lo: Vector3 = (tri[0] as Vector3).min(tri[1]).min(tri[2])
+				var hi: Vector3 = (tri[0] as Vector3).max(tri[1]).max(tri[2])
+				for x in range(floori(lo.x / 2.0), floori(hi.x / 2.0) + 1):
+					for z in range(floori(lo.z / 2.0), floori(hi.z / 2.0) + 1):
+						if not _nav_cells.has(Vector2i(x, z)):
+							_nav_cells[Vector2i(x, z)] = []
+						_nav_cells[Vector2i(x, z)].append(tri)
+	for tri in _nav_cells.get(Vector2i(floori(p.x / 2.0), floori(p.z / 2.0)), []):
+		var hit = Geometry3D.ray_intersects_triangle(p + Vector3.UP * 0.4, Vector3.DOWN, tri[0], tri[1], tri[2])
+		if hit == null:
+			hit = Geometry3D.ray_intersects_triangle(p + Vector3.DOWN * 0.4, Vector3.UP, tri[0], tri[1], tri[2])
+		if hit != null and absf((hit as Vector3).y - p.y) < 0.4:
+			return true
+	return false
+
+
+# Entities moved by a CIwAnimatorSpec (Shi No Numa's dragonflies): their placed
+# transform times the looping root keyframes of tools/animators.py.
+var _animated := []   # {node, base, times, pos, rot, phase}
+
+
+func _setup_animators(base: String) -> void:
+	var path := base + "animators.json"
+	if not FileAccess.file_exists(path):
+		return
+	var data: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(path))
+	for n in entities:
+		var a: Dictionary = data.get(String(entities[n].get("hash", "")), data.get(String(n), {}))
+		if a.is_empty():
+			continue
+		var node := static_root.find_child("ent_" + String(entities[n].get("glb_name", n)), true, false) as Node3D
+		if node == null:
+			continue
+		var times: Array = a["times"]
+		_animated.append({"node": node, "base": node.transform, "times": times, "pos": a["pos"], "rot": a["rot"],
+			"phase": randf() * float(times[-1])})
+
+
+func _animate(delta: float) -> void:
+	for e in _animated:
+		var times: Array = e["times"]
+		var t: float = fmod(float(e["phase"]) + delta, float(times[-1]))
+		e["phase"] = t
+		var k := 0
+		while k < times.size() - 2 and float(times[k + 1]) <= t:
+			k += 1
+		var w := clampf((t - float(times[k])) / maxf(float(times[k + 1]) - float(times[k]), 0.001), 0.0, 1.0)
+		var p0: Array = e["pos"][k]
+		var p1: Array = e["pos"][k + 1]
+		var r0: Array = e["rot"][k]
+		var r1: Array = e["rot"][k + 1]
+		var pos := Vector3(p0[0], p0[1], p0[2]).lerp(Vector3(p1[0], p1[1], p1[2]), w)
+		var rot := Quaternion(r0[0], r0[1], r0[2], r0[3]).normalized().slerp(Quaternion(r1[0], r1[1], r1[2], r1[3]).normalized(), w)
+		(e["node"] as Node3D).transform = (e["base"] as Transform3D) * Transform3D(Basis(rot), pos)
+
+
 func _process(delta: float) -> void:
+	_animate(delta)
 	var cam := get_viewport().get_camera_3d()
 	if _sky and cam:
 		_sky.global_transform = Transform3D(Basis.from_scale(Vector3.ONE * SKY_SCALE), cam.global_position + Vector3.DOWN * 0.5 * SKY_SCALE)
@@ -531,7 +748,7 @@ func _prepare_meshes(root: Node) -> void:
 					_water_faces.append(xf * v)
 			elif not effect and mat != null and mat.transparency == BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR:
 				# the holes of window grids and fences let bullets through: their upright
-				# faces only block bodies (layer 4, like the window blockers); flat ones
+				# faces only block the player (SEE_THROUGH_LAYER); flat ones
 				# stay solid so grenades do not fall through grated floors
 				var fs := _surface_faces(mi.mesh, s)
 				for k in range(0, fs.size() - 2, 3):
@@ -567,7 +784,7 @@ func _prepare_meshes(root: Node) -> void:
 			shape.backface_collision = true
 			var body := StaticBody3D.new()
 			body.name = "SeeThrough"
-			body.collision_layer = 4
+			body.collision_layer = SEE_THROUGH_LAYER
 			body.collision_mask = 0
 			var cs := CollisionShape3D.new()
 			cs.shape = shape

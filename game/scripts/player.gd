@@ -36,15 +36,15 @@ var _repair_cooldown := 0.0
 
 
 func _ready() -> void:
-	collision_mask = 1 | 2 | 4  # world, zombies, window blockers
+	collision_mask = 1 | 2 | 4 | Level.SEE_THROUGH_LAYER  # world, zombies, window blockers, grids
 	floor_snap_length = 0.5   # stick to stairs when walking down
 	floor_max_angle = deg_to_rad(50)
 	var shape := CollisionShape3D.new()
 	var cap := CapsuleShape3D.new()
 	cap.radius = 0.3
-	cap.height = 1.75
+	cap.height = 1.68   # eye at 1.6; 1.75 did not fit under the Doctor's hut porch roof (Shi No Numa)
 	shape.shape = cap
-	shape.position.y = 0.875
+	shape.position.y = 0.84
 	add_child(shape)
 	_camera = Camera3D.new()
 	_camera.position.y = 1.6

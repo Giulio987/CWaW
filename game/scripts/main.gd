@@ -45,6 +45,8 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_view_shots(game)
 	if args.has("--walk"):
 		_walk_test(game)
+	if args.has("--column"):
+		_column(game)
 	if args.has("--orient-probe"):
 		_orient_probe(game)
 	if args.has("--perk-test"):
@@ -1130,6 +1132,43 @@ func _walk_test(game: Game) -> void:
 
 # Screenshots from photo-mode readouts: --view "x,y,z,yaw,pitch;..." (yaw/pitch in
 # degrees as the photo mode prints them) -> analysis/preview/view_<n>.png
+# Every surface above and below points: --column "x,z;x,z" (all layers, top down)
+func _column(game: Game) -> void:
+	await game.level.wait_navigation()
+	var space := game.player.get_world_3d().direct_space_state
+	for spec in OS.get_cmdline_user_args()[OS.get_cmdline_user_args().find("--column") + 1].split(";"):
+		var v := spec.split_floats(",")
+		var from := Vector3(v[0], 30.0, v[1])
+		var skip: Array[RID] = [game.player.get_rid()]
+		print("[column] %.2f, %.2f" % [v[0], v[1]])
+		for k in 20:
+			var q := PhysicsRayQueryParameters3D.create(from, Vector3(v[0], -30.0, v[1]), 0xFFFFFFFF, skip)
+			q.hit_back_faces = true
+			var hit := space.intersect_ray(q)
+			if hit.is_empty():
+				break
+			var c: Node = hit["collider"]
+			print("[column]   y=%.2f %s (%s) layer %d normal %s" % [hit["position"].y, c.name, c.get_parent().name if c.get_parent() else "", c.get("collision_layer"), hit["normal"].snapped(Vector3(0.01, 0.01, 0.01))])
+			from = hit["position"] + Vector3.DOWN * 0.01
+		# visible triangles on the same vertical (what is drawn, collider or not)
+		for mi: MeshInstance3D in game.level.find_children("*", "MeshInstance3D", true, false):
+			var box := mi.global_transform * mi.get_aabb()
+			if v[0] < box.position.x or v[0] > box.end.x or v[1] < box.position.z or v[1] > box.end.z:
+				continue
+			for sfc in mi.mesh.get_surface_count():
+				var arr := mi.mesh.surface_get_arrays(sfc)
+				var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+				var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+				for k in range(0, idx.size(), 3):
+					var hitp = Geometry3D.ray_intersects_triangle(Vector3(v[0], 30, v[1]), Vector3.DOWN,
+						mi.global_transform * vs[idx[k]], mi.global_transform * vs[idx[k + 1]], mi.global_transform * vs[idx[k + 2]])
+					if hitp != null:
+						var mat := mi.get_active_material(sfc)
+						var ex: Dictionary = mat.get_meta("extras", {}) if mat else {}
+						print("[column]   mesh y=%.2f %s/%s surf %d tex %s blend '%s' visible %s collides %s" % [hitp.y, mi.get_parent().name, mi.name, sfc, ex.get("texture0", ""), ex.get("blend", ""), mi.is_visible_in_tree(), not game.level._no_collision.has(mi)])
+	get_tree().quit()
+
+
 func _view_shots(game: Game) -> void:
 	await game.level.wait_navigation()
 	game.set_process(false)
