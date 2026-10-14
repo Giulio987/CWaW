@@ -48,6 +48,7 @@ var interactables := []     # nodes with usable_from(pos) / prompt(player) / int
 var teleporters: TeleporterNetwork   # Der Riese
 var pack_a_punch: PackAPunch         # Der Riese
 var zipline: Zipline                 # Shi No Numa
+var wunder_grave: Node3D             # Shi No Numa (wunder_grave.gd)
 var nav_region: NavigationRegion3D
 var nav_ready := false      # set once the first bake has finished
 var static_root: Node3D
@@ -106,6 +107,12 @@ func load_level(name: String) -> void:
 		add_child(zipline)   # outside the navmesh source: the car moves
 		zipline.setup(self)
 		interactables.append_array(zipline.interactables())
+	if has_entity("WunderwaffeGameTrigger1"):   # Shi No Numa: the Wunderwaffe grave (wunder_grave.gd)
+		wunder_grave = preload("res://scripts/wunder_grave.gd").new()
+		wunder_grave.name = "WunderwaffeGrave"
+		add_child(wunder_grave)
+		wunder_grave.setup(self)
+		interactables.append(wunder_grave)
 	if has_entity("packapunch"):
 		pack_a_punch = PackAPunch.new()
 		pack_a_punch.name = "PackAPunch"

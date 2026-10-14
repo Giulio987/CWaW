@@ -174,17 +174,35 @@ var _hand: BoneAttachment3D
 var _skel: Skeleton3D
 var _slash := -1.0                # 0..1 while slashing
 var _knife_set := false
+# Bowie knife (bowie.gd): the same procedural slash with another model. _knife_fix turns
+# the model so its blade runs along +X like knife_lod1, _knife_grip replaces KNIFE_GRIP.
+var _knife_model := KNIFE_MODEL
+var _knife_fix := Basis.IDENTITY
+var _knife_grip := KNIFE_GRIP
+
+
+# Swaps the model held in the slash (CItemKnife model of the knife in use).
+func set_knife_model(model: String, fix := Basis.IDENTITY, grip := KNIFE_GRIP) -> void:
+	_knife_fix = fix
+	_knife_grip = grip
+	if model == _knife_model:
+		return
+	_knife_model = model
+	if _knife:
+		_knife.queue_free()
+		_knife = null
 
 
 func melee() -> void:
 	if _slash >= 0.0 or drinking or _item != null:
 		return
 	if _knife == null:
-		_hand = BoneAttachment3D.new()
-		_skel.add_child(_hand)
-		_hand.bone_idx = GRIP_BONE
+		if _hand == null:
+			_hand = BoneAttachment3D.new()
+			_skel.add_child(_hand)
+			_hand.bone_idx = GRIP_BONE
 		var models: Node = (load("res://assets/models/ingame/player.glb") as PackedScene).instantiate()
-		_knife = models.find_child(KNIFE_MODEL, true, false)
+		_knife = models.find_child(_knife_model, true, false)
 		if _knife:
 			_knife.get_parent().remove_child(_knife)
 			_hand.add_child(_knife)
@@ -227,7 +245,7 @@ func _orient_knife() -> void:
 	var palm := _hand.global_transform * PALM
 	# model blade runs along +X: point it to the camera's left, edge slightly forward
 	var b := cam.global_basis * Basis(Vector3.UP, PI - 0.3) * Basis(Vector3.RIGHT, 0.25)
-	_knife.global_transform = Transform3D(b, palm - b.x * KNIFE_GRIP)
+	_knife.global_transform = Transform3D(b * _knife_fix, palm - b.x * _knife_grip)
 	_knife.visible = true
 	_knife_set = true
 
@@ -436,6 +454,20 @@ func throw_item(arms_anim: String, release: float) -> float:
 	get_tree().create_timer(maxf(length, release), false).timeout.connect(func():
 		if id == _item_id:
 			end_item())
+	return length
+
+
+# Next animation of a multi-step item state with the item still in hand (the Bouncing
+# Betty: Primingbetty = arms c4a86447 then e870c316, Plantingbetty = e86e9ec4, each with
+# its betty animation; betty_belt.gd). Returns the length.
+func play_item_anim(arms_anim: String, item_anim := "") -> float:
+	if _item == null:
+		return 0.0
+	var length := _play_raw(_arms_anim, arms_anim)
+	if item_anim != "":
+		var aps := _item.find_children("*", "AnimationPlayer", true, false)
+		if not aps.is_empty():
+			length = maxf(length, _play_raw(aps[0], item_anim))
 	return length
 
 

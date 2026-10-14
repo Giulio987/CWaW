@@ -205,6 +205,11 @@ static func decorate(vm: Node) -> void:
 			m.detail_enabled = true
 			m.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
 			m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_2
+			# The trench gun model (02b0744d, also ppsh bed7ac37) has no CIwModelBlockGLUVs2
+			# stream: like IwGx, sample the camo with the first UV set instead of a missing
+			# second one (Godot would read (0, 0) and tint the whole gun one flat colour).
+			if not (mi.mesh.surface_get_format(s) & Mesh.ARRAY_FORMAT_TEX_UV2):
+				m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1
 			m.detail_albedo = camo
 			m.detail_mask = null
 			m.albedo_color = Color(2.0, 2.0, 2.0)   # modulate x2

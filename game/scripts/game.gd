@@ -223,6 +223,8 @@ func start(level_name_: String) -> void:
 	Bridge.create(level)     # Der Riese drawbridge (bridge.gd)
 	FlyTrap.create(self)     # Der Riese fly trap easter egg (flytrap.gd)
 	DerrieseExtras.create(self)   # Der Riese start sequence, dropping doors, map boards (derriese_extras.gd)
+	ExplosiveBarrels.create(self, level)   # Nacht SetUpBarrels (barrels.gd)
+	ShinonumaMysteryMaps.create(level)    # Shi No Numa mystery box map boards (mystery_maps.gd)
 
 	hud = Hud.new()
 	add_child(hud)

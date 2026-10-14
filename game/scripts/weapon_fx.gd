@@ -30,6 +30,9 @@ static func fire(player: Player, w: Dictionary, s: Dictionary, cam: Camera3D) ->
 		"flamethrower":
 			_fire_flamethrower(player, w, s, cam)
 			return true
+		"wunderwaffe":   # lightning ball + radial kill effect (wunderwaffe.gd)
+			preload("res://scripts/wunderwaffe.gd").fire(player, w, s, cam)
+			return true
 	return false
 
 

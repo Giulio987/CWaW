@@ -19,8 +19,13 @@
 # bottle c7e5e430, colt a0d23f6b (entities.json misses the models of the rotated
 # entities, so they are listed here from the entity bodies).
 # The four triggers are the only CTriggerDamageSpec of the game whose last byte is 1
-# (and the only ones with a CFlagsSpec): as in World at War, read as "Pack-a-Punched
-# weapons only" (UPGRADED_ONLY).
+# (and the only ones with a CFlagsSpec). Confirmed in the code: CTriggerDamageSpec::
+# Serialise (kiwi 0x13c050) reads u32 0x30 (required damage type, 0 = any) and that byte
+# as bool 0x34; CTriggerDamage's damage-message handler (0xf5344) ignores a hit when 0x34
+# is set and the damage info byte 0x2a is 0. That byte is the "upgraded" flag: splash
+# damage copies it from CSplashEffectSpec 0x75 (0xe4730), which is 1 only for the
+# Pack-a-Punched Ray Gun's splash (c5a7a7b6), 0 for the normal Ray Gun's. So only
+# Pack-a-Punched weapons trigger the fly trap and its items (UPGRADED_ONLY).
 class_name FlyTrap
 extends Node3D
 

@@ -41,9 +41,9 @@ const GROUP_TITLE := {"achievements": "Generali", "nacht_achievements": "Nacht d
 const FEET_50 := 15.24           # Eagle Eye: maxkilldistance 1524 cm
 const TEN_MILES := 16093.44      # Running Man (m)
 const SHOTGUNS := ["shotgun", "sawnoff", "trenchgun"]
-# need something the remake does not have (co-op, tutorial, Wunderwaffe, magnum,
-# Bouncing Betty, Bowie knife, exploding barrels, teleporter kills)
-const UNAVAILABLE := [8, 15, 31, 35, 36, 37, 38, 55, 56, 70, 73, 74, 78, 94, 101, 104, 108]
+# need something the remake does not have (co-op, tutorial, teleporter kills)
+# (magnum 73/78, Bouncing Betty 56, Bowie knife 101: betty.gd, bowie_knife.gd)
+const UNAVAILABLE := [8, 15, 35, 36, 37, 38, 55, 74, 94, 108]
 
 # Italian names and descriptions, by list number
 const IT := {
@@ -384,6 +384,7 @@ func _evaluate() -> void:
 	_c(28, _o("global.leglesszombie") >= 35)
 	_c(29, _s("global.maxkilldistance") >= FEET_50)
 	_c(30, _o("global.distancecovered") >= TEN_MILES)
+	_c(31, _o("nacht.totalzombiebarrelkill") >= 20)   # Blow Me Away (barrels.gd)
 	_c(32, _s("session_wavenozombieinside") >= 2)
 	_c(33, _o("global.nuke") >= 10)
 	_c(34, _o("global.doublePoints") >= 10)
@@ -409,6 +410,7 @@ func _evaluate() -> void:
 	_c(65, _s("knife.killsinarow") >= 30)
 	_c(66, _o("knife.totalzombiekilled") >= 100)
 	_c(68, _s("global.zombiescatteredkillssimu") >= 4)
+	_c(70, _s("wunderwaffe.zombieskillssimu") >= 8)   # Face Melter: set by wunderwaffe.gd at the end of a shot
 	_c(71, _s("nuke.onekill") >= 1)
 	_c(72, _s("session_scoreacquired") >= 20000)
 	_c(75, _s("shinonuma.floggerkills") >= 1 and _s("shinonuma.electrokills") >= 1)
@@ -432,6 +434,13 @@ func _evaluate() -> void:
 	_c(105, _o("global.carpenter") >= 5)
 	_c(106, _o("monkeybomb.totalzombiekilled") + _o("monkeybomb.totaldogkilled") >= 20)
 	_c(107, _o("derriese.totalzombiekilledclimbing") >= 1)
+	# Big Brawler: WeaponKillInARow 30, weapon "magnum"; Hong Kong Akimbo: InventoryWeapon
+	# colt45 + magnum; 40 Knives: bowieKnife.session_totalzombiekilled >= 40 (Der Riese)
+	_c(73, _s("magnum.killsinarow") >= 30)
+	if game and is_instance_valid(game) and game.player:
+		var held: Array = game.player.weapons.map(func(w): return String(w["name"]))
+		_c(78, "colt45" in held and "magnum" in held)
+	_c(101, _s("bowieKnife.session_totalzombiekilled") >= 40)
 
 
 # progress of the counted ones, for the list: [current, target] or []
@@ -446,7 +455,7 @@ func progress(num: int) -> Array:
 		51: ["global.doubletaprootbeer", 10], 52: ["global.speedcola", 10], 53: ["verruckt.totalzombieelectroBarrierKill", 50],
 		66: ["knife.totalzombiekilled", 100], 76: ["shinonuma.totalzombiekilled", 200], 77: ["shinonuma.headlesszombie", 150],
 		86: ["global.totaldogkilled", 50], 100: ["derriese.totalzombiekilled", 500], 105: ["global.carpenter", 5],
-		30: ["global.distancecovered", TEN_MILES]}
+		30: ["global.distancecovered", TEN_MILES], 31: ["nacht.totalzombiebarrelkill", 20]}
 	if num == 106:
 		return [_o("monkeybomb.totalzombiekilled") + _o("monkeybomb.totaldogkilled"), 20]
 	if not t.has(num):
@@ -525,7 +534,7 @@ func _cause(z: Zombie, knife: bool) -> String:
 		return "nuke"
 	for b in get_tree().get_nodes_in_group("ach_blasts"):
 		if is_instance_valid(b) and b.get("_exploded"):
-			return "monkeybomb" if b is MonkeyBomb else "grenade"
+			return "monkeybomb" if b is MonkeyBomb else ("betty" if b is Betty else "grenade")
 	if z.get_node_or_null("Burning") != null:
 		return "flamethrower"
 	if game and game.player and not game.player.weapons.is_empty():
@@ -557,8 +566,15 @@ func _on_killed(z: Zombie, headshot: bool, knife: bool) -> void:
 	# knife streak (Feel My Blade): any other kill by the player breaks it
 	if cause == "knife":
 		_add("knife.killsinarow", 1, false)
+		if BowieKnife.damage_of(game.player) > 0.0:
+			_add("bowieKnife.session_totalzombiekilled", 1, false)
 	elif cause != "trap" and cause != "nuke":
 		session["knife.killsinarow"] = 0
+	# magnum streak (Big Brawler): any other kill by the player breaks it
+	if cause == "magnum":
+		_add("magnum.killsinarow", 1, false)
+	elif cause != "trap" and cause != "nuke":
+		session["magnum.killsinarow"] = 0
 	if cause in SHOTGUNS:
 		var f := Engine.get_physics_frames()
 		_shotgun_kills = {f: _shotgun_kills.get(f, 0) + 1}
@@ -773,6 +789,10 @@ func _observe_player(p: Player) -> void:
 			upgraded += 1
 	_weapon_seen = now
 	_set_max("upgradedatonce", upgraded)
+	# Acquire Waffle Weapons (Direct, Der Riese): Ray Gun, Wunderwaffe and Monkey Bombs held together
+	if now.has("raygun") or now.has("raygun+"):
+		if (now.has("wunderwaffe") or now.has("wunderwaffe+")) and MonkeyBelt.of(p) and MonkeyBelt.of(p).count > 0:
+			_unlock_id("acquireWaffleWeapons")
 	for k in p.perks:
 		if not k in _perks_seen:
 			_add("session_perksused", 1, false)

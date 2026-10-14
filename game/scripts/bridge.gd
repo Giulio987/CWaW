@@ -24,7 +24,20 @@ const SND_LOWER := "f4b8d41a"
 const SND_DOWN := "9180a3e8"
 const STEAM := ["bridgeSteam1", "bridgeSteam2", "bridgeSteam3", "bridgeSteam4"]
 const STEAM_TIME := 7.5            # Timeout(7500, "TurnOffSteam")
-const STEAM_TEX := "81d92923"
+# bridgeSteam1-4 use the effects-group spec list 1061589f: CIwGFXEmitterSpec (Serialise
+# kiwi 0x11c358; base 0x9e774): texture b8975a67, 10 particles, duration -1 (loops until
+# DisableParticles), spawn box (-8,40,0)-(8,55,80) units, velocity (-300,50,300)-(300,800,2200)
+# units/s along the entity's local +z, which the transform flags turn into the gap (0x14 at
+# the garage end -> +x, 0x10 at the lab end -> -x), lifetime 1500-3000 ms. Sizes read from
+# 0x80 (55-150 units) and 0x68 (65-150, taken as growth per second); the 0x88 = 500 field
+# (upward drift?) is not decoded, the gentle rise below stays estimated.
+const STEAM_TEX := "b8975a67"
+const STEAM_AMOUNT := 10
+const STEAM_LIFE := 3.0                     # 1500-3000 ms
+const STEAM_BOX := [Vector3(-8, 40, 0), Vector3(8, 55, 80)]
+const STEAM_VEL := [Vector3(-300, 50, 300), Vector3(300, 800, 2200)]
+const STEAM_SIZE := 102.0                   # mean of 55-150 units
+const STEAM_GROW := 108.0                   # mean of 65-150 units/s
 # col_Link_pC_pC: s32 vertices (entity units) and triangles
 const COL_VERTS := [
 	[-4793, 2530, -12029], [-4793, 2534, -13527], [-1386, 2066, -13527], [-1386, 2066, -12029],
@@ -71,12 +84,25 @@ func _build() -> void:
 	_build_ends()
 	for n in STEAM:
 		if level.has_entity(n):
-			var p := WeaponFx.particles(STEAM_TEX, {"amount": 24, "lifetime": 2.2, "size": 0.5, "grow": 3.0,
-				"speed": 1.6, "dir": Vector3.UP, "spread": 18.0, "gravity": Vector3(0, 0.3, 0), "one_shot": false,
-				"additive": false, "color": Color(0.85, 0.85, 0.85, 0.45), "damping": 0.6, "sphere": 0.15})
+			var u := Level.UNITS
+			var vmin: Vector3 = STEAM_VEL[0] * u
+			var vmax: Vector3 = STEAM_VEL[1] * u
+			var vmid := (vmin + vmax) * 0.5
+			var size := STEAM_SIZE * u
+			var p := WeaponFx.particles(STEAM_TEX, {"amount": STEAM_AMOUNT, "lifetime": STEAM_LIFE,
+				"size": size, "grow": (size + STEAM_GROW * u * STEAM_LIFE * 0.75) / size,
+				"speed": vmax.length(), "dir": vmid.normalized(), "spread": 30.0,
+				"gravity": Vector3(0, 0.3, 0), "one_shot": false, "local": false,
+				"additive": false, "color": Color(0.85, 0.85, 0.85, 0.45), "damping": 0.6,
+				"box": (STEAM_BOX[1] - STEAM_BOX[0]) * u * 0.5})
+			p.initial_velocity_min = vmin.length()
+			p.lifetime_randomness = 0.5     # 1.5-3 s
 			p.emitting = false
 			level.nav_region.add_child(p)
-			p.global_position = level.entity_transform(n).origin
+			# the flags hold the emitter's quarter turn (Level.flag_transform)
+			var xf := Level.flag_transform(level.entity(n)["transform"])
+			p.global_transform = Transform3D(xf.basis,
+				xf * ((STEAM_BOX[0] + STEAM_BOX[1]) * 0.5 * u))
 			_steam.append(p)
 	level.power_changed.connect(func(on: bool): if on: lower())
 	if level.power_on:

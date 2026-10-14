@@ -29,6 +29,10 @@ class_name Weapons
 const STATS := {
 	"colt45":       {"damage": 30, "min": 20, "head": 3.5, "loc": [3.5, 0.85, 0.85, 1.25, 0.85, 0.85], "mag": 8, "reserve": 80,
 		"rate": 0.25, "auto": false, "reload": 2.275, "hits": 10, "pierce": 0.7, "falloff_start": 6.35, "falloff": 2.93},
+	# .357 Magnum: CItemGun "magnum" (mystery box only: MysteryWeapons<map> in console.bin lists
+	# it on all four maps; no wall buy). Pierce 40/4096, falloff 3900 units / 252 per unit.
+	"magnum":       {"damage": 1060, "min": 300, "head": 3.5, "loc": [3.5, 0.85, 0.85, 1.25, 0.85, 0.85], "mag": 6, "reserve": 80,
+		"rate": 0.266, "auto": false, "reload": 3.0, "hits": 20, "pierce": 0.0098, "falloff_start": 9.75, "falloff": 24.609},
 	"kar98":        {"damage": 150, "min": 100, "head": 8.0, "loc": [8.0, 1.0, 1.0, 1.0, 1.0, 1.0], "mag": 5, "reserve": 50,
 		"rate": 1.432, "auto": false, "reload": 2.424, "hits": 20, "pierce": 0.1, "falloff_start": 30.48, "falloff": 0.781},
 	"arisaka":      {"damage": 150, "min": 100, "head": 8.0, "loc": [8.0, 1.0, 1.0, 1.0, 1.0, 1.0], "mag": 5, "reserve": 50,
@@ -79,6 +83,10 @@ const STATS := {
 	# a projectile: the hit spawns a 2450 splash over 2.25 m (explosion.gd RAYGUN)
 	"raygun":       {"damage": 2450, "min": 2450, "head": 1.0, "mag": 20, "reserve": 160, "rate": 0.433, "auto": false,
 		"reload": 3.333, "hits": 1, "pierce": 0.0, "range": 100.0},
+	# a projectile (the Ray Gun's) whose impact kills every zombie in a growing sphere,
+	# up to 10 (wunderwaffe.gd: CRadialEffectWunderwaffe); "damage" is the gun's 2450
+	"wunderwaffe":  {"damage": 2450, "min": 2450, "head": 1.0, "mag": 3, "reserve": 24, "rate": 0.599, "auto": false,
+		"reload": 5.5, "hits": 1, "pierce": 0.0, "range": 100.0},
 }
 
 # Start pistol: the Lua scripts call Game.AddPlayerWeapon("colt45", 32) (40 after a death)
@@ -89,6 +97,7 @@ const DISPLAY := {
 	"sawnoff": "Sawed-Off Shotgun", "trenchgun": "M1897 Trench Gun", "bar": "BAR", "flamethrower": "M2 Flamethrower",
 	"mp40": "MP40", "stg44": "STG-44", "type100": "Type 100", "garand": "M1 Garand", "g43": "Gewehr 43", "ppsh": "PPSh-41",
 	"mg42": "MG42", "browning": "Browning M1919", "fg42": "FG42", "ptrs": "PTRS-41", "springfield": "Springfield", "raygun": "Ray Gun",
+	"wunderwaffe": "Wunderwaffe DG-2", "magnum": ".357 Magnum",
 }
 
 const LOC_HEAD := 0
@@ -140,6 +149,10 @@ const UPGRADES := {
 	# 7 s to overheat (CItemGun 0x100 = 7.0)
 	"flamethrower": {"mag": 87,  "reserve": 999, "name": "Dante's Inferno", "stats": {"damage": 1200, "dps": 1200, "reload": 7.0}},
 	"raygun":       {"mag": 40,  "reserve": 200, "name": "Porter's X2 Ray Gun", "stats": {}},
+	# wunderwaffe_upgrade: damage 3000, reload state 4714 ms; a bigger sphere (wunderwaffe.gd)
+	"wunderwaffe":  {"mag": 6,   "reserve": 30,  "name": "Wunderwaffe DG-3 JZ", "stats": {"damage": 3000, "reload": 4.714}},
+	# magnum_upgrade: damage 1500, same 6 + 80 (CItemGun); no WaW name known for it
+	"magnum":       {"mag": 6,   "reserve": 80,  "name": ".357 Magnum (potenziata)", "stats": {"damage": 1500}},
 }
 
 
@@ -240,6 +253,8 @@ const AIM := {
 	"ptrs": [364, [193, 182, 0, 193, 22, 11]],
 	"flamethrower": [546, [0, 0, 0, 0, 0, 0]],
 	"raygun": [534, [45, 34, 0, 45, 11, 11]],
+	"wunderwaffe": [534, [45, 34, 0, 45, 11, 11]],
+	"magnum": [534, [113, 56, 0, 113, 22, 11]],
 }
 const AIM_UPGRADED := {"colt45": [534, [45, 34, 0, 45, 11, 11]]}   # colt45_upgrade (Mustang & Sally)
 

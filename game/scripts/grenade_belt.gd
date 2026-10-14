@@ -13,9 +13,12 @@ const THROW_SPEED := 13.0
 const THROW_UP := 3.0
 const COOLDOWN := 0.8
 const HOLD_POS := Vector3(0.24, -0.3, -0.5)
-# frag icon in the in-game UI atlas
+# frag icon in the in-game UI atlas: the stick grenade. The touch "special" button
+# (CIwGuiMultiBitmap specialBitmap, ui group) has one image per item in CItem order
+# grenade / betty / molotov: (139,433)-(178,473), (204,472)-(243,512), (100,433)-(139,473);
+# the canister with the prongs at (204,472) is the Bouncing Betty (betty_belt.gd).
 const ICON_ATLAS := "res://assets/textures/ingame/ui/2f66d01c.png"
-const ICON_RECT := Rect2(204, 474, 38, 38)
+const ICON_RECT := Rect2(139, 433, 39, 40)
 
 var player: Player
 var count := 0

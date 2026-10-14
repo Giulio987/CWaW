@@ -200,8 +200,12 @@ func interact(player: Player) -> void:
 			if player == _buyer:
 				if offered == MonkeyBomb.ITEM:
 					MonkeyBelt.give(player)
+				elif offered == BettyBelt.ITEM:
+					BettyBelt.give(player)
 				else:
 					player.give_weapon(offered)
+					if offered == "wunderwaffe":
+						Sfx.instance.vox("weapon_tesla")   # player vox line for the Wunderwaffe
 				_close()
 
 
@@ -367,12 +371,30 @@ func _pick() -> String:
 	return choices.pick_random() if not choices.is_empty() else pool().pick_random()
 
 
-# Der Riese also has the Monkey Bomb in the box (CItemMonkey in the player group)
+# Der Riese also has the Monkey Bomb in the box (CItemMonkey in the player group).
+# The Wunderwaffe DG-2 is in the box lists of Shi No Numa and Der Riese only (console.bin
+# MysteryWeaponsShinonuma / MysteryWeaponsDerriese end with "...,type100,wunderwaffe"; Nacht
+# and Verrückt do not have it). MysteryUniqueWeaponsDerRiese = "flamethrower,wunderwaffe":
+# one at a time in the game; solo, _pick already skips the guns the buyer holds.
 func pool() -> Array:
-	return POOL + [MonkeyBomb.ITEM] if level and level.level_name == "derriese" else POOL
+	var p: Array = POOL + [MonkeyBomb.ITEM] if level and level.level_name == "derriese" else POOL
+	if level and level.level_name in ["shinonuma", "derriese"]:
+		p = p + ["wunderwaffe"]
+	# .357 Magnum: in MysteryWeapons<map> of all four maps (console.bin); the Bouncing Betty
+	# is in the box only on Nacht (MysteryWeaponsNacht ends "...,type100,betty"), the other
+	# maps sell it on the wall (CActionBuyBettySpec)
+	p = p + ["magnum"]
+	if level and level.level_name == "nacht":
+		p = p + [BettyBelt.ITEM]
+	return p
 
 
 func _show_weapon(name: String) -> void:
+	if name == BettyBelt.ITEM:
+		var bm := Betty.model()
+		bm.scale = Vector3.ONE * 2.0
+		_show_model(bm)
+		return
 	if name == MonkeyBomb.ITEM:
 		var m := MonkeyBomb.model()
 		m.scale = Vector3.ONE * 2.0

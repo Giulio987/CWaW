@@ -79,6 +79,8 @@ func _ready() -> void:
 	_camera.add_child(_viewmodel)
 	changed.connect(_sync_viewmodel)
 	add_child(GrenadeBelt.new())   # frag grenades (grenade_belt.gd)
+	add_child(BettyBelt.new())     # Bouncing Betties (betty_belt.gd)
+	add_child(BowieKnife.new())    # Bowie knife wall buy, Der Riese (bowie_knife.gd)
 	give_weapon("colt45")
 	max_health = base_health(false)
 	health = max_health
@@ -204,11 +206,14 @@ func melee() -> void:
 			best = z
 	if best:
 		best.take_damage(knife_damage(best), false, self, true)
+	elif ExplosiveBarrels.of(self):
+		ExplosiveBarrels.of(self).knife(self, KNIFE_RANGE)   # Nacht barrels (barrels.gd)
 
 
 # World at War knife: always 150 damage (one stab at round 1, two at round 2...)
 func knife_damage(_z: Zombie) -> float:
-	return KNIFE_DAMAGE
+	var bowie := BowieKnife.damage_of(self)   # CItemKnife bowieKnife: 1000
+	return bowie if bowie > 0.0 else KNIFE_DAMAGE
 
 
 func switch_weapon() -> void:
@@ -298,13 +303,23 @@ func _physics_process(delta: float) -> void:
 # FootstepSpeedMultiplier / (|vx| + |vz|) of the velocity in the player's frame: the
 # faster (and the more diagonal the stick: it is the Manhattan length) the player
 # moves, the closer the steps; wading at half speed
-# (WaterMoveSpeedModifier) doubles the interval. FootstepSpeedMultiplier (fixed 14/4096
-# per world unit/frame of the original) is set here as metres of |vx|+|vz| per step,
-# calibrated by ear (0.42 s at walking speed). Sound specs: volume 0x599/4096
-# (-9 dB), pitch 0x0c00/4096 (0.75). The original has no zombie footsteps.
+# (WaterMoveSpeedModifier) doubles the interval. Exact formula (kiwi 0x1a211c-0x1a2150):
+# timer_ms = IW_FIXED_DIV(FootstepSpeedMultiplier, |dx| + |dz|) = 14 * 4096 / s, where
+# FootstepSpeedMultiplier is 14 (iwfixed, console.bin; built-in default "0.2") and s is
+# the motor's displacement of THIS FRAME in world units (accumulated by the movement
+# code, 0x182d70: speed x WorldScale x stick x frame ms). So the interval depends on the
+# original's frame time: with s = |v| (m/s) x 400 x frame, interval = 0.14336 / (|v| x
+# frame) s. FOOTSTEP_FRAME (estimated: the device frame time, ~30 fps; variableFPS only
+# clamps it to 5..45 ms) turns it into metres of |vx|+|vz| per step: 4.3 m, i.e. 0.66 s
+# running straight at 6.49 m/s, 0.47 s diagonally (at 20 fps it would be 2.87 m).
+# Sound specs: volume 0x599/4096 (-9 dB), pitch 0x0c00/4096 (0.75). The original has no
+# zombie footsteps.
 const FOOTSTEPS := ["player_footstep_walk3", "player_footstep_walk4"]
 const FOOTSTEPS_WATER := ["water_walk1", "water_walk2"]
-const FOOTSTEP_STRIDE := 1.75
+const FOOTSTEP_MULT := 14.0 / 4096.0        # FootstepSpeedMultiplier (console.bin)
+const FOOTSTEP_FRAME := 1.0 / 30.0          # estimated original frame time (s)
+# timer ms = (14/4096 x 4096) x 4096 / s  ->  stride = 57.344 / (400 x frame) = 4.30 m
+const FOOTSTEP_STRIDE := FOOTSTEP_MULT * 4096.0 * 4096.0 / 1000.0 / (400.0 * FOOTSTEP_FRAME)
 const FOOTSTEP_DB := -9.1
 const FOOTSTEP_PITCH := 0.75
 var _step_t := 0.0
@@ -752,6 +767,9 @@ func give_perk(kind: String) -> void:
 
 
 # Solo Quick Revive: instead of dying, get back up once; every perk is lost (WaW).
+# Remake addition: in the original the revive perk (index 1) only shortens reviving a
+# co-op partner (kiwi 0xc9900: PerkedRevivingTimeMs 1000 instead of RevivingTimeMs) and
+# counts totalplayerrevivedsoda (0xcb10c); in single player it has no effect.
 func _self_revive() -> void:
 	perks.clear()
 	max_health = base_health(false)

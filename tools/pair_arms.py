@@ -30,7 +30,7 @@ ARMS_MODEL = 0x7C9433B8
 TAG_WEAPON = 22  # arms bone the weapon root hangs from (found by hand/grip contact)
 WEAPONS = ["colt45", "kar98", "carbine", "thompson", "mp40", "stg44", "trenchgun", "shotgun", "bar", "garand", "g43",
            "ppsh", "type100", "mg42", "raygun", "ptrs", "fg42", "sawnoff", "springfield", "arisaka", "browning",
-           "flamethrower", "wunderwaffe"]
+           "flamethrower", "wunderwaffe", "magnum"]
 # the sawed-off shares the double-barrel's skeleton and animations; its model is the
 # other model family on that skeleton (50f... contains shotgun_lod1, b5c... is the sawed-off)
 ANIM_ALIAS = {"sawnoff": "shotgun"}

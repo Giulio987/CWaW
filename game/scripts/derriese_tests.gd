@@ -91,6 +91,8 @@ func _bridge_test() -> void:
 	lv.turn_on_power()
 	await get_tree().create_timer(2.0).timeout
 	await _shot("bridge_lowering", c + Vector3(0, 3.0, 9.0), c)
+	# steam jets (bridgeSteam1-4) seen from the garage end of the gap
+	await _shot("bridge_steam", Vector3(a.x - 1.5, a.y + 1.7, c.z), c)
 	_check(TAG, not br.lowered, "still lowering after 2 s")
 	await get_tree().create_timer(3.0).timeout
 	_check(TAG, br.lowered, "bridgeClosed after %.1f s" % Bridge.LOWER_TIME)

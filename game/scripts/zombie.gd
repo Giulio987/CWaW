@@ -86,7 +86,12 @@ var _shape: CollisionShape3D
 const TEAR := "fb0fe592"
 const CLIMB := "9c58e56e"
 const ATTACK_RANGE := 1.3
-const ATTACK_DAMAGE := 45.0
+# Zombie spec (zombiesbase CIwSpecList c9872545): CAIControllerSpec (Serialise kiwi 0x119be8)
+# embeds a CAttackSpec (Serialise 0xa8a24): 0x10 damage 10, 0x14 damage type 0, 0x18 reach
+# 400 units (1 m). The ASM "damage" event (CDamageHandler kiwi 0xe9d78) sends it through
+# 0xa70a0 to CHealth::TakeDamage (0x19c4c8): 10 of the player's 20 -> two hits down
+# (Juggernog 40: four). x HEALTH_SCALE for the remake.
+const ATTACK_DAMAGE := 10.0 * Player.HEALTH_SCALE
 
 enum State { TO_WINDOW, TEARING, CLIMBING, CHASE, ATTACK, DEAD, RISING }
 

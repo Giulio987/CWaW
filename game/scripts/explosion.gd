@@ -43,6 +43,10 @@ static func blast(game: Node3D, pos: Vector3, by: Player, cfg: Dictionary, exclu
 	var space := game.get_world_3d().direct_space_state
 	var radius := float(cfg["radius"])
 	var eye := pos + Vector3.UP * 0.5
+	# explosive barrels inside the blast go off (barrels.gd: chain reaction)
+	var barrels := ExplosiveBarrels.of(game)
+	if barrels:
+		barrels.splash(pos, radius, by)
 	for n in game.get_tree().get_nodes_in_group("zombies"):
 		var z := n as Zombie
 		if z == null or z == exclude or z.state == Zombie.State.DEAD:

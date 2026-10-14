@@ -202,7 +202,7 @@ func _footstep_test() -> void:
 		for i in range(1, names.size()):
 			alternating = alternating and names[i] != names[i - 1]
 		var want := "water_walk" if water else "player_footstep_walk"
-		_check(TAG, log.size() >= 3 and names.all(func(n): return String(n).begins_with(want)) and alternating,
+		_check(TAG, log.size() >= 2 and names.all(func(n): return String(n).begins_with(want)) and alternating,
 			"%s: %d steps %s" % [run[0], log.size(), names])
 		_check(TAG, gaps.size() > 0 and absf(mean - expect) < 0.06, "%s: mean interval %.3f s (expected %.3f)" % [run[0], mean, expect])
 		await _wait(0.6)

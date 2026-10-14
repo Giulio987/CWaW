@@ -73,10 +73,14 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_tele_test(game)
 	if args.has("--bridge-test") or args.has("--flytrap-test") or args.has("--extras-test"):
 		DerrieseTests.start(self, game, args)   # derriese_tests.gd
+	if args.has("--barrel-test") or args.has("--maps-test"):
+		preload("res://scripts/barrel_tests.gd").start(self, game, args)   # barrel_tests.gd
 	if args.has("--achievement-test") or args.has("--footstep-test"):
 		AchievementTests.start(self, game, args)   # achievement_tests.gd
 	if args.has("--save-test") or args.has("--gameover-test") or args.has("--hud-test"):
 		SaveTests.start(self, game, args)   # save_tests.gd
+	if args.has("--item-test"):
+		preload("res://scripts/item_tests.gd").start(self, game, args)   # item_tests.gd (betty, bowie, magnum)
 	if args.has("--wave-test"):
 		preload("res://scripts/wave_tests.gd").start(self, game)   # wave_tests.gd
 	if args.has("--photo-test"):
@@ -442,8 +446,44 @@ func _door_test(game: Game) -> void:
 	get_tree().quit()
 
 
+# --sink: how deep the closed model's lowest vertices go into the floor under them
+# (posed mesh baked from the skeleton, a ray down through each low vertex).
+func _debris_sink(d: Debris, space: PhysicsDirectSpaceState3D) -> void:
+	var pts := []
+	for mi: MeshInstance3D in d.find_children("*", "MeshInstance3D", true, false):
+		var m: ArrayMesh = mi.bake_mesh_from_current_skeleton_pose() if mi.skeleton != NodePath() else mi.mesh
+		if m == null:
+			continue
+		for s in m.get_surface_count():
+			for v: Vector3 in m.surface_get_arrays(s)[Mesh.ARRAY_VERTEX]:
+				pts.append(mi.global_transform * v)
+	if pts.is_empty():
+		return
+	var lo := INF
+	for v: Vector3 in pts:
+		lo = minf(lo, v.y)
+	var worst := []
+	for v: Vector3 in pts:
+		if v.y > lo + 1.2:
+			continue
+		var q := PhysicsRayQueryParameters3D.create(v + Vector3.UP * 0.5, v + Vector3.DOWN * 0.6)
+		q.exclude = [d._body.get_rid()]
+		var hit := space.intersect_ray(q)
+		if hit.is_empty():
+			continue
+		worst.append([hit["position"].y - v.y, v])
+	worst.sort_custom(func(a, b): return a[0] > b[0])
+	var box := AABB(d.global_transform.affine_inverse() * pts[0], Vector3.ZERO)
+	for v: Vector3 in pts:
+		box = box.expand(d.global_transform.affine_inverse() * v)
+	print("[sink] %s local box (units) %s .. %s" % [d.entity, (box.position / Level.UNITS).round(), (box.end / Level.UNITS).round()])
+	print("[sink] %s: %d verts, lowest %.3f; deepest under floor: %s" % [d.entity, pts.size(), lo,
+		worst.slice(0, 8).map(func(w): return "%.3f@%s" % [w[0], (w[1] as Vector3).snapped(Vector3.ONE * 0.01)])])
+
+
 # Every debris blocks its passage (rays across its blocker, along its local z, at knee
 # and chest height), then opens: the opening animation plays and the blocker goes. -- <map> --debris-test
+# (--sink: also print _debris_sink for each one)
 func _debris_test(game: Game) -> void:
 	await game.level.wait_navigation()
 	game.set_process(false)
@@ -465,6 +505,8 @@ func _debris_test(game: Game) -> void:
 					blocked += 1
 		print("[debris] %s blocked %d/6 yaw %.0f" % [d.entity, blocked, rad_to_deg(d.global_transform.basis.get_euler().y)])
 		all_ok = all_ok and blocked == 6
+		if OS.get_cmdline_user_args().has("--sink"):
+			_debris_sink(d, space)
 	# --shot <entity>[@deg]: four frames (0.3 s apart) of that debris opening, seen like --look
 	var si := OS.get_cmdline_user_args().find("--shot")
 	var spec: String = OS.get_cmdline_user_args()[si + 1] if si >= 0 else ""

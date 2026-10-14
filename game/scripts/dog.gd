@@ -37,7 +37,10 @@ const DOG_RUN_RADIUS := 12000.0 / 400.0
 const DOG_TURN_MOVE := 30000.0 * TAU / 4096.0
 const DOG_TURN_RENDER := 10000.0 * TAU / 4096.0
 const DOG_RANGE := 1.35      # bite reach (m)
-const DOG_DAMAGE := 35.0     # three bites down a player without Juggernog
+# dog.group.bin CIwSpecList 1d1ca339: CAIControllerSpec -> CAttackSpec damage 7 (of the
+# player's 20, reach 1300 units), same path as the zombie (kiwi 0xe9d78 -> 0x19c4c8):
+# three bites down a player without Juggernog. x HEALTH_SCALE for the remake.
+const DOG_DAMAGE := 7.0 * Player.HEALTH_SCALE
 const DOG_BITE_TIME := 0.9
 
 const FLAME_BONE := "ba089bde"
