@@ -1,8 +1,8 @@
 # --bounds-test reach|escape (level.gd player_allowed, player.gd _keep_in_bounds)
 #   reach:  walks the map from the spawns, perks, boxes... without jumping (every door open, windows
 #           closed) on a 0.4 m grid and lists the floor spots the bounds would refuse.
-#   escape: jumps forward from --bounds-from "x,y,z,yaw" for 6 s and checks the player is
-#           still allowed (Nacht's balcony railing by default).
+#   escape: jumps forward from --bounds-from "x,y,z[,yaw];..." for 6 s and checks the player
+#           is still allowed (no yaw: eight directions; Nacht's balcony railing by default).
 extends RefCounted
 
 const GRID := 0.4
@@ -82,25 +82,35 @@ static func _key(v: Vector3) -> Vector3i:
 
 
 static func _escape(main: Node, game: Game, args: PackedStringArray) -> void:
+	# "x,y,z,yaw;x,y,z;..." (no yaw: eight directions)
 	var fi := args.find("--bounds-from")
-	var v := (args[fi + 1] if fi >= 0 else "-24.97,3.7,-3.2,180").split_floats(",")
+	var runs := []
+	for spec in (args[fi + 1] if fi >= 0 else "-24.97,3.7,-3.2,180").split(";"):
+		var v := spec.split_floats(",")
+		for yaw in ([v[3]] if v.size() > 3 else range(0, 360, 45)):
+			runs.append([Vector3(v[0], v[1], v[2]), float(yaw)])
 	var p := game.player
-	p.global_position = Vector3(v[0], v[1], v[2])
-	p.rotation.y = deg_to_rad(v[3])
-	p.velocity = Vector3.ZERO
-	for k in 10:
-		await main.get_tree().physics_frame
-	var t := 0.0
-	Input.action_press("move_forward")
-	while t < 6.0:
-		Input.action_press("jump")
-		await main.get_tree().physics_frame
-		Input.action_release("jump")
-		await main.get_tree().physics_frame
-		t += 2.0 / Engine.physics_ticks_per_second
-	Input.action_release("move_forward")
-	for k in 60:
-		await main.get_tree().physics_frame
-	var ok: bool = game.level.player_allowed(p.global_position, not p.is_on_floor())
-	print("[bounds] escape from %s ended at %s: %s" % [Vector3(v[0], v[1], v[2]), p.global_position.snapped(Vector3.ONE * 0.01), "inside" if ok else "OUTSIDE"])
-	print("[bounds] RESULT %s" % ("OK" if ok else "FAIL"))
+	var fails := 0
+	for r in runs:
+		p.global_position = r[0]
+		p.rotation.y = deg_to_rad(r[1])
+		p.velocity = Vector3.ZERO
+		p.set("_last_safe", Vector3.INF)
+		for k in 10:
+			await main.get_tree().physics_frame
+		var t := 0.0
+		Input.action_press("move_forward")
+		while t < 6.0:
+			Input.action_press("jump")
+			await main.get_tree().physics_frame
+			Input.action_release("jump")
+			await main.get_tree().physics_frame
+			t += 2.0 / Engine.physics_ticks_per_second
+		Input.action_release("move_forward")
+		for k in 60:
+			await main.get_tree().physics_frame
+		var ok: bool = game.level.player_allowed(p.global_position, not p.is_on_floor())
+		if not ok:
+			fails += 1
+		print("[bounds] escape from %s yaw %d ended at %s: %s" % [r[0], r[1], p.global_position.snapped(Vector3.ONE * 0.01), "inside" if ok else "OUTSIDE"])
+	print("[bounds] RESULT %s (%d of %d runs outside)" % ["OK" if fails == 0 else "FAIL", fails, runs.size()])

@@ -782,6 +782,25 @@ func player_seeds() -> Array:
 	return seeds
 
 
+# True on a floor right over the allowed navmesh (no margin): a spot to put the player
+# back on.
+func player_safe(p: Vector3) -> bool:
+	if not BOUNDED_MAPS.has(level_name) and not OS.get_cmdline_user_args().has("--bounds-test"):
+		return true
+	if not _area_ready:
+		_build_player_area()
+	var q := Vector2(p.x, p.z)
+	for tri in _area_cells.get(Vector2i(floori(p.x / 2.0), floori(p.z / 2.0)), []):
+		var a: Vector3 = tri[0]
+		var b: Vector3 = tri[1]
+		var c: Vector3 = tri[2]
+		if p.y < minf(a.y, minf(b.y, c.y)) - 0.4 or p.y > maxf(a.y, maxf(b.y, c.y)) + 0.4:
+			continue
+		if Geometry2D.point_is_inside_triangle(q, Vector2(a.x, a.z), Vector2(b.x, b.z), Vector2(c.x, c.z)):
+			return true
+	return false
+
+
 # True where the player may be: over the reachable navmesh (see PLAYER_MARGIN), on a
 # floor at most PLAYER_ABOVE over it, or in the air anywhere above it. Maps without a
 # navmesh allow everything.

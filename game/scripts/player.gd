@@ -283,31 +283,29 @@ func reload() -> void:
 
 
 # The remake's jump must not take the player over railings and wall tops out of the
-# map (level.gd player_allowed): a step that leaves the reachable navmesh is taken back,
-# sideways only while in the air, so the player drops straight down. Only from an allowed spot:
-# teleporters and the zipline place the player themselves.
-var _last_ok := Vector3.INF
+# map (level.gd player_allowed). A step in the air that leaves the allowed area is taken
+# back sideways, so the player drops straight down; anything else (landing on a wall top
+# past the floor, dropping on the far side of it) puts the player back on the last floor
+# spot well inside the navmesh. Teleporters and scripts that place the player far away
+# (over 8 m) start afresh.
+var _last_safe := Vector3.INF
 func _keep_in_bounds(before: Vector3) -> void:
 	if game == null or game.level == null:
 		return
 	var air := not is_on_floor()
 	if game.level.player_allowed(global_position, air):
-		if not air:
-			_last_ok = global_position
+		if not air and game.level.player_safe(global_position):
+			_last_safe = global_position
 		return
-	if not game.level.player_allowed(before, true):
-		return   # placed off it (a script, a test): left alone
-	if air:
+	if _last_safe == Vector3.INF or Vector2(before.x - _last_safe.x, before.z - _last_safe.z).length() > 8.0:
+		return   # placed off it by a script: left alone until back on the floor
+	if air and game.level.player_allowed(before, true):
 		global_position = Vector3(before.x, global_position.y, before.z)
 		velocity.x = 0.0
 		velocity.z = 0.0
-	elif _last_ok != Vector3.INF and _last_ok.distance_to(global_position) < 3.0:
-		global_position = _last_ok
-		velocity = Vector3.ZERO
 	else:
-		global_position = Vector3(before.x, global_position.y, before.z)
-		velocity.x = 0.0
-		velocity.z = 0.0
+		global_position = _last_safe
+		velocity = Vector3.ZERO
 	if OS.get_cmdline_user_args().has("--bounds-log"):
 		print("[bounds] kept in at %s (%s)" % [global_position.snapped(Vector3.ONE * 0.01), "air" if air else "floor"])
 
