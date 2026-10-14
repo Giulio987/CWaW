@@ -52,6 +52,8 @@ func _start(level: String, args: PackedStringArray) -> void:
 		preload("res://scripts/box_anim_tests.gd").start(self, game, args)   # box_anim_tests.gd (box timeline shots)
 	if args.has("--view"):
 		_view_shots(game)
+	if args.has("--bounds-test"):
+		preload("res://scripts/bounds_tests.gd").start(self, game, args)   # bounds_tests.gd (player kept in the map)
 	if args.has("--walk"):
 		_walk_test(game)
 	if args.has("--column"):
@@ -1461,6 +1463,7 @@ func _view_shots(game: Game) -> void:
 		for k in 8:
 			await get_tree().physics_frame
 		p.global_position = Vector3(v[0], v[1], v[2])
+		game._update_fog(10.0)   # game._process is off here: settle the height fog now
 		await RenderingServer.frame_post_draw
 		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/view_%d.png" % n))
 		print("[view] %d at %s" % [n, p.global_position])
@@ -1492,4 +1495,38 @@ func _view_shots(game: Game) -> void:
 						if desc != "":
 							break
 				print("[view]   centre ray: %s at %.2f m, %s" % [mi.name, hit["position"].distance_to(cam2.global_position), desc])
+		var pxi := OS.get_cmdline_user_args().find("--pick-px")
+		if pxi >= 0:
+			# nearest drawn triangle under each screen pixel "x,y;x,y" (collider or not)
+			var cam3 := get_viewport().get_camera_3d()
+			for px in OS.get_cmdline_user_args()[pxi + 1].split(";"):
+				var xy := px.split_floats(",")
+				var from := cam3.project_ray_origin(Vector2(xy[0], xy[1]))
+				var dir := cam3.project_ray_normal(Vector2(xy[0], xy[1]))
+				var best := INF
+				var desc := "nothing (background)"
+				for mi: MeshInstance3D in game.level.find_children("*", "MeshInstance3D", true, false):
+					if not mi.is_visible_in_tree() or mi.mesh == null:
+						continue
+					for sfc in mi.mesh.get_surface_count():
+						var arr := mi.mesh.surface_get_arrays(sfc)
+						var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+						var idx: PackedInt32Array = arr[Mesh.ARRAY_INDEX]
+						if idx.is_empty():
+							idx = PackedInt32Array(range(vs.size()))
+						for k in range(0, idx.size() - 2, 3):
+							var ta := mi.global_transform * vs[idx[k]]
+							var tb := mi.global_transform * vs[idx[k + 1]]
+							var tc := mi.global_transform * vs[idx[k + 2]]
+							# Godot culls counter-clockwise faces: skip the triangles seen from the back
+							var mat0 := mi.get_active_material(sfc) as BaseMaterial3D
+							if (mat0 == null or mat0.cull_mode == BaseMaterial3D.CULL_BACK) and (tb - ta).cross(tc - ta).dot(dir) < 0.0:
+								continue
+							var hp = Geometry3D.ray_intersects_triangle(from, dir, ta, tb, tc)
+							if hp != null and from.distance_to(hp) < best:
+								best = from.distance_to(hp)
+								var mat := mi.get_active_material(sfc)
+								var ex: Dictionary = mat.get_meta("extras", {}) if mat else {}
+								desc = "%s/%s surf %d at %.1f m %s tex %s blend '%s'" % [mi.get_parent().name, mi.name, sfc, best, (hp as Vector3).snapped(Vector3.ONE * 0.1), ex.get("texture0", ""), ex.get("blend", "")]
+				print("[view]   px %s: %s" % [px, desc])
 	get_tree().quit()

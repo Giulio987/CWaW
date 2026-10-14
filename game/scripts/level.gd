@@ -624,6 +624,194 @@ func _on_orig_navmesh(p: Vector3) -> bool:
 	return false
 
 
+# Player bounds. The original has no jump: its railings, low walls and wall tops kept the
+# player in. The remake's jump (and sprint) would go over them, onto wall tops and
+# into the yards the zombies come from (Nacht's balcony railing). The player is kept over
+# the reachable part of the original navmesh: its triangles linked where a body gets
+# across (windows, bars and low openings split the zombies' yards off), from the player
+# spawns, perks, boxes, doors, traps and other interactables. Within PLAYER_MARGIN of them sideways
+# (the navmesh keeps off the walls), grounded on a floor at most PLAYER_ABOVE over it.
+# Only on the maps checked with --bounds-test reach (every spot walkable on foot allowed):
+# on the others the original's navmesh leaves walkable corners out.
+const BOUNDED_MAPS := ["nacht"]
+const PLAYER_MARGIN := 0.75
+const PLAYER_ABOVE := 1.3    # crates and barrels to jump onto
+const JOIN_GAP := 0.3        # navmesh pieces closer than this along a border are neighbours
+var _area_cells := {}        # 2 m cell -> allowed navmesh triangles
+var _area_ready := false
+
+
+func _build_player_area() -> void:
+	_area_ready = true
+	_on_orig_navmesh(Vector3.ZERO)   # loads _nav_cells
+	var t0 := Time.get_ticks_msec()
+	var index := {}   # triangle (Array) -> index
+	var list := []
+	for cell in _nav_cells.values():
+		for tri in cell:
+			if not index.has(tri):
+				index[tri] = list.size()
+				list.append(tri)
+	if list.is_empty():
+		return
+	var parent := range(list.size())
+	var find := func(i: int) -> int:
+		while parent[i] != i:
+			parent[i] = parent[parent[i]]
+			i = parent[i]
+		return i
+	var centre := func(i: int) -> Vector3:
+		return (list[i][0] + list[i][1] + list[i][2]) / 3.0
+	# Triangles sharing an edge are one piece (one CIwNavMesh); pieces meet where their
+	# border edges lie along each other within JOIN_GAP.
+	var edges := {}   # edge key -> [first triangle, a, b, inner]
+	var pairs := []   # [i, j, point on the border between two pieces]
+	for i in list.size():
+		var t: Array = list[i]
+		for k in 3:
+			# corners to 1 cm, as integers (no -0 keys)
+			var ka := Vector3i((t[k] as Vector3 * 100.0).round())
+			var kb := Vector3i((t[(k + 1) % 3] as Vector3 * 100.0).round())
+			var key := [ka, kb] if ka < kb else [kb, ka]
+			if edges.has(key):
+				parent[find.call(i)] = find.call(edges[key][0])   # one piece: walkable
+				edges[key][3] = true   # inner edge
+			else:
+				edges[key] = [i, t[k], t[(k + 1) % 3], false]
+	if OS.get_cmdline_user_args().has("--bounds-log"):
+		var roots := {}
+		for i in list.size():
+			roots[find.call(i)] = roots.get(find.call(i), 0) + 1
+		var big0 := roots.values().filter(func(v): return v > 40)
+		big0.sort()
+		print("[bounds] %d pieces by shared edges, over 40 triangles %s" % [roots.size(), big0])
+	var ecells := {}   # 1 m cell -> border edges
+	for key in edges:
+		var be: Array = edges[key]
+		if be[3]:
+			continue
+		var m: Vector3 = (be[1] + be[2]) / 2.0
+		var ck := Vector2i(floori(m.x), floori(m.z))
+		if not ecells.has(ck):
+			ecells[ck] = []
+		ecells[ck].append(be)
+	for ck in ecells:
+		for be in ecells[ck]:
+			var m: Vector3 = (be[1] + be[2]) / 2.0
+			for dx in [-1, 0, 1]:
+				for dz in [-1, 0, 1]:
+					for other in ecells.get(ck + Vector2i(dx, dz), []):
+						if other[0] > be[0] and Geometry3D.get_closest_point_to_segment(m, other[1], other[2]).distance_to(m) < JOIN_GAP:
+							pairs.append([be[0], other[0], m])
+	# Pieces joined only where the player gets across: centre to border to centre, no wall,
+	# window blocker, window bars or low lintel in the way. The navmesh is the
+	# zombies' and runs through bars they squeeze past and openings they climb. Closed
+	# doors do not count.
+	var space := get_world_3d().direct_space_state
+	var doors := []
+	for d in debris:
+		for body in (d as Node).find_children("*", "CollisionObject3D", true, false):
+			doors.append((body as CollisionObject3D).get_rid())
+	var q := PhysicsRayQueryParameters3D.new()
+	q.collision_mask = 1 | 4 | SEE_THROUGH_LAYER
+	q.exclude = doors
+	q.hit_back_faces = true
+	var clear := func(a: Vector3, b: Vector3) -> bool:
+		# the body's width every 10 cm (Nacht's window bars are 20 cm cards 40 cm apart)
+		var side := Vector3(b.z - a.z, 0, a.x - b.x).normalized()
+		for h in [0.3, 0.9, 1.6]:   # knee, chest and head: low walls, window bars, lintels
+			for k in range(-3, 4):
+				var w := side * 0.09 * k
+				q.from = a + w + Vector3.UP * h
+				q.to = b + w + Vector3.UP * h
+				if not space.intersect_ray(q).is_empty():
+					return false
+		return true
+	var joins := 0
+	for pr in pairs:
+		if find.call(pr[0]) == find.call(pr[1]):
+			continue
+		if clear.call(centre.call(pr[0]), pr[2]) and clear.call(pr[2], centre.call(pr[1])):
+			parent[find.call(pr[1])] = find.call(pr[0])
+			joins += 1
+	# the parts under the player spawns and the things the player uses
+	var seeds := player_seeds()
+	var sizes := {}
+	for i in list.size():
+		sizes[find.call(i)] = sizes.get(find.call(i), 0) + 1
+	var keep := {}
+	for sd in seeds:
+		var sp: Vector3 = sd[0]
+		for i in list.size():
+			var t: Array = list[i]
+			var lo := minf(t[0].y, minf(t[1].y, t[2].y))
+			if absf(lo - sp.y) < 1.5 and Geometry2D.point_is_inside_triangle(Vector2(sp.x, sp.z),
+					Vector2(t[0].x, t[0].z), Vector2(t[1].x, t[1].z), Vector2(t[2].x, t[2].z)):
+				if OS.get_cmdline_user_args().has("--bounds-log") and not keep.has(find.call(i)):
+					print("[bounds]   part %d (%d triangles) under %s at %s" % [find.call(i), sizes[find.call(i)], sd[1], sp.snapped(Vector3.ONE * 0.1)])
+				keep[find.call(i)] = true
+	var kept := 0
+	for i in list.size():
+		if keep.has(find.call(i)):
+			kept += 1
+			var t: Array = list[i]
+			var lo: Vector3 = (t[0] as Vector3).min(t[1]).min(t[2])
+			var hi: Vector3 = (t[0] as Vector3).max(t[1]).max(t[2])
+			for x in range(floori((lo.x - PLAYER_MARGIN) / 2.0), floori((hi.x + PLAYER_MARGIN) / 2.0) + 1):
+				for z in range(floori((lo.z - PLAYER_MARGIN) / 2.0), floori((hi.z + PLAYER_MARGIN) / 2.0) + 1):
+					if not _area_cells.has(Vector2i(x, z)):
+						_area_cells[Vector2i(x, z)] = []
+					_area_cells[Vector2i(x, z)].append(t)
+	if OS.get_cmdline_user_args().has("--bounds-log"):
+		var big := sizes.values().filter(func(v): return v > 40)
+		big.sort()
+		print("[bounds] %s: %d of %d navmesh triangles kept (%d parts), %d of %d links walkable, %d ms; parts over 40 triangles %s" % [
+			level_name, kept, list.size(), keep.size(), joins, pairs.size(), Time.get_ticks_msec() - t0, big])
+
+
+# [position, what]: the player spawns and the things the player uses (bounds and their test)
+func player_seeds() -> Array:
+	var seeds := []
+	for n in entities:
+		if String(n).to_lower().begins_with("player") and String(n).to_lower().ends_with("spawn"):
+			seeds.append([entity_transform(n).origin, n])
+	for group in [debris, boxes, perk_machines, traps, interactables]:
+		for nd in group:
+			if nd is Node3D and is_instance_valid(nd):
+				seeds.append([(nd as Node3D).global_position, nd.name])
+	return seeds
+
+
+# True where the player may be: over the reachable navmesh (see PLAYER_MARGIN), on a
+# floor at most PLAYER_ABOVE over it, or in the air anywhere above it. Maps without a
+# navmesh allow everything.
+func player_allowed(p: Vector3, airborne: bool) -> bool:
+	if not BOUNDED_MAPS.has(level_name) and not OS.get_cmdline_user_args().has("--bounds-test"):
+		return true
+	if not _area_ready:
+		_build_player_area()
+	if _area_cells.is_empty():
+		return true
+	var q := Vector2(p.x, p.z)
+	for tri in _area_cells.get(Vector2i(floori(p.x / 2.0), floori(p.z / 2.0)), []):
+		var a: Vector3 = tri[0]
+		var b: Vector3 = tri[1]
+		var c: Vector3 = tri[2]
+		var lo := minf(a.y, minf(b.y, c.y))
+		var hi := maxf(a.y, maxf(b.y, c.y))
+		if p.y < lo - 0.6 or (not airborne and p.y > hi + PLAYER_ABOVE):
+			continue
+		var a2 := Vector2(a.x, a.z)
+		var b2 := Vector2(b.x, b.z)
+		var c2 := Vector2(c.x, c.z)
+		if Geometry2D.point_is_inside_triangle(q, a2, b2, c2):
+			return true
+		for e in [[a2, b2], [b2, c2], [c2, a2]]:
+			if q.distance_to(Geometry2D.get_closest_point_to_segment(q, e[0], e[1])) < PLAYER_MARGIN:
+				return true
+	return false
+
+
 # Entities moved by a CIwAnimatorSpec (Shi No Numa's dragonflies): their placed
 # transform times the looping root keyframes of tools/animators.py.
 var _animated := []   # {node, base, times, pos, rot, phase}

@@ -282,6 +282,36 @@ func reload() -> void:
 	Sfx.instance.sequence(w["name"] + "_reload")
 
 
+# The remake's jump must not take the player over railings and wall tops out of the
+# map (level.gd player_allowed): a step that leaves the reachable navmesh is taken back,
+# sideways only while in the air, so the player drops straight down. Only from an allowed spot:
+# teleporters and the zipline place the player themselves.
+var _last_ok := Vector3.INF
+func _keep_in_bounds(before: Vector3) -> void:
+	if game == null or game.level == null:
+		return
+	var air := not is_on_floor()
+	if game.level.player_allowed(global_position, air):
+		if not air:
+			_last_ok = global_position
+		return
+	if not game.level.player_allowed(before, true):
+		return   # placed off it (a script, a test): left alone
+	if air:
+		global_position = Vector3(before.x, global_position.y, before.z)
+		velocity.x = 0.0
+		velocity.z = 0.0
+	elif _last_ok != Vector3.INF and _last_ok.distance_to(global_position) < 3.0:
+		global_position = _last_ok
+		velocity = Vector3.ZERO
+	else:
+		global_position = Vector3(before.x, global_position.y, before.z)
+		velocity.x = 0.0
+		velocity.z = 0.0
+	if OS.get_cmdline_user_args().has("--bounds-log"):
+		print("[bounds] kept in at %s (%s)" % [global_position.snapped(Vector3.ONE * 0.01), "air" if air else "floor"])
+
+
 func _physics_process(delta: float) -> void:
 	if dead:
 		return
@@ -315,7 +345,9 @@ func _physics_process(delta: float) -> void:
 		velocity.y -= GRAVITY * delta
 	if is_on_floor():
 		Stairs.step_up(self, delta)
+	var before := global_position
 	move_and_slide()
+	_keep_in_bounds(before)
 	_footsteps(delta)
 
 	var w := weapon()

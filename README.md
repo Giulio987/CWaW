@@ -38,6 +38,7 @@ in `--shots` anche `fire=<arma>`, `reload=<arma>`, `drink=<perk>`, `aim=<arma>`,
 round 5 con Ray Gun e 10000 punti, senza obiettivi né statistiche. Le catture di debug usano il salvataggio obiettivi di test.
 `--column "x,z;..."` elenca tutte le superfici solide e visibili sulla verticale di un punto (buchi nel pavimento, travi basse);
 `--no-leftovers` mostra solo la variante LOD principale, senza i pezzi presi dalle altre varianti.
+`-- nacht --bounds-test reach|escape [--bounds-from "x,y,z,yaw"] [--bounds-log]` verifica i confini del giocatore (`level.gd` `player_allowed`: il salto del remake non porta oltre ringhiere e muretti; il giocatore resta sopra la parte del navmesh originale raggiungibile a piedi, finestre e sbarre escluse; attivo solo sulle mappe in `BOUNDED_MAPS`, per ora Nacht): `reach` percorre a piedi tutta la mappa e segnala i punti rifiutati, `escape` salta in avanti per 6 s e controlla di essere ancora dentro. Su Nacht il piano di sopra ha una nebbia più vicina (`ZONE_FOG` in `game.gd`) che nasconde il retro non finito della mappa visto dalle aperture. `--pick-px "x,y;..."` con `--view` dice quale mesh è disegnata sotto un pixel.
 `-- nacht --stairs-test` apre le macerie e fa salire il giocatore al piano di sopra (stampa OK/FAIL);
 con `--no-open` verifica che saltando non si superino le macerie. `--look Entità@gradi` inquadra di lato:
 le viste frontali nascondono gli errori di rotazione. `tools/run_godot.sh <secondi> -- ...` esegue con un limite di tempo.

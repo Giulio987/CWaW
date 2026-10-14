@@ -115,6 +115,13 @@ const DEFAULT_FOG := {
 	"shinonuma": [Color8(158, 163, 158), 40.0, 90.0],
 	"derriese": [Color8(48, 58, 66), 45.0, 100.0],
 }
+# Closer fog where the far view would show the map's unfinished back side (geometry
+# cut away past the original's 28 m fog end, the clear colour through the holes):
+# Nacht's upper floor looks out over the yard. Blended in with the player's height
+# from y0 to y1 (the stairs); [y0, y1, fog].
+const ZONE_FOG := {
+	"nacht": [1.2, 3.2, [Color8(38, 38, 38), 18.0, 30.0]],
+}
 
 # Dog rounds (waves.lua; Script.DogSpawns on Shi No Numa and Der Riese)
 var dog_rounds := false
@@ -319,6 +326,7 @@ func _setup_environment(level_id: String) -> void:
 	var fc := OS.get_cmdline_user_args().find("--fog-config")   # debug: an original config (FOG), e.g. nacht, dogs
 	if fc >= 0 and FOG.has(OS.get_cmdline_user_args()[fc + 1]):
 		_apply_fog(FOG[OS.get_cmdline_user_args()[fc + 1]])
+		_fog_override = true
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
@@ -379,6 +387,7 @@ static func _wave_counts(w: Dictionary) -> Array:
 
 func _process(delta: float) -> void:
 	_update_powerups(delta)
+	_update_fog(delta)
 	if _between_rounds or player == null or player.dead:
 		return
 	if dog_round:
@@ -828,19 +837,33 @@ func _dog_round_end() -> void:
 # "dogWaveEnd" SetFogMappingEnabled(true) goes back to the default config with its
 # SetDefaultFogConfig time, 1000 ms (CFogManager 0x10f77c / 0x10f4c0).
 var _fog_tween: Tween
+var _dog_fog := 0.0    # 0 = the map's fog, 1 = the dog wave's (tweened)
+var _zone_fog := 0.0   # 0..1 towards ZONE_FOG (player height, smoothed)
+var _fog_override := false   # --fog-config: keep the chosen original config
 
 func _fog(on: bool) -> void:
 	if _env == null:
 		return
-	var cfg: Array = FOG[DOG_FOG.get(level_name, "dogs")] if on else DEFAULT_FOG.get(level_name, DEFAULT_FOG["nacht"])
 	if _fog_tween:
 		_fog_tween.kill()
-	_fog_tween = create_tween().set_parallel()
-	var t := 4.0 if on else 1.0
-	_fog_tween.tween_property(_env, "fog_light_color", cfg[0], t)
-	_fog_tween.tween_property(_env, "background_color", cfg[0], t)
-	_fog_tween.tween_property(_env, "fog_depth_begin", cfg[1], t)
-	_fog_tween.tween_property(_env, "fog_depth_end", cfg[2], t)
+	_fog_tween = create_tween()
+	_fog_tween.tween_property(self, "_dog_fog", 1.0 if on else 0.0, 4.0 if on else 1.0)
+
+
+func _update_fog(delta: float) -> void:
+	if _env == null or _fog_override:
+		return
+	var cfg: Array = DEFAULT_FOG.get(level_name, DEFAULT_FOG["nacht"])
+	if ZONE_FOG.has(level_name) and player:
+		var z: Array = ZONE_FOG[level_name]
+		var want := clampf(inverse_lerp(z[0], z[1], player.global_position.y), 0.0, 1.0)
+		_zone_fog = move_toward(_zone_fog, want, delta / 1.5)
+		cfg = _mix_fog(cfg, z[2], _zone_fog)
+	_apply_fog(_mix_fog(cfg, FOG[DOG_FOG.get(level_name, "dogs")], _dog_fog))
+
+
+static func _mix_fog(a: Array, b: Array, k: float) -> Array:
+	return [(a[0] as Color).lerp(b[0], k), lerpf(a[1], b[1], k), lerpf(a[2], b[2], k)]
 
 
 func _apply_fog(cfg: Array) -> void:
