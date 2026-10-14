@@ -190,11 +190,11 @@ static func _grave(at: Node, game: Game) -> void:
 	print("[wunder] shovel: damage %.0f model %s %s" % [p.knife_damage(null), vm.get("_knife_model"),
 		"OK" if is_equal_approx(p.knife_damage(null), 400.0) and vm.get("_knife_model") == "423ce590" else "FAIL"])
 	p.get("_camera").rotation.x = -0.1
-	for f in 4:
+	for f in 5:
 		p.set("_melee_cooldown", 0.0)
 		if f == 0:
-			p.melee()
-		await WT._wait(at, 0.07)
+			p.melee()   # nothing in reach: the slash (state 40, 0.633 s)
+		await WT._wait(at, 0.1)
 		await WT._snap(at, "wunder_shovel_%d" % f)
 	await WT._wait(at, 1.0)
 	# walk to the grave (teleport) and dig

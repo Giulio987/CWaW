@@ -142,7 +142,7 @@ static func capture(g: Game) -> Dictionary:
 		# leaving with the teddy: it reappears elsewhere on resume (the 950 were refunded)
 		d["box_moving"] = box.state in [MysteryBox.State.TEDDY, MysteryBox.State.LEAVING, MysteryBox.State.GONE]
 		# bought but not taken yet: the purchase is given back
-		if box.state in [MysteryBox.State.CYCLING, MysteryBox.State.OFFERED] and box.get("_buyer") == p:
+		if box.state in [MysteryBox.State.OPENING, MysteryBox.State.CYCLING, MysteryBox.State.OFFERED, MysteryBox.State.LOWERING] and box.get("_buyer") == p:
 			d["points"] = int(d["points"]) + MysteryBox.COST
 	if lv.teleporters:
 		var tp := lv.teleporters

@@ -48,6 +48,8 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_stairs_test(game)
 	if args.has("--box-test"):
 		_box_test(game)
+	if args.has("--box-anim-test"):
+		preload("res://scripts/box_anim_tests.gd").start(self, game, args)   # box_anim_tests.gd (box timeline shots)
 	if args.has("--view"):
 		_view_shots(game)
 	if args.has("--walk"):
@@ -115,13 +117,55 @@ func _weapon_shots(game: Game, names: PackedStringArray) -> void:
 		await get_tree().physics_frame
 	for n in names:
 		if n.begins_with("swing="):
-			# swing=<arms anim>: 5 frames of one knife slash with that animation
-			game.player.melee()
-			for f in 5:
-				await get_tree().create_timer(0.075).timeout
+			# swing=<stab|slash|arms anim>[/<CItemKnife model>]: 8 frames over one knife state
+			# (e.g. swing=stab/a507b242 for the Bowie, swing=slash/423ce590 for the shovel);
+			# @side: seen from a camera 0.9 m to the left of the player's
+			var what := n.get_slice("=", 1)
+			var side := what.ends_with("@side")
+			what = what.trim_suffix("@side")
+			var live := what.ends_with("@live")   # the first 6 rendered frames, game time running
+			what = what.trim_suffix("@live")
+			var vm := game.player.get("_viewmodel") as Viewmodel
+			game.player.set_physics_process(false)   # the view stays put
+			game.set_process(false)   # no zombies in the way
+			game.player.health = 1e9
+			for z in get_tree().get_nodes_in_group("zombies"):
+				z.queue_free()
+			var side_cam: Camera3D
+			if side:
+				var pc := get_viewport().get_camera_3d()
+				side_cam = Camera3D.new()
+				side_cam.near = 0.02
+				side_cam.fov = pc.fov
+				pc.add_child(side_cam)
+				side_cam.transform = Transform3D(Basis(Vector3.UP, deg_to_rad(-90)), Vector3(-0.9, 0.0, -0.35))
+				side_cam.current = true
+			if "/" in what:
+				vm.set_knife_model(what.get_slice("/", 1))
+			var kind := what.get_slice("/", 0)
+			game.player.get("_camera").rotation.x = 0.0
+			# game time frozen, the arms clip posed by hand: the frames do not depend on the frame rate
+			Engine.time_scale = 0.0
+			var length := vm.melee(kind == "stab", "" if kind in ["stab", "slash"] else kind)
+			var ap := vm.get("_arms_anim") as AnimationPlayer
+			if live:
+				Engine.time_scale = 1.0
+			for f in 8:
+				if live:
+					if f >= 6:
+						break
+				else:
+					ap.seek(length * f / 7.0 - (0.001 if f == 7 else 0.0), true)
+					for i in 3:
+						await get_tree().process_frame
 				await RenderingServer.frame_post_draw
-				get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/swing_%s_%d.png" % [n.get_slice("=", 1), f]))
-			await get_tree().create_timer(1.0).timeout
+				get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/swing_%s%s%s_%d.png" % [what.replace("/", "_"), "_side" if side else "", "_live" if live else "", f]))
+			Engine.time_scale = 1.0
+			await get_tree().create_timer(length + 0.8).timeout
+			if side_cam:
+				side_cam.queue_free()
+			game.player.set_physics_process(true)
+			vm.set_knife_model(Viewmodel.KNIFE_MODEL)
 			continue
 		if n.begins_with("drink="):
 			# drink=<perk>: the bottle 1.2 s into the drink
@@ -352,9 +396,17 @@ func _box_test(game: Game) -> void:
 		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://../analysis/preview/box_%s.png" % k))
 		print("[box] %s state=%s offered=%s" % [k, MysteryBox.State.keys()[box.state], box.offered])
 	print("[box] prompt offered: ", box.prompt(p))
+	var item: String = box.offered
 	box.interact(p)
 	await get_tree().create_timer(1.0).timeout
-	print("[box] %s: weapon in hand=%s points=%d state=%s" % ["OK" if p.weapon()["name"] == box.offered else "FAIL", p.weapon()["name"], p.points, MysteryBox.State.keys()[box.state]])
+	# items that are not guns go to their belt (MysteryBox.interact), not to the hand
+	var belts := {MonkeyBomb.ITEM: [MonkeyBelt.of(p), MonkeyBelt.MAX], BettyBelt.ITEM: [BettyBelt.of(p), BettyBelt.MAX], MolotovBelt.ITEM: [MolotovBelt.of(p), MolotovBelt.MAX]}
+	if belts.has(item):
+		var belt: Node = belts[item][0]
+		var full: bool = belt != null and belt.count == belts[item][1] and (not belt is BettyBelt or belt.unlocked)
+		print("[box] %s: item %s on its belt (count %s) points=%d state=%s" % ["OK" if full else "FAIL", item, belt.count if belt else "-", p.points, MysteryBox.State.keys()[box.state]])
+	else:
+		print("[box] %s: weapon in hand=%s points=%d state=%s" % ["OK" if p.weapon()["name"] == item else "FAIL", p.weapon()["name"], p.points, MysteryBox.State.keys()[box.state]])
 	for o in [40, -40]:
 		p.global_position = box.global_position + (front - box.global_position).rotated(Vector3.UP, deg_to_rad(o))
 		to = box.global_position - p.global_position
@@ -385,7 +437,7 @@ func _knife_test(game: Game) -> void:
 				await get_tree().physics_frame
 			p._melee_cooldown = 0.0
 			p.melee()
-			await get_tree().physics_frame
+			await get_tree().create_timer(Player.KNIFE_HIT_TIME + 0.05).timeout
 			results.append("%.1fm %+.0f°: %s" % [dist, ang, "dead" if z.state == Zombie.State.DEAD else "ALIVE hp=%.0f" % z.health])
 			z.queue_free()
 			await get_tree().create_timer(0.1).timeout
@@ -913,6 +965,8 @@ func _trap_test(game: Game) -> void:
 		if tr.kind == "flogger":
 			var eng = tr._flog_loops.get(Trap.FLOG_LOOP_ENGINE)
 			check.call(eng != null and eng.enabled and eng.volume > 0.0, "%s engine loop on (volume %.2f)" % [tr.entity, eng.volume if eng else -1.0])
+		if tr.kind != "flogger" and tr.volumes.is_empty():
+			continue   # no kill volume (already a FAIL above): nothing to test it with
 		var at: Vector3 = tr.pivot + Vector3(1.5, 0, 0) if tr.kind == "flogger" else (tr.volumes[0] as AABB).get_center()
 		at.y = (tr.pivot.y - 0.5) if tr.kind == "flogger" else (tr.volumes[0] as AABB).position.y + 0.35
 		var z := Zombie.new()

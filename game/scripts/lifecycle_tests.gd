@@ -132,6 +132,7 @@ static func _kill(at: Node, game: Game, z: Zombie, how: String) -> void:
 				_aim(p, chest)
 				p._melee_cooldown = 0.0
 				p.melee()
+				await _wait(at, Player.KNIFE_HIT_TIME + 0.05)   # knifeDamage at 199 ms
 			if z.state != Zombie.State.DEAD:
 				z.take_damage(150.0, false, p, true)
 		"crawler":

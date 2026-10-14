@@ -1,21 +1,55 @@
-# Mystery box (CMysteryBoxSpec entity). The box logic lived in the engine, not in
-# Lua, so it follows World at War: 950 points, the lid opens, weapons cycle above
-# the box for ~5 s, the result floats for 12 s and sinks back if not taken.
-# Teddy bear (World at War; box state machine 350fb630 + WarpMysteryBox in the
-# level Lua): on maps with several MysteryBox locations, after a few uses the box
-# can give the teddy instead: it laughs, the 950 points are refunded, the box rises
-# and vanishes (teddypoof), then falls at another location (not one of the last two).
+# Mystery box (CMysteryBoxSpec entity), driven like its anim state machine: ASM 350fb630
+# (Verrückt, Shi No Numa, Der Riese; Nacht's f3e136cb is the same without the teddy states).
+#   S0 closed (pose e98b0527) -goodieInteract-> S1 opening (b83ef401, 1458 ms, createWeapon,
+#   music_box_open) -> S3 open (e6e657ff, raiseWeapon, music_box_play): the weapon rises
+#   -weaponInterpComplete-> S4 offer, 12000 ms -> S6 lowerWeapon (still takeable)
+#   -weaponInterpComplete-> S2 Closing (bf424825, 833 ms, music_box_close) -> S0.
+#   Taken (S4/S6 goodieInteract) -> S7 destroyWeapon -> S2.
+#   Teddy: S3 -teddyBear-> S5 (teddylaugh) -teddyBearInterpComplete-> S8 flight (c7403104 at
+#   14336/4096 = 3.5x, 5238 ms, box_flyaway + teddypoof, effect 03ca2c23 twice, Lua teddyBear =
+#   WarpMysteryBox) -> S9 INACTIVE (dormant); the new box: activateMysteryBoxFalling -> S10
+#   (c7403104 backwards at 5x, 3666 ms, box_fall + teddyland, effect 03ca2c23) -> S2 Closing.
+# The weapon (CMysteryBoxSpec, console.bin): shown once the lid is open, it rises in a straight
+# line from MysteryStartGunOffset (0,25,-32) to MysteryEndGunOffset (0,125,-32) in
+# MysteryInterpolateTime 4000 ms, switching among MysteryNumOtherGunsToShow 13 other guns at a
+# steady pace; lowering takes the same time. The bear waits MysteryWaitToFlyBearTime 1000 ms,
+# then goes up to MysteryEndTeddyBearOffset (0,300,-32) in MysteryTeddyBearInterpolateTime 2000 ms.
+# The offsets are in the units of the code's defaults ({0,100,-125} / {0,500,-125}): x4 is an
+# estimate that matches those defaults (100 / 25 = 4). They are in the entity frame: z -32 x4
+# = -128 units puts the gun over the middle of the box model (its child sits at z -135 / -163).
+# Teddy rules: on maps with several MysteryBox locations, after a few uses the box can give
+# the teddy instead: the 950 points are refunded and the box moves to another location (not
+# one of the last two).
 class_name MysteryBox
 extends Node3D
 
 const COST := 950
-# Nacht's box (ecee0a62); other maps use 350fb630 with different animation names,
-# so open/close/poses are recognised from their key counts (see _pick_animations)
+# animation names from the ASMs, per box model
+const ANIMS := {
+	"350fb630": {"closed": "e98b0527", "open": "b83ef401", "opened": "e6e657ff", "close": "bf424825", "fly": "c7403104"},
+	"ecee0a62": {"closed": "b4bcad2c", "open": "d8283c46", "opened": "ef143ac4", "close": "dc54990a"},   # Nacht, ASM f3e136cb
+}
 var ANIM_OPEN := "d8283c46"
 var ANIM_CLOSE := "dc54990a"
 var ANIM_IDLE_OPEN := "ef143ac4"
 var ANIM_IDLE_CLOSED := "b4bcad2c"
-const CYCLE_TIME := 5.0     # box_music is loud for ~5.5 s
+var ANIM_FLY := ""
+const OPEN_TIME := 1.458        # S1 dur
+const CLOSE_TIME := 0.833       # S2 dur
+const GUN_TIME := 4.0           # MysteryInterpolateTime
+const OTHER_GUNS := 13          # MysteryNumOtherGunsToShow
+const CYCLE_TIME := OPEN_TIME + GUN_TIME   # bought -> weapon offered (or the bear)
+const OFFSET_SCALE := 4.0 * Level.UNITS   # console.bin offsets -> metres (x4 estimated)
+const GUN_START := Vector3(0, 25, -32) * OFFSET_SCALE     # MysteryStartGunOffset
+const GUN_END := Vector3(0, 125, -32) * OFFSET_SCALE      # MysteryEndGunOffset
+const TEDDY_END := Vector3(0, 300, -32) * OFFSET_SCALE    # MysteryEndTeddyBearOffset
+const TEDDY_WAIT := 1.0         # MysteryWaitToFlyBearTime
+const TEDDY_RISE := 2.0         # MysteryTeddyBearInterpolateTime
+const FLY_SPEED := 14336.0 / 4096.0   # S8 rate (3.5x)
+const FLY_TIME := 5.238               # S8 dur
+const FALL_SPEED := 20480.0 / 4096.0  # S10 rate -20480 (5x backwards)
+const FALL_TIME := 3.666              # S10 dur
+const GONE_TIME := 1.0     # WarpMysteryBox sends activateMysteryBoxFalling with a 1 (estimated as 1 s)
 const TEDDY_MODEL := "6e3f6288"   # second model of the CMysteryBoxSpec entities (ingame dynamics)
 const TEDDY_YAW := PI / 2           # faces the front of the box
 # Teddy rules from console.bin, per map (CMysteryBoxSpec reads
@@ -28,10 +62,6 @@ const TEDDY_YAW := PI / 2           # faces the front of the box
 const TEDDY_RULES := {"nacht": [10, 10, 10], "verruckt": [10, 3, 10], "shinonuma": [3, 2, 20],
 	"derriese": [3, 2, 20]}
 const TEDDY_DEFAULT := [10, 5, 10]   # engine defaults when a variable is missing
-const TEDDY_LAUGH := 2.0     # teddy floats and laughs
-const RISE_TIME := 4.5       # box rises and shakes (box_flyaway)
-const GONE_TIME := 2.0
-const FALL_TIME := 1.6       # falls at the new location (box_fall, then teddyland)
 const MEMORY := 2            # Script.Level.MysteryBoxMemorySize
 const OFFER_TIME := 12.0
 # What the box gives, per map: console.bin MysteryWeapons<map> (read by CMysteryBoxSpec,
@@ -57,7 +87,9 @@ const MYSTERY_DEFAULT := "nacht"
 
 signal moved(entity: String)
 
-enum State { CLOSED, CYCLING, OFFERED, CLOSING, TEDDY, LEAVING, GONE, ARRIVING }
+# CLOSED S0, OPENING S1, CYCLING S3, OFFERED S4, LOWERING S6, CLOSING S2, TEDDY S5,
+# LEAVING S8, GONE S9, ARRIVING S10
+enum State { CLOSED, CYCLING, OFFERED, CLOSING, TEDDY, LEAVING, GONE, ARRIVING, OPENING, LOWERING }
 
 var state := State.CLOSED
 var offered := ""
@@ -65,6 +97,11 @@ var _anim: AnimationPlayer
 var _weapon: Node3D
 var _timer := 0.0
 var _swap := 0.0
+var _shown := 0             # other guns shown while rising
+var _teddy_from := Vector3.ZERO
+# entity frame -> this node (the model sits on the entity's child, 0.34-0.41 m behind the
+# entity origin): the gun / bear offsets and the effect are in the entity frame
+var _from_entity := Transform3D.IDENTITY
 var _buyer: Player
 var _cache := {}
 var level: Level
@@ -88,8 +125,15 @@ func setup(level_: Level, entity_: String) -> void:
 		_model = (load(path) as PackedScene).instantiate()
 		add_child(_model)
 		_anim = _model.find_children("*", "AnimationPlayer")[0]
-		if not _anim.has_animation(ANIM_OPEN):
-			_pick_animations()
+		var names: Dictionary = ANIMS.get(model_hash, ANIMS["ecee0a62"])
+		ANIM_OPEN = names["open"]
+		ANIM_CLOSE = names["close"]
+		ANIM_IDLE_OPEN = names["opened"]
+		ANIM_IDLE_CLOSED = names["closed"]
+		ANIM_FLY = names.get("fly", "")
+		for a in [ANIM_OPEN, ANIM_CLOSE, ANIM_FLY]:
+			if _anim.has_animation(a):
+				_anim.get_animation(a).loop_mode = Animation.LOOP_NONE
 		_pose(ANIM_IDLE_CLOSED)
 	_place(entity_)
 	if locations.is_empty():
@@ -107,6 +151,7 @@ func _place(entity_: String) -> void:
 	# quarter turns in the transform flags (Level.flag_transform), as for the debris
 	var root := Level.flag_transform(e["transform"])
 	global_transform = root * Level.flag_transform(e["children"][-1]) if not e["children"].is_empty() else root
+	_from_entity = global_transform.affine_inverse() * root
 	if _body:
 		_body.free()
 	# solid box from the closed model: the entity collider is the use area, 2.2 x 1.9 m
@@ -145,49 +190,9 @@ func _model_box() -> AABB:
 	return _solid
 
 
-# Two one-key poses (closed/open) and two animations (open/close): the opening
-# animation starts from the closed pose.
-func _pick_animations() -> void:
-	var poses := []
-	var moves := []
-	for a in _anim.get_animation_list():
-		var anim := _anim.get_animation(a)
-		var keys := 0
-		for t in anim.get_track_count():
-			keys = max(keys, anim.track_get_key_count(t))
-		(poses if keys <= 1 else moves).append(a)
-	if poses.size() < 2 or moves.size() < 2:
-		return
-	# the opening animation ends far from where it starts and starts at a pose
-	var best := INF
-	for m in moves:
-		for p in poses:
-			var d := _pose_distance(p, m, 0.0)
-			if d < best:
-				best = d
-				ANIM_OPEN = m
-				ANIM_IDLE_CLOSED = p
-	ANIM_CLOSE = moves[0] if moves[1] == ANIM_OPEN else moves[1]
-	ANIM_IDLE_OPEN = poses[0] if poses[1] == ANIM_IDLE_CLOSED else poses[1]
-
-
-func _pose_distance(pose_name: String, move_name: String, t: float) -> float:
-	var pose := _anim.get_animation(pose_name)
-	var move := _anim.get_animation(move_name)
-	var d := 0.0
-	for i in pose.get_track_count():
-		var mt := move.find_track(pose.track_get_path(i), pose.track_get_type(i))
-		if mt < 0 or pose.track_get_key_count(i) == 0:
-			continue
-		if pose.track_get_type(i) == Animation.TYPE_ROTATION_3D:
-			d += (pose.track_get_key_value(i, 0) as Quaternion).angle_to(move.rotation_track_interpolate(mt, t))
-		elif pose.track_get_type(i) == Animation.TYPE_POSITION_3D:
-			d += (pose.track_get_key_value(i, 0) as Vector3).distance_to(move.position_track_interpolate(mt, t))
-	return d
-
-
 func _pose(a: String) -> void:
 	if _anim and _anim.has_animation(a):
+		_anim.speed_scale = 1.0
 		_anim.play(a)
 		_anim.seek(0.0, true)
 		_anim.pause()
@@ -197,7 +202,7 @@ func prompt(player: Player) -> String:
 	match state:
 		State.CLOSED:
 			return "Premi E per la Mystery Box [%d]" % COST
-		State.OFFERED:
+		State.OFFERED, State.LOWERING:
 			if player == _buyer:
 				return "Premi E per prendere %s" % Weapons.display(offered)
 	return ""
@@ -213,7 +218,7 @@ func interact(player: Player) -> void:
 			uses += 1
 			used_count += 1
 			_open()
-		State.OFFERED:
+		State.OFFERED, State.LOWERING:
 			if player == _buyer:
 				if offered == MonkeyBomb.ITEM:
 					MonkeyBelt.give(player)
@@ -229,74 +234,108 @@ func interact(player: Player) -> void:
 				_close()
 
 
+# S1 opening: the lid opens, the weapon appears once it is open (S3)
 func _open() -> void:
-	state = State.CYCLING
-	_timer = CYCLE_TIME
+	state = State.OPENING
+	_timer = OPEN_TIME
 	Sfx.instance.play_at("music_box_open", global_position + Vector3.UP)
-	Sfx.instance.play_at("box_music", global_position + Vector3.UP)
-	if _anim:
-		_anim.play(ANIM_OPEN)
+	_play(ANIM_OPEN)
+
+
+# S3: raiseWeapon + music_box_play
+func _raise() -> void:
+	state = State.CYCLING
+	_timer = GUN_TIME
+	_shown = 0
+	_swap = GUN_TIME / OTHER_GUNS
+	_pose(ANIM_IDLE_OPEN)
+	Sfx.instance.play_at("music_box_play", global_position + Vector3.UP)
 	_show_weapon(pool().pick_random())
+	_gun_at(0.0)
 
 
+# S2 Closing (taken: S7 destroyWeapon first)
 func _close() -> void:
 	state = State.CLOSING
+	_timer = CLOSE_TIME
 	Sfx.instance.play_at("music_box_close", global_position + Vector3.UP)
 	if _weapon:
 		_weapon.queue_free()
 		_weapon = null
-	if _anim:
-		_anim.play(ANIM_CLOSE)
-	var t := _anim.get_animation(ANIM_CLOSE).length if _anim else 0.5
-	get_tree().create_timer(t + 0.3).timeout.connect(func():
-		state = State.CLOSED
-		_pose(ANIM_IDLE_CLOSED))
+	_play(ANIM_CLOSE)
+
+
+func _play(a: String, speed := 1.0, backwards := false) -> void:
+	if _anim and _anim.has_animation(a):
+		if backwards:
+			_anim.play_backwards(a)
+		else:
+			_anim.play(a)
+		_anim.speed_scale = speed
+
+
+func _gun_at(k: float) -> void:
+	if _weapon:
+		_weapon.position = _from_entity * GUN_START.lerp(GUN_END, clampf(k, 0.0, 1.0))
 
 
 func _process(delta: float) -> void:
 	match state:
+		State.OPENING:
+			_timer -= delta
+			if _timer <= 0.0:
+				_raise()
 		State.CYCLING:
 			_timer -= delta
 			_swap -= delta
-			var p := 1.0 - _timer / CYCLE_TIME
-			if _weapon:
-				_weapon.position = Vector3(0, 0.25 + 0.45 * p, 0)
 			if _timer <= 0.0:
 				if _teddy_roll():
 					_teddy()
 					return
 				offered = _pick()
 				_show_weapon(offered)
+				_gun_at(1.0)
 				state = State.OFFERED
 				VoxLines.box_shown(offered)   # weapon_bad (vox_lines.gd)
 				_timer = OFFER_TIME
-			elif _swap <= 0.0:
-				_swap = lerpf(0.08, 0.35, p)  # slows down like the original
+			elif _swap <= 0.0 and _shown < OTHER_GUNS - 1:
+				# a steady switch among the other guns
+				_swap += GUN_TIME / OTHER_GUNS
+				_shown += 1
 				_show_weapon(pool().pick_random())
+				_gun_at(1.0 - _timer / GUN_TIME)
+			else:
+				_gun_at(1.0 - _timer / GUN_TIME)
 		State.OFFERED:
 			_timer -= delta
-			if _weapon:
-				# floats, then sinks back into the box in the last seconds
-				var sink := clampf((3.0 - _timer) / 3.0, 0.0, 1.0)
-				_weapon.position = Vector3(0, 0.7 - 0.45 * sink + sin(_timer * 3.0) * 0.02, 0)
+			if _timer <= 0.0:
+				state = State.LOWERING   # S6 lowerWeapon
+				_timer = GUN_TIME
+		State.LOWERING:
+			_timer -= delta
+			_gun_at(_timer / GUN_TIME)
 			if _timer <= 0.0:
 				_close()
+		State.CLOSING:
+			_timer -= delta
+			if _timer <= 0.0:
+				state = State.CLOSED
+				_pose(ANIM_IDLE_CLOSED)
+		State.TEDDY:
+			_timer -= delta
+			if _weapon:
+				var k := clampf(-_timer / TEDDY_RISE, 0.0, 1.0)
+				_weapon.position = _from_entity * _teddy_from.lerp(TEDDY_END, k)
+			if _timer <= -TEDDY_RISE:
+				_leave()   # teddyBearInterpComplete
 		State.LEAVING:
 			_timer -= delta
-			_fly(1.0 - _timer / RISE_TIME)
 			if _timer <= 0.0:
 				_vanish()
 		State.ARRIVING:
 			_timer -= delta
-			var k := clampf(1.0 - _timer / FALL_TIME, 0.0, 1.0)
-			if _model:
-				_model.position = Vector3(0, 6.0 * (1.0 - k * k), 0)
-				_model.rotation = Vector3.ZERO
 			if _timer <= 0.0:
-				if _model:
-					_model.position = Vector3.ZERO
-				Sfx.instance.play_at("teddyland", global_position + Vector3.UP)
-				state = State.CLOSED
+				_close()
 
 
 # ------------------------------------------------------------------ teddy bear
@@ -314,17 +353,19 @@ func _teddy_roll() -> bool:
 	return false
 
 
+# S5: the bear instead of a gun, teddylaugh; it waits, then goes up
 func _teddy() -> void:
 	state = State.TEDDY
 	offered = ""
+	_timer = TEDDY_WAIT
 	_show_model(_teddy_model())
+	_teddy_from = GUN_END
 	if _weapon:
-		_weapon.position = Vector3(0, 0.8, 0)
+		_weapon.position = _from_entity * GUN_END
 	Sfx.instance.play_at("teddylaugh", global_position + Vector3.UP)
 	VoxLines.say("teddy")   # character line (vox_lines.gd)
 	if _buyer:
 		_buyer.add_points(COST)  # refunded
-	get_tree().create_timer(TEDDY_LAUGH, false).timeout.connect(_leave)
 
 
 func _teddy_model() -> Node3D:
@@ -342,33 +383,69 @@ func _teddy_model() -> Node3D:
 	return bear
 
 
+# S8: the bear goes (teddypoof, effect 03ca2c23) and the box flies off with its lid open
 func _leave() -> void:
 	state = State.LEAVING
-	_timer = RISE_TIME
+	_timer = FLY_TIME
 	if _weapon:
 		_weapon.queue_free()
 		_weapon = null
 	Sfx.instance.play_at("box_flyaway", global_position + Vector3.UP)
+	Sfx.instance.play_at("teddypoof", global_transform * (_from_entity * TEDDY_END))
+	_beams()
+	_play(ANIM_FLY, FLY_SPEED)
 
 
-# rises slowly, shaking more and more, then shoots up
-func _fly(k: float) -> void:
-	if _model == null:
-		return
-	var shake := k * 0.12
-	var t := Time.get_ticks_msec() / 1000.0
-	_model.position = Vector3(sin(t * 31.0) * shake * 0.3, 1.2 * k * k + 3.0 * maxf(k - 0.85, 0.0) / 0.15, cos(t * 27.0) * shake * 0.3)
-	_model.rotation = Vector3(sin(t * 23.0) * shake, sin(t * 17.0) * shake * 0.5, cos(t * 29.0) * shake)
-
-
+# S9 INACTIVE (dormant)
 func _vanish() -> void:
 	state = State.GONE
-	Sfx.instance.play_at("teddypoof", global_position + Vector3.UP * 2.5)
 	if _model:
 		_model.visible = false
 	if _body:
 		_body.process_mode = Node.PROCESS_MODE_DISABLED
 	get_tree().create_timer(GONE_TIME, false).timeout.connect(_warp)
+
+
+# Effect entity 03ca2c23 (ingame effects): three children 03ca2c24-26, each the quad model
+# f85b75b2 (1.3 x 5.2 m, additive material 995344cb: lightning) at an offset from the box, with
+# a short life (450 / 375 / 500 in their specs, read here as ms). Offsets and lives are
+# read from the specs without a full decoding; facing the camera around the vertical is
+# an estimate.
+const BEAMS := [[Vector3(-50, 50, -50), 0.45], [Vector3(70, 0, 70), 0.375], [Vector3(500, 0, -100), 0.5]]
+static var _effects_scene: PackedScene
+
+
+func _beams() -> void:
+	var path := "res://assets/models/ingame/effects.glb"
+	if _effects_scene == null and ResourceLoader.exists(path):
+		_effects_scene = load(path)
+	if _effects_scene == null:
+		return
+	for b in BEAMS:
+		var all := _effects_scene.instantiate()
+		var quad := all.find_child("f85b75b2", true, false) as MeshInstance3D
+		if quad == null:
+			all.free()
+			continue
+		quad.get_parent().remove_child(quad)
+		all.free()
+		quad.transform = Transform3D.IDENTITY
+		quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		for i in quad.mesh.get_surface_count():
+			var m := quad.get_active_material(i)
+			if m is BaseMaterial3D:
+				m = m.duplicate()
+				var bm := m as BaseMaterial3D
+				bm.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
+				# material byte 3 = 2: additive (as the CIwGFXEmitterSpec sprites, iw_emitter.gd)
+				bm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+				bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				bm.cull_mode = BaseMaterial3D.CULL_DISABLED
+				bm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+				quad.set_surface_override_material(i, m)
+		add_child(quad)
+		quad.position = _from_entity * ((b[0] as Vector3) * Level.UNITS)
+		get_tree().create_timer(float(b[1]), false).timeout.connect(quad.queue_free)
 
 
 # WarpMysteryBox: a random location that is not one of the last MEMORY ones
@@ -377,13 +454,18 @@ func _warp() -> void:
 	if choices.is_empty():
 		choices = locations.filter(func(n): return n != entity)
 	_place(choices.pick_random() if not choices.is_empty() else entity)
-	_pose(ANIM_IDLE_CLOSED)
 	if _model:
 		_model.visible = true
-		_model.position = Vector3(0, 6.0, 0)
+	# S10: c7403104 backwards at 5x, from up in the air down onto the new spot
 	state = State.ARRIVING
 	_timer = FALL_TIME
+	if _anim and _anim.has_animation(ANIM_FLY):
+		_play(ANIM_FLY, FALL_SPEED, true)
+	else:
+		_pose(ANIM_IDLE_OPEN)
 	Sfx.instance.play_at("box_fall", global_position + Vector3.UP * 3.0)
+	Sfx.instance.play_at("teddyland", global_position + Vector3.UP)
+	_beams()
 	moved.emit(entity)
 
 

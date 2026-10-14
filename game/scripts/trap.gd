@@ -272,10 +272,13 @@ func _finalize_from_geometry(e: Dictionary) -> void:
 
 
 func _doorway_score(space: PhysicsDirectSpaceState3D, box: AABB) -> float:
+	# the world plus the upright cut-out faces (Level.SEE_THROUGH_LAYER): the jambs and
+	# grilles beside Verrueckt's fences are alpha-scissor surfaces, only on that layer
+	var mask := 1 | Level.SEE_THROUGH_LAYER
 	var c := box.get_center()
 	var bottom := box.position.y
 	# a floor right under the fence
-	var q := PhysicsRayQueryParameters3D.create(Vector3(c.x, bottom + 1.0, c.z), Vector3(c.x, bottom - 1.0, c.z), 1)
+	var q := PhysicsRayQueryParameters3D.create(Vector3(c.x, bottom + 1.0, c.z), Vector3(c.x, bottom - 1.0, c.z), mask)
 	var hit := space.intersect_ray(q)
 	if hit.is_empty() or absf((hit["position"] as Vector3).y - bottom) > 0.4:
 		return INF
@@ -284,12 +287,12 @@ func _doorway_score(space: PhysicsDirectSpaceState3D, box: AABB) -> float:
 	var at := Vector3(c.x, bottom + 1.0, c.z)
 	var score := 0.0
 	for dir: Vector3 in [along, -along]:
-		var r := space.intersect_ray(PhysicsRayQueryParameters3D.create(at, at + dir * (half + 1.5), 1))
+		var r := space.intersect_ray(PhysicsRayQueryParameters3D.create(at, at + dir * (half + 1.5), mask))
 		score += 1.5 if r.is_empty() else absf((r["position"] - at).length() - half)
 	# open on both sides of the fence (it is a passage)
 	var side := along.cross(Vector3.UP)
 	for dir: Vector3 in [side, -side]:
-		var r := space.intersect_ray(PhysicsRayQueryParameters3D.create(at, at + dir * 1.2, 1))
+		var r := space.intersect_ray(PhysicsRayQueryParameters3D.create(at, at + dir * 1.2, mask))
 		if not r.is_empty():
 			score += 1.0
 	return score

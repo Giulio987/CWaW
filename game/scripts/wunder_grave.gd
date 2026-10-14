@@ -21,8 +21,8 @@
 # SetUsingShovel turns the melee item into the "shovel" CItemKnife (player group 1bb91af6,
 # CItemKnife::Serialise va 0xfef00: damage 400 against the knife's 200, first-person model
 # 423ce590): here knife_damage 400 (player.gd, via the "shovel_damage" meta; the base knife
-# stays 150) and the shovel model in the remake's procedural slash (viewmodel.gd
-# set_knife_model, as the Bowie knife). Kept for the rest of the game (in the save).
+# stays 150) and the shovel model in the knife states (viewmodel.gd set_knife_model, as the
+# Bowie knife). Kept for the rest of the game (in the save).
 extends Node3D
 
 const COUNT := 9
@@ -30,11 +30,7 @@ const START_DELAY := 2.0     # Game.Timeout(2000, "WunderwaffeStart")
 const MESSAGE_TIME := 8.0
 const DIG_RANGE := 1.6       # metres from the trigger entity (its collider size is not decoded)
 const SHOVEL_DAMAGE := 400.0 # CItemKnife "shovel"
-const SHOVEL_MODEL := "423ce590"
-# the model: handle up +Y, blade down -Y, 0.88 m in the export (the Bowie's layout): turned so
-# it runs along +X like knife_lod1 and scaled like the Bowie (bowie_knife.gd)
-const SHOVEL_SCALE := 0.5
-const SHOVEL_GRIP := 0.035
+const SHOVEL_MODEL := "423ce590"   # in the left fist with no fix, like every CItemKnife model
 
 var level: Level
 var number := 0              # Game.GetWunderWaffeNumber (0 = not drawn yet)
@@ -141,8 +137,7 @@ func _apply_shovel() -> void:
 	if vm == null:
 		return
 	p.set_meta("shovel_damage", SHOVEL_DAMAGE)
-	var fix := Basis(Vector3.RIGHT, PI / 2) * Basis(Vector3.BACK, PI / 2)
-	vm.set_knife_model(SHOVEL_MODEL, fix.scaled(Vector3.ONE * SHOVEL_SCALE), SHOVEL_GRIP)
+	vm.set_knife_model(SHOVEL_MODEL)
 	_shovel_on = p
 
 

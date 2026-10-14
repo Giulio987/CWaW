@@ -119,7 +119,7 @@ static func _teddy(at: Node, game: Game) -> void:
 	await at.get_tree().create_timer(MysteryBox.CYCLE_TIME + 0.4).timeout
 	_check(box.state == MysteryBox.State.TEDDY and p.points == 5000, "teddy, refunded (points %d)" % p.points)
 	await _box_shot(at, box, "teddy_0_bear", 1.3)
-	await at.get_tree().create_timer(MysteryBox.TEDDY_LAUGH + 3.4).timeout
+	await at.get_tree().create_timer(MysteryBox.TEDDY_WAIT + MysteryBox.TEDDY_RISE + 0.5).timeout
 	_check(box.state == MysteryBox.State.LEAVING, "box rising")
 	p.get_viewport().get_camera_3d().rotation.x = 0.3
 	await _box_shot(at, box, "teddy_1_rising", 2.2)

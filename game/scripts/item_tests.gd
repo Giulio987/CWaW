@@ -178,10 +178,10 @@ func _bowie() -> void:
 	var still_generic := game.wall_buys.any(func(w): return String(w.get("weapon", "")) == BowieKnife.WEAPON_HASH)
 	_check(buy != null and buy.cost == 3000 and not still_generic, "BuyWeaponBowie wall buy, cost %s" % (buy.cost if buy else -1))
 	_check(is_equal_approx(p.knife_damage(null), 150.0), "knife 150 before")
-	# base knife slash frames for comparison
+	# base knife slash frame for comparison
 	p.get("_camera").rotation.x = -0.1
 	p.melee()
-	await _wait(0.16)
+	await _wait(0.3)
 	await _snap("knife_slash")
 	await _wait(1.0)
 	if buy == null:
@@ -195,11 +195,11 @@ func _bowie() -> void:
 	p.rotation.y += PI
 	await _wait(0.2)
 	p.get("_camera").rotation.x = -0.1
-	for f in 4:
+	for f in 5:
 		p.set("_melee_cooldown", 0.0)
 		if f == 0:
-			p.melee()
-		await _wait(0.07)
+			p.melee()   # nothing in reach: the slash (state 40, 0.633 s)
+		await _wait(0.1)
 		await _snap("bowie_slash_%d" % f)
 	await _wait(1.0)
 	# one stab kills a 900 hp zombie in front

@@ -8,20 +8,15 @@
 #   - player vox line "weapon_bowie" when bought (vox table of the player entity)
 #   - achievement 101 "40 Knives" (200e86a9): 40 kills with the Bowie in one game,
 #     condition bowieKnife.session_totalzombiekilled (achievements.gd)
-# The slash is the remake's procedural knife slash (viewmodel.gd) with the bowie model; the
-# base knife keeps its 150.
+# The stab / slash are the original knife states (viewmodel.gd) with the bowie model in the
+# left fist; the base knife keeps its 150.
 # Node under the player (like GrenadeBelt): owned flag, wall buy and save state.
 class_name BowieKnife
 extends Node
 
 const WEAPON_HASH := "9c52b068"   # CActionBuyWeaponSpec weapon of BuyWeaponBowie
 const DAMAGE := 1000.0            # CItemKnife bowieKnife
-const MODEL := "a507b242"         # CItemKnife bowieKnife model (player.glb node)
-# the model's blade runs down -Y from the knuckle guard (origin at the pommel, 0.61 m
-# long in the export): turned so the blade is along +X like knife_lod1, scaled to ~0.3 m
-# (knife_lod1 is 0.28 m)
-const FIX_SCALE := 0.5
-const GRIP := 0.035
+const MODEL := "a507b242"         # CItemKnife bowieKnife model (player.glb node, made for the hand bone)
 
 var player: Player
 var owned := false
@@ -74,9 +69,7 @@ func _apply() -> void:
 	if vm == null:
 		return
 	if owned:
-		# -Y (blade) -> +X, then a quarter turn about the blade so its flat side faces the camera
-		var fix := Basis(Vector3.RIGHT, PI / 2) * Basis(Vector3.BACK, PI / 2)
-		vm.set_knife_model(MODEL, fix.scaled(Vector3.ONE * FIX_SCALE), GRIP)
+		vm.set_knife_model(MODEL)
 	else:
 		vm.set_knife_model(Viewmodel.KNIFE_MODEL)
 

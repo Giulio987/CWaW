@@ -16,7 +16,7 @@ CIwAnimSkin:  u32 1, u32 modelHash, u32 skelHash, u32 numSets, then sets:
   per vertex: u16 vertIndex, s16 localPos[numBones][3], u8 weight[numBones] (sum 128, padded to even)
 CIwAnim:      u32 skelHash, u32 numBones, u32 boneMask, u32 numKeyFrames, keyframes, 12-byte trailer
   keyframe:   u32 class CIwAnimKeyFrame, u32 0, u32 time (1/4096 s),
-              u8 type, s16 rootPos[3] (type 3; garbage in type 2), u8 1, u32 boneMask, u32 numBones, u8 flags,
+              u8 type, s16 pos[3] (type 3: position of the first bone of the mask; garbage in type 2), u8 1, u32 boneMask, u32 numBones, u8 flags,
               type 2 only: s16 x[n+1], y[n+1], z[n+1] - element 0 is a bias, bone i pos = (elem[i+1] + bias) * posScale
               u32 quat[numBones]
   Types are mixed freely within one animation. Bones missing from a keyframe keep their previous value.
@@ -86,7 +86,8 @@ class Anim:
         """scale: the skeleton's position scale (Skeleton.scale)."""
         self.skel, self.num_bones, _mask, nk = struct.unpack_from("<IIII", body, 0)
         self.times, self.root_pos, self.rots = [], [], []  # rots: list of {bone: quat}
-        self.pos = []  # list of {bone: local position} (type 2 keyframes only)
+        self.pos = []  # list of {bone: local position} (type 2 keyframes; type 3 without bone 0)
+        self.root_keyed = []  # whether keyframe k sets the root position (root_pos carries it forward)
         pos = 16
         for _ in range(nk):
             cls, _z, t, kind = struct.unpack_from("<IIIB", body, pos)
@@ -98,7 +99,14 @@ class Anim:
             pos += 29
             bone_pos = {}
             if kind == 3:
-                rp = np.array(struct.unpack_from("<hhh", body, pos - 16), float) * scale
+                # the position belongs to the FIRST bone of the mask: the root only when bone 0
+                # is keyed (box lid b83ef401: mask [1], pos = the lid's rest position)
+                p3 = np.array(struct.unpack_from("<hhh", body, pos - 16), float) * scale
+                if bones and bones[0] == 0:
+                    rp = p3
+                else:
+                    bone_pos = {bones[0]: p3} if bones else {}
+                    rp = self.root_pos[-1] if self.root_pos else np.zeros(3)
             else:
                 # SoA x[n+1] y[n+1] z[n+1]; element 0 is a bias added to the others
                 v = np.frombuffer(body, "<i2", 3 * (cnt + 1), pos).reshape(3, cnt + 1).T.astype(float)
@@ -110,6 +118,7 @@ class Anim:
             pos += 4 * cnt
             self.times.append(t / 4096.0)
             self.root_pos.append(rp)
+            self.root_keyed.append(0 in bone_pos or (kind == 3 and bool(bones) and bones[0] == 0))
             self.pos.append(bone_pos)
             self.rots.append({b: unpack_quat(q) for b, q in zip(bones, qs)})
         self.trailer = body[pos:]

@@ -164,51 +164,93 @@ func look(delta: Vector2) -> void:
 
 
 const KNIFE_DAMAGE := 150.0
-const KNIFE_RANGE := 1.8  # metres, horizontal
+const KNIFE_RANGE := 1.8  # metres, horizontal (slash)
+# Stab or slash (kiwi va 0x205e7c, on the knife button): the default is the slash (state 40);
+# the stab (state 39) when the current target is closer than CItemKnife i_40 = 1000 units
+# (2.5 m) and within i_44 = 136 (1/4096 turn, ~12 deg) of the view. The stab keeps that
+# target (+0xdc) for its damage.
+const STAB_RANGE := 2.5
+const STAB_ANGLE := 136.0 / 4096.0 * TAU
+const SLASH_ANGLE := PI / 3.0   # remake: zombies slightly to the side
+# knifeDamage events of both states: 1 at 199 ms, 0 at 500 ms (stab) / 599 ms (slash): one
+# hit per swing, at the start of the window
+const KNIFE_HIT_TIME := 0.199
+const STAB_TIME := 1.0    # state 39
+const SLASH_TIME := 0.633 # state 40
 var _melee_cooldown := 0.0
+var _melee_id := 0
 
 
 # Knife: short-range hit available with any weapon, as in the original.
 func melee() -> void:
-	if dead or _melee_cooldown > 0.0 or _viewmodel.throwing():
+	if dead or _melee_cooldown > 0.0 or _viewmodel.throwing() or _viewmodel.drinking:
 		return
-	_melee_cooldown = 0.9
-	_viewmodel.melee()
-	Sfx.instance.play("knife_slash", -3.0)
-	# like the original, the knife hits the zombie in front of the player whatever the
-	# vertical aim (crawlers at your feet, zombies slightly to the side)
-	var facing := -global_basis.z
-	facing.y = 0.0
-	facing = facing.normalized()
+	var target := _knife_target(STAB_RANGE, STAB_ANGLE)
+	var stab := target != null
+	var length := _viewmodel.melee(stab)
+	if length <= 0.0:
+		return
+	_melee_cooldown = STAB_TIME if stab else SLASH_TIME
+	Sfx.instance.play("knife_stab" if stab else "knife_slash", -3.0)
+	_melee_id += 1
+	var id := _melee_id
+	get_tree().create_timer(KNIFE_HIT_TIME, false).timeout.connect(func():
+		if id == _melee_id and not dead:
+			_knife_hit(target))
+
+
+func _knife_hit(target: Zombie) -> void:
 	var best: Zombie = null
-	var best_d := INF
-	for z in get_tree().get_nodes_in_group("zombies"):
-		if not z is Zombie or z.state == Zombie.State.DEAD:
-			continue
-		var to: Vector3 = z.global_position - global_position
-		if absf(to.y) > 2.0:
-			continue
-		to.y = 0.0
-		var d := to.length()
-		if d > KNIFE_RANGE or (d > 0.3 and facing.angle_to(to / d) > deg_to_rad(60)):
-			continue
-		# nothing solid in between (no stabbing through walls or window boards)
-		var q := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP, z.global_position + Vector3.UP * (0.4 if z.crawler else 1.0), 1)
-		if not get_world_3d().direct_space_state.intersect_ray(q).is_empty():
-			continue
-		# a crawler lies at your feet: you have to aim down at it
-		if z.crawler:
-			var aim := -_camera.global_basis.z
-			var body: Vector3 = (z.global_position + Vector3.UP * 0.3 - _camera.global_position).normalized()
-			if aim.angle_to(body) > deg_to_rad(35):
-				continue
-		if d < best_d:
-			best_d = d
-			best = z
+	if target and is_instance_valid(target) and _knife_reach(target, STAB_RANGE, STAB_ANGLE * 2.0) >= 0.0:
+		best = target
+	else:
+		best = _knife_target(KNIFE_RANGE, SLASH_ANGLE)
 	if best:
 		best.take_damage(knife_damage(best), false, self, true)
 	elif ExplosiveBarrels.of(self):
 		ExplosiveBarrels.of(self).knife(self, KNIFE_RANGE)   # Nacht barrels (barrels.gd)
+
+
+# like the original, the knife hits the zombie in front of the player whatever the
+# vertical aim (zombies slightly to the side), except a crawler at your feet
+func _knife_target(reach: float, max_angle: float) -> Zombie:
+	var best: Zombie = null
+	var best_d := INF
+	for z in get_tree().get_nodes_in_group("zombies"):
+		if not z is Zombie:
+			continue
+		var d := _knife_reach(z, reach, max_angle)
+		if d >= 0.0 and d < best_d:
+			best_d = d
+			best = z
+	return best
+
+
+# horizontal distance to a zombie the knife can reach, -1 otherwise
+func _knife_reach(z: Zombie, reach: float, max_angle: float) -> float:
+	if z.state == Zombie.State.DEAD:
+		return -1.0
+	var facing := -global_basis.z
+	facing.y = 0.0
+	facing = facing.normalized()
+	var to: Vector3 = z.global_position - global_position
+	if absf(to.y) > 2.0:
+		return -1.0
+	to.y = 0.0
+	var d := to.length()
+	if d > reach or (d > 0.3 and facing.angle_to(to / d) > max_angle):
+		return -1.0
+	# nothing solid in between (no stabbing through walls or window boards)
+	var q := PhysicsRayQueryParameters3D.create(global_position + Vector3.UP, z.global_position + Vector3.UP * (0.4 if z.crawler else 1.0), 1)
+	if not get_world_3d().direct_space_state.intersect_ray(q).is_empty():
+		return -1.0
+	# a crawler lies at your feet: you have to aim down at it
+	if z.crawler:
+		var aim := -_camera.global_basis.z
+		var body: Vector3 = (z.global_position + Vector3.UP * 0.3 - _camera.global_position).normalized()
+		if aim.angle_to(body) > deg_to_rad(35):
+			return -1.0
+	return d
 
 
 # World at War knife: always 150 damage (one stab at round 1, two at round 2...)
@@ -230,7 +272,7 @@ func switch_weapon() -> void:
 func reload() -> void:
 	var w := weapon()
 	var s := Weapons.stats_of(w)
-	if _reloading > 0.0 or w["mag"] >= s["mag"] or w["reserve"] <= 0:
+	if _reloading > 0.0 or w["mag"] >= s["mag"] or w["reserve"] <= 0 or _viewmodel.slashing():
 		return
 	_reloading = s["reload"] * (Perks.SPEED_RELOAD if has_perk("speed") else 1.0)
 	if aiming:   # the reload leaves the sights straight away (no lowering animation)
@@ -283,7 +325,7 @@ func _physics_process(delta: float) -> void:
 		wants_fire = wants_fire or Input.is_action_pressed("fire")
 	else:
 		wants_fire = wants_fire or Input.is_action_just_pressed("fire")
-	if wants_fire and _cooldown <= 0.0 and _reloading <= 0.0:
+	if wants_fire and _cooldown <= 0.0 and _reloading <= 0.0 and not _viewmodel.slashing():
 		_fire(w, s)
 		if not s["auto"]:
 			fire_held = false

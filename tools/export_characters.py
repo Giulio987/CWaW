@@ -69,7 +69,10 @@ def add_animation(w, name, anim, joints):
         keys = [(t, p[b]) for t, p in zip(anim.times, anim.pos) if b in p]
         if keys:
             channel(node, "translation", [k[0] for k in keys], [k[1] * SCALE for k in keys], "VEC3")
-    channel(joints[0], "translation", anim.times, [p * SCALE for p in anim.root_pos], "VEC3")
+    # root: only the keyframes that set it (some zombie anims never key the root: it keeps its rest pose)
+    keys = [(t, p) for t, p, k in zip(anim.times, anim.root_pos, anim.root_keyed) if k]
+    if keys:
+        channel(joints[0], "translation", [k[0] for k in keys], [k[1] * SCALE for k in keys], "VEC3")
     w.j.setdefault("animations", []).append({"name": name, "samplers": samplers, "channels": channels})
 
 
@@ -97,7 +100,7 @@ def main(out_dir, paths):
                 except (ValueError, AssertionError) as e:
                     print(f"skip anim {r.name_hash:08x}: {e}")
                     continue
-                anims.setdefault(a.skel, []).append((r.name_hash, a, s.names if s else None))
+                anims.setdefault(a.skel, []).append((r.name_hash, a, s.names if s else None, group_dir(g.path)))
             if r.cls == C["CIwModel"]:
                 models[(group_dir(g.path), r.name_hash)] = r.body
     for g in groups:
@@ -137,11 +140,16 @@ def main(out_dir, paths):
                 if "mesh" in node:
                     node["skin"] = 0
             w.j["scenes"][0]["nodes"] += roots
-            for name, a, names in anims.get(skin.skel, []):
-                if names is None or names == skel.names:
+            # one animation per name: groups sharing a skeleton (the three dynamics groups of
+            # the box rig 65698795) hold the same animations, and Godot renamed the copies
+            # b83ef4012, b83ef4013; the copy from the skin's own group wins
+            added = set()
+            for name, a, names, adir in sorted(anims.get(skin.skel, []), key=lambda x: x[3] != gdir):
+                if (names is None or names == skel.names) and name not in added:
+                    added.add(name)
                     add_animation(w, f"{name:08x}", a, joints)
             w.write()
-            print(w.out_path, len(anims.get(skin.skel, [])), "anims")
+            print(w.out_path, len(added), "anims")
 
 
 if __name__ == "__main__":

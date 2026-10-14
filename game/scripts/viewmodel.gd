@@ -59,7 +59,7 @@ func set_weapon(name: String) -> void:
 	_attach.add_child(_weapon)
 	_no_shadows(_weapon)
 	preload("res://scripts/weapon_materials.gd").apply(_weapon)   # additive / cel-animated effects (bulb)
-	_weapon.visible = not drinking and _item == null
+	_weapon.visible = not drinking and _item == null and _slash < 0.0
 	var sk := _weapon.find_children("*", "Skeleton3D")
 	_wskel = sk[0] if sk.size() > 0 else null
 	_flash_bone = -1
@@ -81,7 +81,7 @@ func set_weapon(name: String) -> void:
 		for act in d:
 			var own: String = _anims[act][0] if _anims.has(act) else ""
 			_anims[act] = [own, d[act][1]]
-	if not drinking and _item == null:
+	if not drinking and _item == null and _slash < 0.0:
 		_play(_rest_action(), true)
 
 
@@ -92,7 +92,7 @@ func _no_shadows(n: Node) -> void:
 
 
 func _play(action: String, loop := false) -> float:
-	if drinking or _item != null:
+	if drinking or _item != null or _slash >= 0.0:
 		return 0.0
 	# The idle arms poses were paired by timing alone and some are wrong (FG42, PPSh):
 	# hold the first frame of the shoot animation instead, which always starts in the grip pose.
@@ -128,7 +128,7 @@ func _hold_first_frame(action: String) -> void:
 
 
 func _back_to_idle(action: String) -> void:
-	if drinking or _item != null:
+	if drinking or _item != null or _slash >= 0.0:
 		return
 	if not _arms_anim.is_playing() or _arms_anim.current_animation == "" or _arms_anim.current_animation == _anims.get(action, ["", ""])[1]:
 		_play(_rest_action(), true)
@@ -161,31 +161,31 @@ func slashing() -> bool:   # knife in progress (player movement cap MaxKnifeMove
 	return _slash >= 0.0
 
 
-# Knife slash: none of the original arms animations matches the iOS knife, so it is
-# procedural. The knife is a rigid child of the right hand, set at the start of the
-# slash so its tip points to the left of the screen; the arms then sweep left -> right.
-const KNIFE_MODEL := "78d2d941"   # knife_lod1 in the player group
-const GRIP_BONE := 15             # left hand (chain 13-14-15, fingers 16-21); the knife uses the left arm only
-const PALM := Vector3(0.011, -0.012, 0.004)  # inside the fist: palm centroid moved back towards the wrist and into the palm
-const HIDE_BONE := 4              # right upper arm: collapsed while knifing
-const KNIFE_GRIP := 0.05          # metres from the model origin (pommel end) to the middle of the handle
-const SLASH_TIME := 0.42
+# Knife, from the gun state machines (all 35 CIsAnimStateMachine in the player group have
+# the same two states):
+#   39 "Stabbing"  arms 73ede5dc (1000 ms), sound knife_stab
+#   40 "Slashing"  arms f1a640ed (633 ms), sound knife_slash
+# no weapon animation: the gun goes away (outputs knife / reticle / aimModel / aimfov on
+# entry) and the CItemKnife model sits in the left fist (arms bone 6, identity transform:
+# the models are made for it). Only the left arm chain (bones 4-12) moves; the right arm
+# (13-21) is out of view. At the end the state outputs switchGun: the player swaps back to
+# the gun (kiwi va 0x207d34 -> 0x2063f4 -> 0xfd5a4 -> 0x20c020, the weapon switch), which
+# comes up with its raise state 11 (the "pullout" pair). player.gd picks stab or slash.
+const KNIFE_MODEL := "78cd240c"   # CItemKnife "knife" (lod 78d2d941 not used in first person)
+const KNIFE_BONE := 6             # left hand (chain 4 upper arm - 5 forearm - 6 hand, fingers 7-12)
+const STAB_ARMS := "73ede5dc"
+const SLASH_ARMS := "f1a640ed"
+const KNIFE_BLEND := 0.0          # from the gun pose into the knife clip (0: straight cut, like the state machine)
 var _knife: Node3D
 var _hand: BoneAttachment3D
 var _skel: Skeleton3D
-var _slash := -1.0                # 0..1 while slashing
-var _knife_set := false
-# Bowie knife (bowie.gd): the same procedural slash with another model. _knife_fix turns
-# the model so its blade runs along +X like knife_lod1, _knife_grip replaces KNIFE_GRIP.
-var _knife_model := KNIFE_MODEL
-var _knife_fix := Basis.IDENTITY
-var _knife_grip := KNIFE_GRIP
+var _slash := -1.0                # >= 0 while the knife state runs
+var _slash_id := 0
+var _knife_model := KNIFE_MODEL   # Bowie (bowie_knife.gd) and shovel (wunder_grave.gd) swap it
 
 
-# Swaps the model held in the slash (CItemKnife model of the knife in use).
-func set_knife_model(model: String, fix := Basis.IDENTITY, grip := KNIFE_GRIP) -> void:
-	_knife_fix = fix
-	_knife_grip = grip
+# Swaps the model held in the knife states (CItemKnife model of the knife in use).
+func set_knife_model(model: String) -> void:
 	if model == _knife_model:
 		return
 	_knife_model = model
@@ -194,61 +194,72 @@ func set_knife_model(model: String, fix := Basis.IDENTITY, grip := KNIFE_GRIP) -
 		_knife = null
 
 
-func melee() -> void:
-	if _slash >= 0.0 or drinking or _item != null:
-		return
+# Plays the stab (or the slash, or any arms clip given by `anim`); returns its length,
+# 0 when the arms are busy with a bottle or a thrown item.
+func melee(stab := false, anim := "") -> float:
+	if drinking or _item != null:
+		return 0.0
 	if _knife == null:
 		if _hand == null:
 			_hand = BoneAttachment3D.new()
 			_skel.add_child(_hand)
-			_hand.bone_idx = GRIP_BONE
+			_hand.bone_idx = KNIFE_BONE
 		var models: Node = (load("res://assets/models/ingame/player.glb") as PackedScene).instantiate()
 		_knife = models.find_child(_knife_model, true, false)
 		if _knife:
 			_knife.get_parent().remove_child(_knife)
+			_knife.owner = null
 			_hand.add_child(_knife)
+			_knife.transform = Transform3D.IDENTITY
+			_no_shadows(_knife)
 			if _knife is GeometryInstance3D:
 				_knife.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				_knife.layers = LAYER
 		models.queue_free()
 	if _weapon:
 		_weapon.visible = false
 	if _knife:
-		_knife.visible = false  # shown once oriented on the first slash frame
-	_play("idle", true)
-	_skel.set_bone_pose_scale(HIDE_BONE, Vector3.ZERO)  # right arm out of view
+		_knife.visible = true
+	if _weapon_anim:
+		_weapon_anim.stop()
+	if anim == "":
+		anim = STAB_ARMS if stab else SLASH_ARMS
+	var length := 1.0 if stab else 0.633
+	if _arms_anim.has_animation(anim):
+		# no stop(): it would show the rest pose (arms out of view, the knife in front of
+		# the camera) for a frame; the first pose is applied at once
+		var a := _arms_anim.get_animation(anim)
+		a.loop_mode = Animation.LOOP_NONE
+		length = a.length
+		_arms_anim.play(anim, KNIFE_BLEND if _slash < 0.0 else 0.0)
+		if KNIFE_BLEND <= 0.0:
+			_arms_anim.seek(0.0, true)
 	_slash = 0.0
-	_knife_set = false
+	_slash_id += 1
+	var id := _slash_id
+	get_tree().create_timer(length, false).timeout.connect(func():
+		if id == _slash_id and _slash >= 0.0:
+			_end_melee())
+	return length
 
 
+# switchGun: back to the gun, raised like after a weapon switch (state 11, "pullout")
 func _end_melee() -> void:
-	_slash = -1.0
-	_skel.set_bone_pose_scale(HIDE_BONE, Vector3.ONE)
-	if _knife:
-		_knife.visible = false
+	_cancel_melee()
 	if _weapon:
 		_weapon.visible = true
+	if _anims.has("pullout"):
+		_play("pullout")
+	else:
+		_kick = -0.6
+		_play(_rest_action(), true)
 
 
-# Arms offset in camera space: wind-up on the left, quick sweep to the right.
-func _slash_offset() -> Transform3D:
-	var t := _slash
-	var sweep := smoothstep(0.1, 0.7, t)
-	var arc := sin(clampf(t / 0.85, 0.0, 1.0) * PI)
-	var pos := Vector3(lerpf(-0.40, 0.06, sweep), 0.15 + 0.03 * arc, -0.10 * arc)
-	var yaw := lerpf(0.4, -0.3, sweep)
-	return Transform3D(Basis.from_euler(Vector3(0.0, yaw, -0.2 * arc)), pos)
-
-
-func _orient_knife() -> void:
-	if _knife == null or _hand == null:
-		return
-	var cam := get_viewport().get_camera_3d()
-	var palm := _hand.global_transform * PALM
-	# model blade runs along +X: point it to the camera's left, edge slightly forward
-	var b := cam.global_basis * Basis(Vector3.UP, PI - 0.3) * Basis(Vector3.RIGHT, 0.25)
-	_knife.global_transform = Transform3D(b * _knife_fix, palm - b.x * _knife_grip)
-	_knife.visible = true
-	_knife_set = true
+func _cancel_melee() -> void:
+	_slash = -1.0
+	_slash_id += 1
+	if _knife:
+		_knife.visible = false
 
 
 # Perk-a-Cola: the weapon goes away, the arms drink from the bottle (the bottle
@@ -277,11 +288,7 @@ func drink(perk := "jugga") -> float:
 		var aps := _bottle.find_children("*", "AnimationPlayer")
 		_bottle_anim = aps[0] if aps.size() > 0 else null
 	_clear_item()
-	_slash = -1.0
-	if _skel:
-		_skel.set_bone_pose_scale(HIDE_BONE, Vector3.ONE)
-	if _knife:
-		_knife.visible = false
+	_cancel_melee()
 	drinking = true
 	if _weapon:
 		_weapon.visible = false
@@ -377,14 +384,8 @@ func _process(delta: float) -> void:
 	var dip: float = clamp(-_kick, 0.0, 1.0) * 0.25
 	var base := Transform3D(Basis(Vector3.UP, PI), Vector3(sin(_bob) * amp, abs(cos(_bob)) * amp - dip, max(_kick, 0.0) * 0.02))
 	if _slash >= 0.0:
-		_slash += delta / SLASH_TIME
-		if _slash >= 1.0:
-			_end_melee()
-		else:
-			base = _slash_offset() * base
+		_slash += delta
 	transform = base
-	if _slash >= 0.0 and not _knife_set:
-		_orient_knife()
 
 
 # Grenades and monkey bombs, from the arms state machine "base_arms" (CIsAnimStateMachine
@@ -419,11 +420,7 @@ func item_position() -> Variant:
 # Shows `item` in hand and plays the arms animation (held on its last frame).
 func hold_item(item: Node3D, arms_anim: String, item_anim := "") -> float:
 	_clear_item()
-	_slash = -1.0
-	if _skel:
-		_skel.set_bone_pose_scale(HIDE_BONE, Vector3.ONE)
-	if _knife:
-		_knife.visible = false
+	_cancel_melee()
 	if _weapon:
 		_weapon.visible = false
 	_item = item

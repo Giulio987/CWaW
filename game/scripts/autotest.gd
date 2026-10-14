@@ -244,7 +244,7 @@ func _knife_live() -> void:
 			game.round_number = int(args[args.find("--round") + 1])
 		p._melee_cooldown = 0.0
 		p.melee()
-		await get_tree().physics_frame
+		await get_tree().create_timer(Player.KNIFE_HIT_TIME + 0.05).timeout   # knifeDamage at 199 ms
 		var dist := p.global_position.distance_to(z.global_position)
 		var hit := z.health < before
 		hits += int(hit)

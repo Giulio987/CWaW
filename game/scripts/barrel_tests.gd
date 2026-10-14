@@ -134,6 +134,7 @@ func _barrel_test() -> void:
 	LifecycleTests._aim(p, k.global_position + Vector3.UP * 0.6)
 	p._melee_cooldown = 0.0
 	p.melee()
+	await get_tree().create_timer(Player.KNIFE_HIT_TIME + 0.05).timeout   # knifeDamage at 199 ms
 	_check(TAG, k.state == ExplosiveBarrels.Barrel.BURNING, "knife sets it on fire")
 	# a frag grenade blast
 	var g: ExplosiveBarrels.Barrel = x.barrels["BarrelExplosive19"]
