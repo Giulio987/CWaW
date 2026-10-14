@@ -42,7 +42,7 @@ const ITEM_GLB := {"6e3f6288": "res://assets/models/ingame/dynamics.glb"}
 const PLAYER_GLB := "res://assets/models/ingame/player.glb"
 # CSoundEmitterSpec of the flytrap sound entities: [spec, mode, range units]
 const EMITTERS := {
-	"flytrapSoundHit": [["88f2dfb4"], "loop", 1600],
+	"flytrapSoundHit": [["88f2dfb4", "3a700d20"], "loop", 1600],   # spec 88f2dfb4's "next": flytrap_loop
 	"flytrapSoundVox1": [["c97084a1"], "once", 1600],
 	"flytrapSoundVox2": [["c97084a2"], "once", 1600],
 	"flytrapSoundEnd": [["5fef1d91"], "once", 1600],

@@ -220,6 +220,8 @@ func start(level_name_: String) -> void:
 	player.died.connect(_on_player_died)
 	sfx.listener = player
 	RadioEggs.create(self)   # shootable radios/phone easter eggs (radio_egg.gd)
+	AmbientEmitters.create(self)   # positional ambient sound emitters (ambient_emitters.gd)
+	VoxLines.create(self)   # character lines: ammo, hits, close kills (vox_lines.gd)
 	Bridge.create(level)     # Der Riese drawbridge (bridge.gd)
 	FlyTrap.create(self)     # Der Riese fly trap easter egg (flytrap.gd)
 	DerrieseExtras.create(self)   # Der Riese start sequence, dropping doors, map boards (derriese_extras.gd)
@@ -253,6 +255,7 @@ func start(level_name_: String) -> void:
 # node caches kept in static vars are not freed with the scene
 func _exit_tree() -> void:
 	Grenade.release_cache()
+	Molotov.release_cache()
 	Powerup.release_cache()
 	PerkMachine.release_cache()
 

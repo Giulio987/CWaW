@@ -19,7 +19,7 @@ extends Node3D
 const TRIGGER_LAYER := 16   # layer 5: damage triggers, only bullets look for them
 
 # emitter -> [sound spec chain, mode, range units]. mode: "loop" (one-shot byte 0),
-# "once" (one-shot byte 1), "ambient" (mode byte 1: plays now and then while enabled).
+# "once" (one-shot byte 1), "ambient" (enabled byte 1: on from the start, loops like "loop").
 const EMITTERS := {
 	"nacht": {
 		# radio_start1..3: radio switch-on static (6534b79e) then the track
@@ -426,12 +426,12 @@ class Emitter extends Node3D:
 		if _step < chain.size():
 			_play_step()
 			return
-		_step = 0
 		match mode:
-			"loop":
+			"loop", "ambient":
+				# as CSoundEmitter (ambient_emitters.gd): the sound starts again when it ends;
+				# a chain (spec "next") goes on and the emitter keeps looping its last spec
+				_step = chain.size() - 1
 				_play_step()
-			"ambient":
-				_wait = randf_range(3.0, 9.0)
 			_:
 				enabled = false   # one-shot: done (DisableSoundEmitterOnSoundEnd)
 

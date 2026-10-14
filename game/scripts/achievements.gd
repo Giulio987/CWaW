@@ -41,9 +41,9 @@ const GROUP_TITLE := {"achievements": "Generali", "nacht_achievements": "Nacht d
 const FEET_50 := 15.24           # Eagle Eye: maxkilldistance 1524 cm
 const TEN_MILES := 16093.44      # Running Man (m)
 const SHOTGUNS := ["shotgun", "sawnoff", "trenchgun"]
-# need something the remake does not have (co-op, tutorial, teleporter kills)
+# need something the remake does not have (co-op, tutorial)
 # (magnum 73/78, Bouncing Betty 56, Bowie knife 101: betty.gd, bowie_knife.gd)
-const UNAVAILABLE := [8, 15, 35, 36, 37, 38, 55, 74, 94, 108]
+const UNAVAILABLE := [8, 15, 35, 36, 37, 38, 55, 74]
 
 # Italian names and descriptions, by list number
 const IT := {
@@ -427,6 +427,8 @@ func _evaluate() -> void:
 	_c(91, wave <= 6 and _s("session_teleporterslinked") >= 3)
 	_c(92, _s("session_teleportertimesused") >= 8)
 	_c(93, _s("session_packapunchused") >= 5)
+	# The Poetry of Steak: derriese.totalzombieteleKill >= 10 (pads' CSplashEffectSpec stat "teleKill", teleporter.gd)
+	_c(94, _o("derriese.totalzombieteleKill") >= 10)
 	_c(95, _s("session_packapunchused") >= 1)
 	_c(96, _s("upgradedatonce") >= 2)
 	_c(100, _o("derriese.totalzombiekilled") >= 500)
@@ -441,6 +443,10 @@ func _evaluate() -> void:
 		var held: Array = game.player.weapons.map(func(w): return String(w["name"]))
 		_c(78, "colt45" in held and "magnum" in held)
 	_c(101, _s("bowieKnife.session_totalzombiekilled") >= 40)
+	# Wunderkind (CAchievementWunder, any map): raygun, wunderwaffe and monkeybomb "purchased"
+	# (overall stats: box, wall, grave) and the four easter eggs 89, 48, 69, 1 unlocked
+	_c(108, _o("raygun.purchased") >= 1 and _o("wunderwaffe.purchased") >= 1 and _o("monkeybomb.purchased") >= 1
+		and [89, 48, 69, 1].all(func(k): return is_unlocked(k)))
 
 
 # progress of the counted ones, for the list: [current, target] or []
@@ -454,7 +460,7 @@ func progress(num: int) -> Array:
 		4: ["flamethrower.totaldamage", 50000], 49: ["global.revivesoda", 10], 50: ["global.juggernog", 10],
 		51: ["global.doubletaprootbeer", 10], 52: ["global.speedcola", 10], 53: ["verruckt.totalzombieelectroBarrierKill", 50],
 		66: ["knife.totalzombiekilled", 100], 76: ["shinonuma.totalzombiekilled", 200], 77: ["shinonuma.headlesszombie", 150],
-		86: ["global.totaldogkilled", 50], 100: ["derriese.totalzombiekilled", 500], 105: ["global.carpenter", 5],
+		86: ["global.totaldogkilled", 50], 100: ["derriese.totalzombiekilled", 500], 94: ["derriese.totalzombieteleKill", 10], 105: ["global.carpenter", 5],
 		30: ["global.distancecovered", TEN_MILES], 31: ["nacht.totalzombiebarrelkill", 20]}
 	if num == 106:
 		return [_o("monkeybomb.totalzombiekilled") + _o("monkeybomb.totaldogkilled"), 20]

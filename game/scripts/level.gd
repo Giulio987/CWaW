@@ -1180,6 +1180,8 @@ func _build_wall_buys() -> void:
 	for n in entities:
 		if "CActionBuyWeaponSpec" in entities[n]["components"] and not "CCabinetSpec" in entities[n]["components"]:
 			wall_buys.append({"name": n, "position": entity_transform(n).origin})
+	# Nacht's flamethrower cabinet (CCabinetSpec): doors that open on the first buy (flame_cabinet.gd)
+	interactables.append_array(FlameCabinet.create_all(self))
 
 
 static var _hidden_mat: StandardMaterial3D

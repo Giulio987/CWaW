@@ -30,6 +30,9 @@ func _ready() -> void:
 	_pages["main"] = _page("PAUSA", [
 		["Riprendi", close],
 		["Impostazioni", func(): _show("settings")],
+		# original ig_pause: localleaderboard, resetlevel (with ig_resetlevelyesno)
+		["Classifica locale", func(): add_child(ExtrasScreen.new("leaderboard", String(game.get("level_name")) if game else ""))],
+		["Ricomincia livello", func(): _show("restart")],
 		["Obiettivi", func(): add_child(AchievementsScreen.new())],   # achievements_screen.gd (closes itself)
 		["Modalità foto (debug)", _photo_mode],
 		["Torna al menu principale", func(): _show("confirm")],
@@ -39,6 +42,8 @@ func _ready() -> void:
 		["Sì", _to_main_menu],
 	], 44)
 	_pages["settings"] = _settings_page()
+	FrontendOptions.add_pages(self)   # restart / default settings / reset confirmations
+	UiSound.install()                 # menu_press on the buttons
 
 
 func is_open() -> bool:
@@ -241,6 +246,7 @@ func _settings_page() -> VBoxContainer:
 	_slider(grid, "Volume musica", "music_volume", 0.0, 1.0, 0.05, "pct")
 	# toggleDifficulty: Recruit / Regular, used from the next game (Game.difficulty)
 	_check(grid, "Difficoltà Recluta (prossima partita)", "recruit")
+	FrontendOptions.add_rows(self, grid, box)   # Detail Level, Auto-Pause, Default Settings, reset
 	var back := _button("Indietro", func():
 		Settings.save()
 		_show("main"))

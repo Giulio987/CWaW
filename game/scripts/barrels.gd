@@ -14,7 +14,8 @@
 #   CBarrelSpec: [df8f83fb] (CBarrelSpec::Serialise kiwi 0x10ea70: an array of entity specs).
 # CBarrel::HandleEvent (kiwi 0x201fe8): on the damage event (0x8002) that takes the health to
 #   0 it starts the life timer (kiwi 0x222bb0: 3000 ms) and spawns the CBarrelSpec entities on
-#   the barrel (df8f83fb: the fire model 0f74ae25 on top, 500 units up, sprite sheet 8x4),
+#   the barrel (df8f83fb: the fire model on top, 500 units up, material 53f7e924: additive,
+#   texture 0f74ae25, 32 cels 8 per row, celPeriod 1, the same 30 Hz tick as the level flames),
 #   and remembers who did it. CHealth (kiwi 0x2023c8) ignores damage once at 0, so it burns
 #   only once. When the timer ends the barrel dies (no destroyed model, it is gone) and the
 #   death action spawns the splash 3aa5fb63: CSplashEffectSpec 300 damage, type 2
@@ -33,10 +34,10 @@ const RADIUS := 150.0 * Level.UNITS          # collider cylinder
 const HEIGHT := 500.0 * Level.UNITS
 const HEALTH := 10.0                          # CHealthSpec
 const FUSE := 3.0                             # CLifeTimeSpec 3000 ms
-const FIRE_TEX := "0f74ae25"                  # fire model df8f83fb, 8 x 4 frames
+const FIRE_TEX := "0f74ae25"                  # fire model df8f83fb, material 53f7e924
 const FIRE_Y := 500.0 * Level.UNITS
 const FIRE_SIZE := Vector2(0.72, 1.2075)      # model 0f74ae25: x -0.36..0.36, y -0.32..0.8875
-const FIRE_FPS := 16.0
+const FIRE_CELS := 32                         # 53f7e924: 32 cels, 8 per row, celPeriod 1
 const SOUND := "barrel_explosion"             # 7ba2387d
 const SPLASH := {
 	"radius": 3.5, "max_damage": 300.0, "min_damage": 300.0, "kill_radius": 0.0, "los_free": 0.0,
@@ -121,6 +122,7 @@ func ignite(b: Barrel, by: Player, fuse := FUSE) -> void:
 func _explode(b: Barrel) -> void:
 	b.state = Barrel.GONE
 	var pos := b.global_position + Vector3.UP * 0.1
+	var xf := Transform3D(b.global_basis.orthonormalized(), b.global_position)
 	var by: Player = b.by if is_instance_valid(b.by) else null
 	barrels.erase(b.entity)
 	destroyed.append(b.entity)
@@ -128,7 +130,7 @@ func _explode(b: Barrel) -> void:
 	b.visible = false
 	_log(b.entity, "explode")
 	Sfx.instance.play_at(SOUND, pos + Vector3.UP * 0.5)
-	effect(game, pos)
+	effect(game, xf)
 	last_result = Explosion.blast(game, pos, by, SPLASH)
 	Achievements.event(level.level_name + ".totalbarrelkill")
 	if int(last_result.get("killed", 0)) > 0:
@@ -199,20 +201,26 @@ func _log(n: String, what: String) -> void:
 		print("[barrel] %.2f %s %s" % [_clock, n, what])
 
 
-# Explosion look: the splash entity's emitter (fireball a6ce831f), the two emitters spawned
-# with it (76b0fb36: sparks 1d980a04, cd49c3e1: smoke 81d92923) and a flash.
-static func effect(parent: Node, pos: Vector3) -> void:
-	var c := pos + Vector3.UP * 0.6
-	WeaponFx.flash(parent, c + Vector3.UP * 0.4, Color(1.0, 0.6, 0.28), 14.0, 12.0, 0.55)
-	WeaponFx.burst(parent, c, "a6ce831f", {"amount": 10, "lifetime": 0.7, "size": 1.5, "grow": 2.4,
-		"speed": 2.0, "dir": Vector3.UP, "spread": 70.0, "sphere": 0.4})
-	WeaponFx.pop(parent, c + Vector3.UP * 0.3, "a6ce831f", 2.2, 2.0, 0.45)
-	WeaponFx.burst(parent, c, "1d980a04", {"amount": 30, "lifetime": 1.0, "size": 0.12, "grow": 0.5,
-		"speed": 10.0, "dir": Vector3.UP, "spread": 80.0, "gravity": Vector3(0, -9.8, 0), "rotate": false})
-	WeaponFx.burst(parent, c + Vector3.UP * 0.5, "81d92923", {"amount": 12, "lifetime": 3.5, "size": 1.6,
-		"grow": 3.0, "speed": 1.2, "dir": Vector3.UP, "spread": 60.0, "gravity": Vector3(0, 0.3, 0),
-		"damping": 0.4, "additive": false, "color": Color(0.35, 0.33, 0.3, 0.75), "fade_in": 0.1,
-		"explosiveness": 0.7})
+# Explosion look: the original emitters (CIwGFXEmitterSpec, iw_emitter.gd) spawned on the
+# barrel's transform: the splash entity's fireball and the two death-spawn emitters. No
+# flash light and no extra sprite: the original has neither.
+const FX_FIREBALL := ["a6ce831f", true, 250.0, [10.0, 15.0], [500.0, 750.0],   # splash 3aa5fb63, mat b5a4bcab
+	[Vector3(-25, 25, -25), Vector3(25, 75, 25)], [Vector3(-3500, 7500, -3500), Vector3(3500, 15000, 3500)],
+	[400.0, 600.0], 500.0, [-440.0, 440.0]]
+const FX_SPARKS := ["1d980a04", true, 400.0, [10.0, 17.0], [1250.0, 2000.0],   # 76b0fb36, mat 88d7daba
+	[Vector3(-100, 50, -100), Vector3(100, 100, 100)], [Vector3(-10000, 3500, -10000), Vector3(10000, 5000, 10000)],
+	[50.0, 150.0], -500.0, [-264.0, 264.0]]
+const FX_SMOKE := ["81d92923", false, 1000.0, [100.0, 300.0], [1500.0, 3000.0],  # cd49c3e1, mat b690c2e5 (blend)
+	[Vector3(-80, 400, 40), Vector3(80, 550, 80)], [Vector3(-3000, 5000, 100), Vector3(3000, 7500, 3000)],
+	[1000.0, 1300.0], 500.0, [-176.0, 176.0]]
+const SMOKE_COLOR := Color(0.5, 0.5, 0.5)     # b690c2e5 diffuse 0x80
+
+
+static func effect(parent: Node, xf: Transform3D) -> void:
+	for f in [FX_FIREBALL, FX_SPARKS, FX_SMOKE]:
+		var c := IwEmitter.from_spec(f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9],
+			SMOKE_COLOR if f == FX_SMOKE else Color.WHITE)
+		IwEmitter.burst(parent, xf, c)
 
 
 # ------------------------------------------------------------------ save provider (save_game.gd)
@@ -269,7 +277,6 @@ class Barrel extends StaticBody3D:
 	var _fire: MeshInstance3D
 	var _fire_mat: StandardMaterial3D
 	var _light: OmniLight3D
-	var _frame := 0.0
 
 	func _ready() -> void:
 		collision_layer = 1 | RadioEggs.TRIGGER_LAYER
@@ -303,10 +310,10 @@ class Barrel extends StaticBody3D:
 		add_child(_light)
 		_light.position = Vector3.UP * (ExplosiveBarrels.FIRE_Y + 0.3)
 
-	func _process(delta: float) -> void:
+	func _process(_delta: float) -> void:
 		if _fire == null or state != BURNING:
 			return
-		_frame = fmod(_frame + delta * ExplosiveBarrels.FIRE_FPS, 32.0)
-		var f := int(_frame)
+		# same tick as the level's cel animations (Level._animate_cels): one cel per 30 Hz tick
+		var f := int(Time.get_ticks_msec() * Level.CEL_TICKS / 1000.0) % ExplosiveBarrels.FIRE_CELS
 		_fire_mat.uv1_offset = Vector3(float(f % 8) / 8.0, float(f / 8) / 4.0, 0.0)
 		_light.light_energy = 1.4 + randf() * 0.8

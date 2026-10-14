@@ -37,7 +37,7 @@ def names_dictionary():
             bases.add("sector_" + base.lower())
             bases.add(base.lower() + suffix)
             bases.add(base + suffix)
-    for base in bases:
+    for base in sorted(bases):  # sets iterate in random order (hash seed): keep names stable
         d.setdefault(iw_hash(base), base)
         for i in range(40):
             for v in (f"{base}{i}", f"{base}{i:02d}"):
@@ -121,6 +121,24 @@ def action_params(b, comps_hashes):
     return out
 
 
+def sound_emitters(b):
+    """CSoundEmitterSpec components (serialiser kiwi va 0x191e10; runtime CSoundEmitter update
+    va 0x148c74): u32 sound spec, u8 enabled at start, u8 disable when the sound ends (one-shot),
+    s32 vertical range in units (the volume fades to 0 at that height difference from the
+    listener), u8 distance attenuation (the spec's min/max distance), s32 number of random
+    variants ("<spec>%d"). Nested child entities carry their own: their name hash precedes them
+    (u32 CIwEntSpec, u32 name, 5 bytes)."""
+    out, key, i = [], struct.pack("<I", iw_hash("CSoundEmitterSpec")), b.find(struct.pack("<I", iw_hash("CSoundEmitterSpec")))
+    while i >= 0 and i + 19 <= len(b):
+        spec, start, once, rng, att, nvar = struct.unpack_from("<IBBiBi", b, i + 4)
+        e = {"spec": f"{spec:08x}", "start_on": start, "one_shot": once, "range": rng, "attenuate": att, "variants": nvar}
+        if i >= 13 and struct.unpack_from("<I", b, i - 13)[0] == iw_hash("CIwEntSpec"):
+            e["child"] = f"{struct.unpack_from('<I', b, i - 9)[0]:08x}"
+        out.append(e)
+        i = b.find(key, i + 1)
+    return out
+
+
 def main(out_path, group_path, *model_groups):
     d = names_dictionary()
     g = Group(group_path)
@@ -144,6 +162,7 @@ def main(out_path, group_path, *model_groups):
                      "components": comps, "models": [f"{h:08x}" for h in refs],
                      "transform": xf[-1] if xf else None, "children": xf[:-1], "size": len(b),
                      "params": action_params(b, comps), "colliders": colliders(b),
+                     **({"sound_emitters": sound_emitters(b)} if "CSoundEmitterSpec" in comps else {}),
                      "lod": lod_controller(b, models)})
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w") as f:

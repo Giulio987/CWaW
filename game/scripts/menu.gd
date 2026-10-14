@@ -17,10 +17,12 @@ var _selected := 0
 var _cards := []
 var _title: Label
 var _achievements: AchievementsScreen
+var extras: FrontendMenu   # music, map description, options/help/leaderboards/credits/about
 
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	UiSound.install()   # menu_press on the buttons (ui_sound.gd)
 	var bg := ColorRect.new()
 	bg.color = Color.BLACK
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -114,6 +116,7 @@ func _ready() -> void:
 	diff.offset_top = -124
 	diff.offset_bottom = -80
 	add_child(diff)
+	extras = FrontendMenu.attach(self)   # frontend_menu.gd
 	_select(0)
 
 
@@ -208,6 +211,8 @@ func _select(i: int) -> void:
 		var picked := j == i
 		c.modulate = Color.WHITE if picked else Color(0.55, 0.55, 0.55)
 		(c.get_child(1) as Label).add_theme_color_override("font_color", RED if picked else Color(0.85, 0.85, 0.85))
+	if extras:
+		extras.selected(MAPS[i]["id"])
 
 
 # achievement list over the menu (achievements_screen.gd)
@@ -220,7 +225,7 @@ func show_achievements() -> AchievementsScreen:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if _achievements != null:
+	if _achievements != null or (extras and extras.overlay_open()):
 		return
 	if event.is_action_pressed("ui_right"):
 		_select((_selected + 1) % MAPS.size())

@@ -62,6 +62,10 @@ func set_count(n: int) -> void:
 
 # Press / release (keyboard or touch).
 func set_held(down: bool) -> void:
+	var molotovs := MolotovBelt.of(player)   # the special slot on the molotovs (molotov_belt.gd)
+	if molotovs and molotovs.active() and not _held:
+		molotovs.set_held(down)
+		return
 	var monkeys := MonkeyBelt.of(player)   # monkey bombs take the grenade slot (monkey_belt.gd)
 	if monkeys and monkeys.active() and not _held:
 		monkeys.set_held(down)
@@ -217,6 +221,8 @@ func _build_hud() -> void:
 func _refresh() -> void:
 	if _icons == null:
 		return
+	var mb := MolotovBelt.of(player)
+	_icons.modulate = Color(1, 1, 1, 0.45 if mb and mb.selected else 1.0)   # not the selected special item
 	for c in _icons.get_children():
 		c.queue_free()
 	for i in count:

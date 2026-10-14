@@ -68,7 +68,13 @@ static func _shot(at: Node, game: Game) -> void:
 	await WT._snap(at, "wunder_1_arcs")
 	await WT._wait(at, 0.3)
 	await WT._snap(at, "wunder_2_arcs")
-	await WT._wait(at, 1.0)
+	await _fx_report(at, game, cluster)
+	var lightning := 0
+	for z in cluster:
+		if is_instance_valid(z) and z.state == Zombie.State.DEAD and String(z._anim.current_animation) in Zombie.LIGHTNING_DEATHS:
+			lightning += 1
+	print("[wunder] lightning deaths %d/%d %s" % [lightning, cluster.size(), "OK" if lightning == cluster.size() else "FAIL"])
+	await WT._snap(at, "wunder_2b_bodies")
 	var dc := _dead(cluster)
 	print("[wunder] cluster dead %d/%d far(4.6 m) %s points +%d %s" % [dc, cluster.size(), Zombie.State.keys()[far.state],
 		p.points - pts0, "OK" if dc == cluster.size() and far.state != Zombie.State.DEAD else "FAIL"])
@@ -85,10 +91,14 @@ static func _shot(at: Node, game: Game) -> void:
 	_fire(p)
 	# side view of the arcs
 	var cam := WT._side_cam(at, game, c + Vector3.UP * 1.0, side * 3.5 + Vector3.UP * 0.4 + fwd * 1.5)
-	await WT._wait(at, 0.45)
+	await WT._wait(at, 0.12)
 	await WT._snap(at, "wunder_3_side")
 	await WT._wait(at, 0.25)
 	await WT._snap(at, "wunder_3_side_b")
+	cam.global_position = c + Vector3.UP * 1.0 - fwd * 4.0 + Vector3.UP * 0.6   # from the far side, facing the player
+	cam.look_at(c + Vector3.UP * 1.0, Vector3.UP)
+	await WT._wait(at, 0.05)
+	await WT._snap(at, "wunder_3_back")
 	await WT._wait(at, 0.9)
 	cam.queue_free()
 	p.get_children().filter(func(n): return n is Camera3D)[0].make_current()
@@ -109,11 +119,41 @@ static func _shot(at: Node, game: Game) -> void:
 	print("[wunder] upgraded %s mag %d reserve %d %s" % [Weapons.display_of(w), s["mag"], s["reserve"],
 		"OK" if s["mag"] == 6 and s["reserve"] == 30 else "FAIL"])
 	WT._aim(p, c)
+	var mid := (p.global_position + c) * 0.5 + Vector3.UP * 1.3
+	var cam2 := WT._side_cam(at, game, mid, side * 2.5 + Vector3.UP * 0.3)
 	_fire(p)
+	for i in 3:
+		await at.get_tree().physics_frame
+	await WT._snap(at, "wunder_4_flight_side")
+	cam2.queue_free()
+	p.get_children().filter(func(n): return n is Camera3D)[0].make_current()
 	await WT._wait(at, 0.3)
 	await WT._snap(at, "wunder_4_upgraded")
 	await WT._wait(at, 1.5)
 	print("[wunder] upgraded: zombie at 2.2 m %s %s" % [Zombie.State.keys()[z2.state], "OK" if z2.state == Zombie.State.DEAD else "FAIL"])
+
+
+# victim effects right after the hit (CAttachEffect "wunderwaffe"): glows on Spine2 / Neck,
+# radial arcs, the sheet and the ground strips; no lights (the original has none)
+static func _fx_report(at: Node, game: Game, zs: Array) -> void:
+	var arcs := 0
+	var lights := 0
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 1000:   # arcs live 0.4 s from each hit: the most seen at once
+		arcs = maxi(arcs, game.find_children("WunderArc", "", true, false).size())
+		for w in game.get_children():
+			if w.get_script() == load("res://scripts/wunderwaffe.gd"):
+				lights = maxi(lights, w.find_children("*", "OmniLight3D", true, false).size())
+		await at.get_tree().process_frame
+	var glows := 0
+	var hit := 0
+	for z in zs:
+		if is_instance_valid(z) and z.state == Zombie.State.DEAD:
+			hit += 1
+			glows += z.find_children("Fx_*", "MeshInstance3D", true, false).size()
+	var loose := game.get_children().filter(func(n): return String(n.name).begins_with("Fx_")).size()
+	print("[wunder] victim fx: %d glows on %d bodies hit, up to %d arcs, %d sheets/strips left, %d lights %s" % [glows, hit, arcs,
+		loose, lights, "OK" if hit > 0 and glows == 2 * hit and arcs >= 1 and loose >= 1 and lights == 0 else "FAIL"])
 
 
 static func _grave(at: Node, game: Game) -> void:
@@ -144,6 +184,19 @@ static func _grave(at: Node, game: Game) -> void:
 	await WT._wait(at, 1.5)
 	print("[wunder] grave %d started %s message '%s' %s" % [g.number, g.started, game.hud.get("_msg").text,
 		"OK" if g.started and g.number >= 1 and g.number <= 9 else "FAIL"])
+	# SetUsingShovel(true): the knife becomes the 400-damage shovel, with its model in the slash
+	await WT._wait(at, 0.2)
+	var vm := p.get("_viewmodel") as Viewmodel
+	print("[wunder] shovel: damage %.0f model %s %s" % [p.knife_damage(null), vm.get("_knife_model"),
+		"OK" if is_equal_approx(p.knife_damage(null), 400.0) and vm.get("_knife_model") == "423ce590" else "FAIL"])
+	p.get("_camera").rotation.x = -0.1
+	for f in 4:
+		p.set("_melee_cooldown", 0.0)
+		if f == 0:
+			p.melee()
+		await WT._wait(at, 0.07)
+		await WT._snap(at, "wunder_shovel_%d" % f)
+	await WT._wait(at, 1.0)
 	# walk to the grave (teleport) and dig
 	var t: Transform3D = game.level.entity_transform("WunderwaffeGameTrigger%d" % g.number)
 	p.global_position = t.origin + Vector3.UP * 0.2 + t.basis.z * 1.0
@@ -158,7 +211,8 @@ static func _grave(at: Node, game: Game) -> void:
 	var has := p.weapons.any(func(w): return w["name"] == "wunderwaffe")
 	print("[wunder] dug: found %s has gun %s %s" % [g.found, has, "OK" if g.found and has else "FAIL"])
 	var st: Dictionary = g.save_state()
-	print("[wunder] save_state %s" % st)
+	print("[wunder] save_state %s %s" % [st, "OK" if st.get("shovel", false) else "FAIL"])
+	await _wunderkind(at, game)
 	# resume (WunderwaffeReload): a fresh state, then the saved one
 	g.load_state({"number": st["number"], "started": true, "found": false})
 	var closed_ok: bool = g.model("WunderwaffeGraveClosed%d" % g.number).visible and not g.model("WunderwaffeGraveOpen%d" % g.number).visible
@@ -181,3 +235,27 @@ static func _grave_views(at: Node, game: Game, o: Vector3, tag: String) -> void:
 		cam.queue_free()
 		i += 1
 	game.player.get_children().filter(func(n): return n is Camera3D)[0].make_current()
+
+
+# Wunderkind (108): "purchased" raygun / wunderwaffe / monkeybomb + achievements 89, 48, 69, 1
+static func _wunderkind(at: Node, game: Game) -> void:
+	var a := Achievements.instance
+	var p := game.player
+	if a == null:
+		print("[wunder] wunderkind: no Achievements FAIL")
+		return
+	print("[wunder] wunderkind available %s" % a.by_num[108]["available"])
+	for k in [108, 89, 48, 69, 1]:   # the test save file keeps earlier runs: start without them
+		a.unlocked.erase(String(a.by_num[k]["id"]))
+	p.give_weapon("raygun")
+	MonkeyBelt.give(p)
+	await WT._wait(at, 0.5)
+	var got := [a._o("raygun.purchased"), a._o("wunderwaffe.purchased"), a._o("monkeybomb.purchased")]
+	var before: bool = a.is_unlocked(108)
+	print("[wunder] wunderkind stats raygun/wunderwaffe/monkeybomb purchased %s, unlocked before the eggs %s %s" % [got, before,
+		"OK" if got.all(func(v): return v >= 1) and not before else "FAIL"])
+	for k in [89, 48, 69, 1]:   # the eggs of the other maps (unlocked there in a real game)
+		a.unlocked[String(a.by_num[k]["id"])] = 1
+	a._check = true
+	await WT._wait(at, 0.5)
+	print("[wunder] wunderkind after the eggs: %s %s" % [a.is_unlocked(108), "OK" if a.is_unlocked(108) else "FAIL"])

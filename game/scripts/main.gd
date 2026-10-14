@@ -10,7 +10,14 @@ func _ready() -> void:
 		# only real level names count; anything else (option values) is ignored
 		if DirAccess.dir_exists_absolute("res://assets/levels/" + a) and a != "":
 			level = a
+	if args.has("--frontend-test"):
+		FrontendTests.start(self, args, level)   # frontend_tests.gd
+		return
 	if level == "":
+		if args.is_empty():   # a plain start only: splash logos + intro video (intro.gd)
+			var intro := IntroSequence.new()
+			add_child(intro)
+			await intro.finished
 		_show_menu(args.has("--menu-shot"))
 		return
 	_start(level, args)
@@ -79,6 +86,8 @@ func _start(level: String, args: PackedStringArray) -> void:
 		AchievementTests.start(self, game, args)   # achievement_tests.gd
 	if args.has("--save-test") or args.has("--gameover-test") or args.has("--hud-test"):
 		SaveTests.start(self, game, args)   # save_tests.gd
+	if args.has("--boxlists-test"):
+		preload("res://scripts/box_tests.gd").start(self, game, args)   # box_tests.gd (box lists, kar98/carbine, molotov, cabinet)
 	if args.has("--item-test"):
 		preload("res://scripts/item_tests.gd").start(self, game, args)   # item_tests.gd (betty, bowie, magnum)
 	if args.has("--wave-test"):
@@ -87,6 +96,8 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_photo_test(game)
 	if args.has("--pap-test"):
 		_pap_test(game)
+	if args.has("--sound-test"):
+		preload("res://scripts/sound_tests.gd").start(self, game, args)   # sound_tests.gd (emitters, lines)
 	var shots := args.find("--shots")
 	if shots >= 0:
 		_weapon_shots(game, args[shots + 1].split(","))
@@ -896,9 +907,12 @@ func _trap_test(game: Game) -> void:
 		check.call(tr.state == Trap.State.ACTIVE and p.points == 10000 - tr.cost, "%s bought for %d" % [tr.entity, tr.cost])
 		# the switch animates first (ASM TurnOn + pull, 2.3 s): then the arcs come on
 		var t0 := Time.get_ticks_msec()
-		while not tr.armed and Time.get_ticks_msec() - t0 < 4000:
+		while not tr.armed and Time.get_ticks_msec() - t0 < 6000:
 			await get_tree().physics_frame
-		check.call(tr.armed and absf((Time.get_ticks_msec() - t0) / 1000.0 - (0.0 if tr.kind == "flogger" else 2.265)) < 0.3, "%s armed after %.2f s" % [tr.entity, (Time.get_ticks_msec() - t0) / 1000.0])
+		check.call(tr.armed and absf((Time.get_ticks_msec() - t0) / 1000.0 - (Trap.FLOG_TURN_ON + Trap.FLOG_DAMAGER_AT if tr.kind == "flogger" else 2.265)) < 0.3, "%s armed after %.2f s" % [tr.entity, (Time.get_ticks_msec() - t0) / 1000.0])
+		if tr.kind == "flogger":
+			var eng = tr._flog_loops.get(Trap.FLOG_LOOP_ENGINE)
+			check.call(eng != null and eng.enabled and eng.volume > 0.0, "%s engine loop on (volume %.2f)" % [tr.entity, eng.volume if eng else -1.0])
 		var at: Vector3 = tr.pivot + Vector3(1.5, 0, 0) if tr.kind == "flogger" else (tr.volumes[0] as AABB).get_center()
 		at.y = (tr.pivot.y - 0.5) if tr.kind == "flogger" else (tr.volumes[0] as AABB).position.y + 0.35
 		var z := Zombie.new()
@@ -925,14 +939,19 @@ func _trap_test(game: Game) -> void:
 		await _shot("trap_" + tr.entity)
 		tr._stop()
 		check.call(tr.state == Trap.State.COOLDOWN and tr.prompt(p) == "Trappola in ricarica", "%s cools down" % tr.entity)
-		var expect := (Trap.LEVER_BACK[1] + Trap.COOLDOWN + Trap.LEVER_TURN_OFF[1]) if tr.kind == "electric" else Trap.COOLDOWN + Trap.FLOGGER_TURN_OFF
+		var expect := (Trap.LEVER_BACK[1] + Trap.COOLDOWN + Trap.LEVER_TURN_OFF[1]) if tr.kind == "electric" else Trap.FLOG_SPIN_DOWN + Trap.COOLDOWN + Trap.FLOGGER_TURN_OFF
+		if tr.kind == "flogger":
+			check.call(tr._flog_loops.values().all(func(e): return not e.enabled), "%s loop sounds off after floggerEnd" % tr.entity)
 		check.call(absf(tr._timer - expect) < 0.05, "%s cooldown %.1f s (ASM: 30 s hold)" % [tr.entity, tr._timer])
 	print("[trap] %s (%d failures)" % ["OK" if fails[0] == 0 else "FAIL", fails[0]])
 	get_tree().quit()
 
 
-# Der Riese teleporters: power, link the three pads at the mainframe (the door
-# opens step by step), then teleport from pad A to the mainframe: -- derriese --tele-test
+# Der Riese teleporters (teleporter.gd): power, a link that times out (PA countdown,
+# fail), a link in time (pad PA, the pad fires once), the other two links (door, Pack-a-
+# Punch, "all active" PA), then a teleport from pad A for 1500 with a zombie on the pad
+# and one at the mainframe (splash kills), the 20 s cooldown and the power-up:
+# -- derriese --tele-test
 func _tele_test(game: Game) -> void:
 	var fails := [0]
 	var check := func(ok: bool, what: String) -> void:
@@ -945,57 +964,131 @@ func _tele_test(game: Game) -> void:
 	var p := game.player
 	p.health = 1e6
 	p.points = 100000
+	var logged := func(what: String) -> bool:
+		return net.log.any(func(e): return e[1] == what)
+	var log_time := func(what: String) -> float:
+		for e in net.log:
+			if e[1] == what:
+				return e[0]
+		return -1.0
 	check.call(net != null and net.pads.size() == 3, "3 teleporter pads")
+	check.call(absf(TeleporterNetwork.START_TIME - 1.98) < 0.001 and absf(TeleporterNetwork.REMATERIALIZE_TIME - 2.39) < 0.001 \
+		and TeleporterNetwork.COOLDOWN == 20.0 and TeleporterNetwork.LINK_TIME == 30.0, "timings: start 1.98 s, remat 2.39 s (console.bin), cooldown 20 s, link 30 s")
 	var go := func(pad) -> void:
 		p.global_position = pad.centre + Vector3.UP * 0.2
 		p.velocity = Vector3.ZERO
-	go.call(net.pads[0])
+	var a: TeleporterNetwork.Pad = net.pads[0]
+	go.call(a)
 	await get_tree().physics_frame
 	await get_tree().physics_frame
-	check.call(net.pads[0].prompt(p) == "Serve la corrente", "pad needs power: '%s'" % net.pads[0].prompt(p))
+	check.call(a.prompt(p) == "Serve la corrente", "pad needs power: '%s'" % a.prompt(p))
 	await _shot("tele_padA")
 	p.global_position = net.mainframe.centre + Vector3(0, 0.2, 0)
 	_face(p, lv.pack_a_punch.global_position + Vector3.UP)
 	await get_tree().create_timer(0.3).timeout
 	await _shot("tele_door_closed")
 	lv.turn_on_power()
-	for pad in net.pads:
+	# 1) link that times out (shortened to 3.5 s left: the last three PA numbers)
+	go.call(a)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	check.call(p._interaction_target() == a and a.prompt(p).begins_with("Premi E per collegare"), "pad A link prompt '%s'" % a.prompt(p))
+	a.interact(p)
+	check.call(a.state == "linking" and absf(a.link_timer - 30.0) < 0.1 and net.clock_visible() and logged.call("pa_beep_link_count_start"),
+		"pad A linking: 30 s, HUD clock, pa_beep_link_count_start")
+	check.call(net.pads[1].prompt(p) == "Collegamento in corso", "other pads while linking: '%s'" % net.pads[1].prompt(p))
+	await get_tree().create_timer(0.5).timeout
+	await _shot("tele_linking_clock")
+	a.link_timer = 3.5
+	a.count_index = TeleporterNetwork.COUNTER_MS.size() - 3
+	var t0: float = net._clock
+	await get_tree().create_timer(4.0).timeout
+	var c3: float = log_time.call("count 3") - t0
+	var c1: float = log_time.call("count 1") - t0
+	check.call(absf(c3 - 0.5) < 0.1 and absf(c1 - 2.5) < 0.1 and logged.call("count 2"), "PA countdown 3, 2, 1 at %.2f..%.2f s" % [c3, c1])
+	var fail_t: float = log_time.call("pa_beep_link_count_fail") - t0
+	check.call(a.state == "idle" and absf(fail_t - 3.5) < 0.1 and not net.clock_visible(), "time out at %.2f s: pa_beep_link_count_fail, pad unlinked, clock off" % fail_t)
+	# 2) link in time: the pad's PA, then it fires once (nobody on it)
+	go.call(a)
+	await get_tree().physics_frame
+	a.interact(p)
+	await get_tree().create_timer(1.0).timeout
+	go.call(net.mainframe)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	check.call(p._interaction_target() == net.mainframe, "mainframe target: '%s'" % net.mainframe.prompt(p))
+	net.mainframe.interact(p)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	check.call(a.state == "linked" and logged.call("pa_beep_pad_active_1") and a.incoming and a.splash, "pad A linked: pa_beep_pad_active_1, firing started")
+	check.call(net.pads[1].prompt(p) == "Temporaneamente non disponibile", "other pad while A starts: '%s'" % net.pads[1].prompt(p))
+	await get_tree().create_timer(TeleporterNetwork.START_TIME + 0.2).timeout
+	check.call(logged.call("fire TeleporterPeerA empty") and a.cooldown > 19.0 and a.prompt(p) == "Il teletrasporto si sta ricaricando", "A fires empty, cooling down %.1f s" % a.cooldown)
+	await get_tree().create_timer(TeleporterNetwork.REMATERIALIZE_TIME).timeout
+	check.call(logged.call("pa_beep_teleport_successful") and not a.splash, "rematerialized: pa_beep_teleport_successful, splash off")
+	# 3) the other two links
+	for pad in [net.pads[1], net.pads[2]]:
 		go.call(pad)
 		await get_tree().physics_frame
-		await get_tree().physics_frame
-		var t = p._interaction_target()
-		check.call(t == pad, "%s target: '%s'" % [pad.entity, pad.prompt(p)])
 		pad.interact(p)
-		check.call(pad.state == "linking", "%s activated" % pad.entity)
 		go.call(net.mainframe)
 		await get_tree().physics_frame
-		await get_tree().physics_frame
-		t = p._interaction_target()
-		check.call(t == net.mainframe, "mainframe target: '%s'" % net.mainframe.prompt(p))
 		net.mainframe.interact(p)
 		check.call(pad.state == "linked", "%s linked (%d)" % [pad.entity, net.linked_count()])
 		await get_tree().create_timer(2.2).timeout
 	check.call("packapunch" in game.open_areas and net._door_body == null, "third link opens the mainframe door and the Pack-a-Punch area")
+	await get_tree().create_timer(1.2).timeout
+	check.call(logged.call("pa_beep_pad_active_all"), "pa_beep_pad_active_all 3.2 s after the third link")
 	p.global_position = net.mainframe.centre + Vector3(0, 0.2, 0)
 	_face(p, lv.pack_a_punch.global_position + Vector3.UP)
 	await get_tree().create_timer(0.3).timeout
 	await _shot("tele_door_open")
-	go.call(net.pads[0])
+	# 4) teleport from A with zombies on the pad and at the mainframe
+	await get_tree().create_timer(maxf(a.cooldown, 0.0) + 0.2).timeout
+	go.call(a)
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	var before := p.points
-	check.call(net.pads[0].prompt(p).begins_with("Premi E per teletrasportarti"), "teleport prompt '%s'" % net.pads[0].prompt(p))
-	net.pads[0].interact(p)
-	await get_tree().create_timer(0.4).timeout
+	check.call(a.prompt(p).begins_with("Premi E per teletrasportarti"), "teleport prompt '%s'" % a.prompt(p))
+	var zs := []
+	for at in [a.centre + Vector3(0.8, 0, 0.3), net.mainframe.centre + Vector3(0.3, 0, 0)]:
+		var z := Zombie.new()
+		z.setup(at, lv.windows[0], p, 12000.0, false)
+		game.add_child(z)
+		z.state = Zombie.State.CHASE
+		z.set_physics_process(false)
+		zs.append(z)
+	var far := Zombie.new()
+	far.setup(a.centre + Vector3(6, 0, 6), lv.windows[0], p, 100, false)
+	game.add_child(far)
+	far.state = Zombie.State.CHASE
+	far.set_physics_process(false)
+	var kills0: int = net.tele_kills
+	var ach0: float = Achievements.instance.stats.get("derriese.totalzombieteleKill", 0) if Achievements.instance else 0.0
+	a.interact(p)
+	await get_tree().create_timer(1.2).timeout
+	check.call(zs.all(func(z): return z.state == Zombie.State.DEAD) and far.state != Zombie.State.DEAD, "splash (5000 every 0.1 s): zombies with 12000 health on the pad and at the mainframe dead, the far one alive")
+	var ach1: float = Achievements.instance.stats.get("derriese.totalzombieteleKill", 0) if Achievements.instance else 2.0
+	check.call(net.tele_kills - kills0 == 2 and ach1 - ach0 == 2, "teleKill stat +%d (%s)" % [net.tele_kills - kills0, ach1 - ach0])
+	check.call(p.global_position.distance_to(a.centre) < 2.0, "still on the pad before the firing")
+	await _shot("tele_start")
+	await get_tree().create_timer(TeleporterNetwork.START_TIME - 1.2 + 0.15).timeout
+	var dest := lv.entity_transform(TeleporterNetwork.DESTINATION).origin
+	check.call(p.global_position.distance_to(dest) < 0.5 and before - p.points == TeleporterNetwork.COST and logged.call("fire TeleporterPeerA teleported"),
+		"teleported to the mainframe (%s) for %d" % [p.global_position, before - p.points])
 	await _shot("tele_flash")
-	await get_tree().create_timer(1.0).timeout
-	check.call(p.global_position.distance_to(net.mainframe.centre) < 1.5 and before - p.points == TeleporterNetwork.COST, "teleported to the mainframe for %d (at %s)" % [before - p.points, p.global_position])
 	go.call(net.pads[1])
 	await get_tree().physics_frame
-	check.call(net.pads[1].prompt(p) == "Il teletrasporto si sta ricaricando", "cooldown: '%s'" % net.pads[1].prompt(p))
+	check.call(absf(a.cooldown - 19.85) < 0.3 and a.prompt(p) == "Il teletrasporto si sta ricaricando", "A cooldown %.2f s" % a.cooldown)
 	await get_tree().create_timer(8.0).timeout
 	var pick := game.get_children().any(func(n): return n is Powerup) or get_tree().get_nodes_in_group("zombies").any(func(n): return n is Dog)
-	check.call(pick, "power-up or dogs after the teleport")
+	check.call(pick, "power-up or dogs 8 s after the firing")
+	await get_tree().create_timer(a.cooldown - 0.3).timeout
+	check.call(a.cooldown > 0.0, "A still cooling down at 19.7 s")
+	await get_tree().create_timer(0.6).timeout
+	go.call(a)
+	await get_tree().physics_frame
+	check.call(a.cooldown <= 0.0 and a.prompt(p).begins_with("Premi E per teletrasportarti"), "A usable again after 20 s: '%s'" % a.prompt(p))
 	print("[tele] %s (%d failures)" % ["OK" if fails[0] == 0 else "FAIL", fails[0]])
 	get_tree().quit()
 

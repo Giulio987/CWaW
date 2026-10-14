@@ -37,6 +37,26 @@ const LEVER_COOL := "8d5f0abc"            # held for COOLDOWN
 const LEVER_TURN_OFF := ["09888375", 0.966]   # plays TRAP_READY_SOUND, "zapperOff"
 const TRAP_READY_SOUND := "f629ac13"
 const FLOGGER_TURN_OFF := 0.833           # flogger ASM b373d4cb TurnOff state
+# Flogger ASM b373d4cb (Lua outputs named by their hashes):
+#   READY -goodieInteract-> TurnOn 875 ms, plays 7653e0bc
+#   -> spin up 5977 ms: "floggerStart" (the 30 s, as zapperStart), plays 35e60ba8;
+#      at 2333 ms "floggerStartEngineLoopSound", at 3333 ms "floggerStartDamager" (kills)
+#   -> full force: "floggerStartWhooshLoopSound", until "floggerEnd"
+#   -> spin down 7533 ms: "floggerStopLoopSounds", plays 56f77680; at 2000 ms
+#      "floggerEndDamager" -> 30000 ms -> TurnOff 833 ms, plays f629ac13 -> READY.
+# The loops are the child emitters Trap_FloggerSound1 (eafe4b96, 0.46 s: the whoosh) and
+# Trap_FloggerSound2 (56f38a94, 1.9 s: the engine) of Trap_Flogger (which is which: estimate).
+const FLOG_TURN_ON := 0.875
+const FLOG_ENGINE_AT := 2.333
+const FLOG_DAMAGER_AT := 3.333
+const FLOG_SPIN_UP := 5.977
+const FLOG_SPIN_DOWN := 7.533
+const FLOG_DAMAGER_END := 2.0
+const FLOG_SOUND_TURN_ON := "7653e0bc"
+const FLOG_SOUND_START := "35e60ba8"
+const FLOG_SOUND_STOP := "56f77680"
+const FLOG_LOOP_WHOOSH := "eafe4b96"
+const FLOG_LOOP_ENGINE := "56f38a94"
 const FLOGGER_MODEL := "b373d4cb"
 const FLOGGER_RADIUS := 3.4
 
@@ -70,6 +90,8 @@ const GEN_DELAY := {"Trap_power": 4.3}
 # The door counts as open once it has left level.debris (bought, or freed by a resumed save).
 const FLOGGER_DOOR := "Link_DwnSt_FshSw_Trigger"
 var _door: Node = null
+var _flog_loops := {}         # spec -> AmbientEmitters.Emitter (flogger)
+var _flog_started := false
 
 
 func setup(level_: Level, entity_: String) -> void:
@@ -331,7 +353,40 @@ func activate() -> void:
 		if _lever and _lever.has_animation(LEVER_ACTIVE):
 			_lever.queue(LEVER_ACTIVE)
 	else:
-		_timer = ACTIVE_TIME
+		# TurnOn, then spin up: the 30 s run from "floggerStart", kills from the damager
+		_timer = FLOG_TURN_ON + ACTIVE_TIME
+		_arm_at = ACTIVE_TIME - FLOG_DAMAGER_AT
+		armed = false
+		_flog_started = false
+		Sfx.instance.play_at(FLOG_SOUND_TURN_ON, use_point + Vector3.UP)
+
+
+# Flogger sounds by the time since it was bought (ACTIVE)
+func _flogger_sounds() -> void:
+	var t := FLOG_TURN_ON + ACTIVE_TIME - _timer
+	if not _flog_started and t >= FLOG_TURN_ON:
+		_flog_started = true
+		if t < FLOG_TURN_ON + 1.0:   # not when a saved game resumes mid-run
+			Sfx.instance.play_at(FLOG_SOUND_START, pivot + Vector3.UP)
+	if t >= FLOG_TURN_ON + FLOG_ENGINE_AT:
+		_flog_loop(FLOG_LOOP_ENGINE, true)
+	if t >= FLOG_TURN_ON + FLOG_SPIN_UP:
+		_flog_loop(FLOG_LOOP_WHOOSH, true)
+
+
+func _flog_loop(spec: String, on: bool) -> void:
+	var em = _flog_loops.get(spec)
+	if em == null:
+		if not on:
+			return
+		em = AmbientEmitters.Emitter.make({"spec": spec, "range": 800, "attenuate": 1})
+		add_child(em)
+		em.global_position = pivot + Vector3.UP
+		_flog_loops[spec] = em
+	if on and not em.enabled:
+		em.enable()
+	elif not on and em.enabled:
+		em.disable()
 
 
 # the arcs come on ("zapperOn"): from now on the trap kills
@@ -384,7 +439,12 @@ func _stop() -> void:
 		if _lever and _lever.has_animation(LEVER_COOL):
 			_lever.queue(LEVER_COOL)
 	else:
-		_timer = COOLDOWN + FLOGGER_TURN_OFF
+		# floggerEnd: spin down (still killing for FLOG_DAMAGER_END), then the cooldown
+		_timer = FLOG_SPIN_DOWN + COOLDOWN + FLOGGER_TURN_OFF
+		armed = true
+		_flog_loop(FLOG_LOOP_WHOOSH, false)
+		_flog_loop(FLOG_LOOP_ENGINE, false)
+		Sfx.instance.play_at(FLOG_SOUND_STOP, pivot + Vector3.UP)
 	_turned_off = false
 	if _fx:
 		_fx.queue_free()
@@ -396,6 +456,7 @@ func _stop() -> void:
 func _turn_off() -> void:
 	_turned_off = true
 	if kind != "electric":
+		Sfx.instance.play_at(TRAP_READY_SOUND, use_point + Vector3.UP)   # flogger TurnOff
 		return
 	_lever_play(LEVER_TURN_OFF[0])
 	if _lever and _lever.has_animation(LEVER_READY):
@@ -412,16 +473,30 @@ func _physics_process(delta: float) -> void:
 			_turn_off()
 		if _timer <= 0.0:
 			state = State.IDLE
+		if armed and kind == "flogger":
+			var down := FLOG_SPIN_DOWN + COOLDOWN + FLOGGER_TURN_OFF - _timer
+			if _flogger:
+				_flogger.rotate_y(delta * 2.6 * maxf(0.0, 1.0 - down / FLOG_SPIN_DOWN))
+			if down >= FLOG_DAMAGER_END:
+				armed = false   # floggerEndDamager
+			else:
+				_kill_inside(delta)
 		return
 	if _timer <= 0.0:
 		_stop()
 		return
+	if kind == "flogger":
+		_flogger_sounds()
 	if not armed:
 		if _timer <= _arm_at:
 			_arm()
 		return
 	if _flogger:
 		_flogger.rotate_y(delta * 2.6)
+	_kill_inside(delta)
+
+
+func _kill_inside(delta: float) -> void:
 	_hurt_cd -= delta
 	var game := level.get_parent() as Game
 	for z in get_tree().get_nodes_in_group("zombies"):

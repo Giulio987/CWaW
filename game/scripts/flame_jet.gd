@@ -41,6 +41,9 @@ func pulse(upgraded: bool) -> void:
 	_flames.color = c
 	if not _flames.emitting:
 		_set_on(true)
+		# ignition (ae363ff4): the flamethrower fire states of the player ASM 76271987 play it
+		# with the fire loop when the trigger is pulled
+		Sfx.instance.play("ae363ff4", -6.0)
 	if _sound <= 0.0:
 		_sound = SOUND_EVERY
 		Sfx.instance.play("flamethrower_fire", -6.0, randf_range(0.97, 1.03))

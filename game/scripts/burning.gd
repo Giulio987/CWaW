@@ -70,7 +70,8 @@ func _process(delta: float) -> void:
 	if _tick <= 0.0:
 		_tick = TICK
 		var hurt := (dps if _jet > 0.0 else after_dps) * TICK
-		if by != null and is_instance_valid(by):
+		# hurt 0: flames only (the molotov's zombieonfires effect, molotov.gd)
+		if hurt > 0.0 and by != null and is_instance_valid(by):
 			Achievements.event("flamethrower.totaldamage", minf(hurt, maxf(zombie.health, 0.0)))
 			zombie.take_damage(hurt, false, by)
 	_jet -= delta

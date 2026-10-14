@@ -34,4 +34,6 @@ $PY -I tools/pair_arms.py > /dev/null
 $PY -I tools/sound_index.py "$A/sounds/index.json"
 $PY -I tools/achievements.py "$A/achievements.json"
 $PY -I tools/fonts.py extracted/main/fixed/fixed.group.bin "$A/fonts"
+$PY -I tools/frontend_text.py "$A/frontend_text.json"
+sh tools/intro_video.sh   # needs Godot (OGV writer); assets/videos/intro.ogv
 echo "assets rebuilt"

@@ -10,9 +10,22 @@ signal opened(debris: Debris)
 
 const JUMP_GUARD := 2.5  # metres added above the original volume
 const MIN_DEPTH := 0.4   # blockers made from the model's closed pose are at least this thick
+# The "playsound" of the "opening" state in each debris' CIsAnimStateMachine (the ASM the
+# entity references): c82c1277 (5.5 s rubble) for Nacht's sofas (7c9e04ce), Verrückt's
+# stair piles (7c9e04ce, 105ac577), Shi No Numa's no1 (eb0e6081) and Der Riese's G_gT /
+# L_lTop (e05f4ec5); a66ed71a for Nacht's door (7c95cc59); "dooropen" 312518cb for the other
+# Verrückt doors (c0eea7f4, 4db8e07b); 8737cbb6 for the other Shi No Numa gates; the other
+# Der Riese doors' ASMs play nothing. By level, then entity (default for the level).
+const OPEN_SOUND := {
+	"nacht": {"": "a66ed71a", "BackSofaTrigger": "c82c1277", "FrontSofaTrigger": "c82c1277"},
+	"verruckt": {"": "dooropen", "AmerDwn_AmerUp1_Trigger": "c82c1277", "GerSrt_GerUp1_Trigger": "c82c1277"},
+	"shinonuma": {"": "8737cbb6", "Link_StRm_SwRm_no1_Trigger": "c82c1277"},
+	"derriese": {"": "", "Link_G_gT_Trigger": "c82c1277", "Link_L_lTop_Trigger": "c82c1277"},
+}
 
 var cost := 1000
 var entity := ""
+var open_sound := ""   # played when bought (OPEN_SOUND)
 var _body: StaticBody3D
 var _anim: AnimationPlayer
 var _closed := ""
@@ -23,6 +36,11 @@ func setup(level: Level, name_: String) -> void:
 	entity = name_
 	var e: Dictionary = level.entities[name_]
 	cost = int(e["params"].get("cost", 1000))
+	var sounds: Dictionary = OPEN_SOUND.get(level.level_name, {"": "dooropen"})
+	open_sound = sounds.get(name_, sounds.get(""))
+	for k in sounds:
+		if String(k).to_lower() == name_.to_lower() and k != "":
+			open_sound = sounds[k]
 	var root := Level.flag_transform(e["transform"])
 	var extra := OS.get_cmdline_user_args().find("--debris-yaw-add")
 	if extra >= 0:

@@ -127,17 +127,17 @@ func _betty() -> void:
 	var side := Vector3(-fwd.z, 0, fwd.x)
 	await _shot("betty_planted_front", g + fwd * 1.2 + Vector3.UP * 0.5, g + Vector3.UP * 0.1)
 	await _shot("betty_planted_side", g + side * 1.2 + Vector3.UP * 0.5, g + Vector3.UP * 0.1)
-	# zombies: z1 walks onto it, z2 at 3.5 m (inside 4.25), z3 at 5.5 m (outside)
+	# zombies: z1 at 1.4 m then 1.1 m, z2 at 3.5 m (inside 4.25), z3 at 5.5 m (outside)
 	var d2 := _free_dir(g, 6.0)
-	var z1 := WeaponTests._zombie(game, g + d2 * 1.5, 900.0)
+	var z1 := WeaponTests._zombie(game, WeaponTests._floor(game, g + d2 * 1.4), 900.0)
 	var z2 := WeaponTests._zombie(game, WeaponTests._floor(game, g + d2 * 3.5), 900.0)
 	var z3 := WeaponTests._zombie(game, WeaponTests._floor(game, g + d2 * 5.5), 900.0)
 	await _wait(0.3)
-	_check(not b.triggered, "not triggered with zombies 1.5 m away")
-	z1.global_position = WeaponTests._floor(game, g + d2 * 0.5)
+	_check(not b.triggered, "not triggered with a zombie 1.4 m away (radii 300 + 180 units = 1.2 m)")
+	z1.global_position = WeaponTests._floor(game, g + d2 * 1.1)
 	await get_tree().physics_frame
 	await get_tree().physics_frame
-	_check(b.triggered, "triggered by a zombie at 0.5 m")
+	_check(b.triggered, "triggered by a zombie at 1.1 m")
 	await _wait(0.15)
 	if is_instance_valid(b):
 		await _shot("betty_bounce_side", g + side * 3.5 + Vector3.UP * 1.2, g + Vector3.UP * 0.9)

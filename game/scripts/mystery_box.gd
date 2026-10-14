@@ -34,9 +34,26 @@ const GONE_TIME := 2.0
 const FALL_TIME := 1.6       # falls at the new location (box_fall, then teddyland)
 const MEMORY := 2            # Script.Level.MysteryBoxMemorySize
 const OFFER_TIME := 12.0
-# weapons the box can give (models and stats exist for all of them)
-const POOL := ["raygun", "mg42", "browning", "bar", "ptrs", "stg44", "ppsh", "mp40", "type100", "thompson",
-	"garand", "g43", "trenchgun", "shotgun", "sawnoff", "springfield", "flamethrower", "fg42", "arisaka"]
+# What the box gives, per map: console.bin MysteryWeapons<map> (read by CMysteryBoxSpec,
+# kiwi 0xb82c0 "MysteryWeapons%s"), in the original order. Items: "betty" (BettyBelt),
+# "molotov" (MolotovBelt: MaxMolotovs 4 via CActionBuyMolotov), "monkeybomb" (MonkeyBelt).
+# MysteryUniqueWeaponsDerRiese = "flamethrower,wunderwaffe": one at a time among the
+# co-op players; in solo _pick already skips the guns the buyer holds.
+const MYSTERY_WEAPONS := {
+	"nacht": ["bar", "browning", "carbine", "flamethrower", "kar98", "magnum", "mp40", "raygun", "sawnoff",
+		"shotgun", "stg44", "thompson", "trenchgun", "fg42", "g43", "garand", "mg42", "ppsh", "ptrs", "springfield",
+		"molotov", "arisaka", "type100", "betty"],
+	"verruckt": ["bar", "browning", "carbine", "flamethrower", "kar98", "magnum", "mp40", "raygun", "sawnoff",
+		"shotgun", "stg44", "thompson", "trenchgun", "fg42", "g43", "garand", "mg42", "ppsh", "ptrs", "springfield",
+		"molotov", "arisaka", "type100"],
+	"shinonuma": ["bar", "browning", "carbine", "flamethrower", "kar98", "magnum", "mp40", "raygun", "sawnoff",
+		"shotgun", "stg44", "thompson", "trenchgun", "fg42", "g43", "garand", "mg42", "ppsh", "ptrs", "springfield",
+		"molotov", "arisaka", "type100", "wunderwaffe"],
+	"derriese": ["bar", "browning", "carbine", "flamethrower", "kar98", "magnum", "mp40", "raygun", "shotgun",
+		"stg44", "thompson", "trenchgun", "fg42", "g43", "garand", "mg42", "ppsh", "ptrs", "molotov", "type100",
+		"wunderwaffe", "monkeybomb"],
+}
+const MYSTERY_DEFAULT := "nacht"
 
 signal moved(entity: String)
 
@@ -202,8 +219,11 @@ func interact(player: Player) -> void:
 					MonkeyBelt.give(player)
 				elif offered == BettyBelt.ITEM:
 					BettyBelt.give(player)
+				elif offered == MolotovBelt.ITEM:
+					MolotovBelt.give(player)
 				else:
 					player.give_weapon(offered)
+					VoxLines.box_taken(offered)   # weapon_good (vox_lines.gd)
 					if offered == "wunderwaffe":
 						Sfx.instance.vox("weapon_tesla")   # player vox line for the Wunderwaffe
 				_close()
@@ -248,6 +268,7 @@ func _process(delta: float) -> void:
 				offered = _pick()
 				_show_weapon(offered)
 				state = State.OFFERED
+				VoxLines.box_shown(offered)   # weapon_bad (vox_lines.gd)
 				_timer = OFFER_TIME
 			elif _swap <= 0.0:
 				_swap = lerpf(0.08, 0.35, p)  # slows down like the original
@@ -300,6 +321,7 @@ func _teddy() -> void:
 	if _weapon:
 		_weapon.position = Vector3(0, 0.8, 0)
 	Sfx.instance.play_at("teddylaugh", global_position + Vector3.UP)
+	VoxLines.say("teddy")   # character line (vox_lines.gd)
 	if _buyer:
 		_buyer.add_points(COST)  # refunded
 	get_tree().create_timer(TEDDY_LAUGH, false).timeout.connect(_leave)
@@ -371,25 +393,22 @@ func _pick() -> String:
 	return choices.pick_random() if not choices.is_empty() else pool().pick_random()
 
 
-# Der Riese also has the Monkey Bomb in the box (CItemMonkey in the player group).
-# The Wunderwaffe DG-2 is in the box lists of Shi No Numa and Der Riese only (console.bin
-# MysteryWeaponsShinonuma / MysteryWeaponsDerriese end with "...,type100,wunderwaffe"; Nacht
-# and Verrückt do not have it). MysteryUniqueWeaponsDerRiese = "flamethrower,wunderwaffe":
-# one at a time in the game; solo, _pick already skips the guns the buyer holds.
+# The map's MysteryWeapons list (MYSTERY_WEAPONS); "monkeybomb" is MonkeyBomb.ITEM here.
+# Every map has the .357 Magnum, the Molotovs, the Kar98k and the M1 Carbine; the betty only
+# on Nacht (the other maps sell it on the wall, CActionBuyBettySpec); the Wunderwaffe on
+# Shi No Numa and Der Riese; Der Riese drops the sawed-off, Springfield and Arisaka and
+# adds the Monkey Bomb.
 func pool() -> Array:
-	var p: Array = POOL + [MonkeyBomb.ITEM] if level and level.level_name == "derriese" else POOL
-	if level and level.level_name in ["shinonuma", "derriese"]:
-		p = p + ["wunderwaffe"]
-	# .357 Magnum: in MysteryWeapons<map> of all four maps (console.bin); the Bouncing Betty
-	# is in the box only on Nacht (MysteryWeaponsNacht ends "...,type100,betty"), the other
-	# maps sell it on the wall (CActionBuyBettySpec)
-	p = p + ["magnum"]
-	if level and level.level_name == "nacht":
-		p = p + [BettyBelt.ITEM]
-	return p
+	var key: String = level.level_name if level and MYSTERY_WEAPONS.has(level.level_name) else MYSTERY_DEFAULT
+	return MYSTERY_WEAPONS[key].map(func(w): return MonkeyBomb.ITEM if w == "monkeybomb" else w)
 
 
 func _show_weapon(name: String) -> void:
+	if name == MolotovBelt.ITEM:
+		var mm := Molotov.model(Molotov.BOX_MODEL)
+		mm.scale = Vector3.ONE * 2.0
+		_show_model(mm)
+		return
 	if name == BettyBelt.ITEM:
 		var bm := Betty.model()
 		bm.scale = Vector3.ONE * 2.0

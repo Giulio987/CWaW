@@ -72,6 +72,10 @@ const RISE := "013110cb"
 const IDLE := "c98b07c8"
 const ATTACKS := ["fab4136a", "fb0fe592"]
 const DEATHS := ["20b0e521", "371f7199", "f037474d"]
+# electric damage (type 6: Wunderwaffe) picks one of ZombieNumDeathsLightning = 2 lightning
+# deaths: states 34 / 35 of the state machine f402afc2 (the normal deaths are 24-26)
+const LIGHTNING_DEATHS := ["407213ce", "407213cf"]
+var electric_death := false   # set by wunderwaffe.gd before the killing hit
 # crawlers ("zombies with half a body", CrawlingZombieMaxHealth in the original): legs
 # blown off, they drag themselves along with these animations
 const CRAWL := "4b64cfc6"         # root-motion partner a429672c: 0.52 m/s
@@ -530,6 +534,7 @@ func _physics_process(delta: float) -> void:
 				_hit_done = true
 				if global_position.distance_to(target.global_position) < ATTACK_RANGE + 0.4:
 					target.take_hit(ATTACK_DAMAGE)
+					VoxLines.hit_by_enemy()   # "been_hit" line (vox_lines.gd)
 			if _timer <= 0.0:
 				state = State.CHASE
 				_play(move_anim)
@@ -1149,6 +1154,10 @@ func _die(headshot: bool, knife := false) -> void:
 	collision_layer = 0
 	collision_mask = 1
 	var death: String = CRAWL_DEATH if crawler else DEATHS.pick_random()
+	if electric_death and not crawler:
+		var ld: String = LIGHTNING_DEATHS.pick_random()
+		if _anim.has_animation(ld):
+			death = ld
 	_anim.get_animation(death).loop_mode = Animation.LOOP_NONE  # stay down
 	_anim.play(death, 0.1)
 	killed.emit(self, headshot, knife)

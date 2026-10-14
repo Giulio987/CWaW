@@ -167,6 +167,7 @@ func _physics_process(delta: float) -> void:
 			_d_bit = true
 			if flat.length() < DOG_RANGE + 0.5 and absf(to.y) < 1.5:
 				target.take_hit(DOG_DAMAGE)
+				VoxLines.hit_by_enemy()   # "been_hit" line (vox_lines.gd)
 		if _d_timer <= 0.0:
 			_d_attacking = false
 			_d_play(_d_run)

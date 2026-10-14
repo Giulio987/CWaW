@@ -58,6 +58,7 @@ func set_weapon(name: String) -> void:
 	_weapon = (load(DIR + model + ".glb") as PackedScene).instantiate()
 	_attach.add_child(_weapon)
 	_no_shadows(_weapon)
+	preload("res://scripts/weapon_materials.gd").apply(_weapon)   # additive / cel-animated effects (bulb)
 	_weapon.visible = not drinking and _item == null
 	var sk := _weapon.find_children("*", "Skeleton3D")
 	_wskel = sk[0] if sk.size() > 0 else null

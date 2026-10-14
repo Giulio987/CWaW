@@ -23,6 +23,12 @@
               (player.group.bin ffed825c): u32 line hash, u32 priority, u32 chance %, u8 broadcast,
               u32 delay ms, u32 n, n x cstring "player%d_<line><k>". Kiwi 0x191f78 (va) picks a
               variant at random and formats it with the character index (0 in solo: 0x192184).
+- specs:      level (or "ingame") -> spec hash -> [vol_min, vol_max, pitch_min, pitch_max (4096 = 1),
+              dist_min, dist_max (units: full volume up to min, linear fade to 0 at max, kiwi va
+              0x227870), next spec (played after this one; an emitter keeps looping it) or ""].
+              CIwSoundSpec serialiser (kiwi va 0x12ed78): u32 hash, u16 flags, s16 vol min/max,
+              pan min/max, pitch min/max, s32 dist min/max, u32 0x2c, u32 0x30, u8, u32 group,
+              u32 next, u32 data.
 Music/jingles: begin_wave/start_game/end_wave come from waves.lua, the perk jingles are
 referenced by the BuyPerk* entities (perkjingle<perk>), the box sounds by the box
 CIsAnimStateMachine (350fb630); ALIAS gives them friendly names (round_start, jingle_jugga...).
@@ -110,7 +116,7 @@ def vox_table(b):
 
 def main(out):
     sounds, seqs, guns_raw, amb, per_group = {}, {}, {}, {}, {}
-    amb_levels, vox = {}, {}
+    amb_levels, vox, spec_params = {}, {}, {}
     for p in glob.glob(os.path.join(ROOT, "extracted/**/*.group.bin"), recursive=True):
         gd = group_dir(p)
         for r in Group(p).resources:
@@ -121,6 +127,12 @@ def main(out):
                 sounds[sh] = f"res://assets/sounds/{gd}/{dh:08x}.wav"
                 if gd.startswith("levels/"):
                     per_group.setdefault(sh, {})[gd.split("/")[1]] = sounds[sh]
+                if len(b) == 47:
+                    v = struct.unpack_from("<6h2i", b, 6)
+                    nxt = struct.unpack_from("<I", b, 39)[0]
+                    lv = gd.split("/")[1] if gd.startswith("levels/") else "ingame"
+                    spec_params.setdefault(lv, {})[f"{sh:08x}"] = [v[0], v[1], v[4], v[5], v[6], v[7],
+                                                                   f"{nxt:08x}" if nxt else ""]
             elif r.cls == iw_hash("CSoundSequence"):
                 (n,) = struct.unpack_from("<I", b, 1)
                 steps, delay = [], 0
@@ -176,7 +188,7 @@ def main(out):
             for lv, p in by_level.items():
                 levels.setdefault(lv, {})[f"{h:08x}"] = p
     index = {"sounds": {f"{h:08x}": p for h, p in sounds.items()}, "names": names, "sequences": seqs,
-             "guns": guns, "ambience": ambience, "levels": levels, "ambience_channels": amb_levels, "vox": vox}
+             "guns": guns, "ambience": ambience, "levels": levels, "ambience_channels": amb_levels, "vox": vox, "specs": spec_params}
     os.makedirs(os.path.dirname(out), exist_ok=True)
     json.dump(index, open(out, "w"), indent=1)
     print(out, len(sounds), "sounds,", len(names), "names,", len(seqs), "sequences,", len(guns), "guns,",

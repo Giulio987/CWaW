@@ -83,6 +83,10 @@ func _write_phase() -> void:
 		await _wait(0.2)
 		lv.teleporters.pads[0].state = "linked"
 		want["pad"] = lv.teleporters.pads[0].entity
+		# a pad cooling down and a link in progress (teleporter.gd save_state)
+		lv.teleporters.pads[0].cooldown = 15.0
+		lv.teleporters.call("_start_link", lv.teleporters.pads[1], game.player)
+		want["pad_linking"] = lv.teleporters.pads[1].entity
 	if not lv.boxes.is_empty():
 		var box: MysteryBox = lv.boxes[0]
 		var other: Array = box.locations.filter(func(n): return n != box.entity)
@@ -129,6 +133,10 @@ func _check_phase() -> void:
 		_check(lv.boxes[0].entity == want["box"], "box at %s" % lv.boxes[0].entity)
 	if want.has("pad"):
 		_check(lv.teleporters.pads.any(func(x): return x.entity == want["pad"] and x.state == "linked"), "pad %s linked" % want["pad"])
+	if want.has("pad_linking"):
+		var tp := lv.teleporters
+		_check(tp.log.any(func(e): return e[1] == "link_start " + want["pad_linking"]), "link of %s resumed" % want["pad_linking"])
+		_check(tp.pads[0].cooldown > 0.0, "pad %s cooldown restored (%.1f s)" % [tp.pads[0].entity, tp.pads[0].cooldown])
 	var pos: Array = want["pos"]
 	_check(p.global_position.distance_to(Vector3(pos[0], pos[1], pos[2])) < 1.0, "position")
 	_check(not SaveGame.load_save().is_empty(), "save kept while playing")

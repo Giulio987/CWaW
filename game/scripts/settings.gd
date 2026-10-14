@@ -7,6 +7,7 @@ class_name Settings
 extends RefCounted
 
 const PATH := "user://settings.cfg"
+const PATH_TEST := "user://settings_test.cfg"   # --frontend-test (frontend_tests.gd)
 const BUS_EFFECTS := "Effects"
 const BUS_MUSIC := "Music"
 const DEFAULTS := {
@@ -30,6 +31,10 @@ const DEFAULTS := {
 	"effects_volume": 1.0,
 	"music_volume": 0.8,
 	"recruit": false,      # difficulty Recruit instead of Regular (Game.difficulty, from the next game)
+	# se_performanceleveltoggle "High (slowest)" / "Medium" / "Low (fastest)": 0 / 1 / 2, see
+	# apply_detail(); cl_autopausetoggle "Auto-Pause": pause when the app loses focus
+	"detail_level": 0,
+	"auto_pause": true,
 }
 
 static var values := {}
@@ -42,7 +47,7 @@ static func ensure_loaded() -> void:
 	_loaded = true
 	values = DEFAULTS.duplicate()
 	var cfg := ConfigFile.new()
-	if cfg.load(PATH) == OK:
+	if cfg.load(path()) == OK:
 		for k in DEFAULTS:
 			values[k] = cfg.get_value("settings", k, DEFAULTS[k])
 		if int(cfg.get_value("settings", "fov_version", 1)) < 2:
@@ -51,6 +56,7 @@ static func ensure_loaded() -> void:
 	if not cfg.has_section_key("settings", "auto_aim"):
 		values["auto_aim"] = DisplayServer.is_touchscreen_available()
 	apply_audio()
+	apply_detail()
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree:
 		tree.node_added.connect(_on_node_added)
@@ -67,6 +73,8 @@ static func set_value(key: String, v: Variant) -> void:
 	values[key] = v
 	if key.ends_with("_volume"):
 		apply_audio()
+	elif key == "detail_level":
+		apply_detail()
 	elif key == "fov":
 		var tree := Engine.get_main_loop() as SceneTree
 		var cam := tree.root.get_viewport().get_camera_3d() if tree else null
@@ -78,7 +86,36 @@ static func save() -> void:
 	var cfg := ConfigFile.new()
 	for k in values:
 		cfg.set_value("settings", k, values[k])
-	cfg.save(PATH)
+	cfg.save(path())
+
+
+static func path() -> String:
+	return PATH_TEST if OS.get_cmdline_user_args().has("--frontend-test") else PATH
+
+
+# "Default Settings" (restoretofactory, kiwi 0x180694: the settings back to their defaults,
+# saved and applied); the difficulty is not a setting of that screen and stays.
+static func restore_defaults() -> void:
+	ensure_loaded()
+	var keep: bool = values.get("recruit", false)
+	values = DEFAULTS.duplicate()
+	values["recruit"] = keep
+	values["auto_aim"] = DisplayServer.is_touchscreen_available()   # as in ensure_loaded
+	apply_audio()
+	apply_detail()
+	set_value("fov", values["fov"])
+	save()
+
+
+# Detail Level (the original's performance toggle) mapped to Godot: 3D render scale and mesh
+# LOD threshold. High = full resolution (as before the option existed).
+static func apply_detail() -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null or tree.root == null:
+		return
+	var lvl := clampi(int(values.get("detail_level", 0)), 0, 2)
+	tree.root.scaling_3d_scale = [1.0, 0.8, 0.6][lvl]
+	tree.root.mesh_lod_threshold = [1.0, 2.0, 4.0][lvl]
 
 
 # --- shortcuts used by gameplay code

@@ -30,6 +30,8 @@ static func give(p: Player) -> MonkeyBelt:
 		b.player = p
 		p.add_child(b)
 	b.count = MAX
+	if Achievements.instance:   # "monkeybomb.purchased" (Wunderkind, achievements.gd)
+		Achievements.instance._add("monkeybomb.purchased")
 	b._refresh()
 	Sfx.instance.vox("weapon_monkey")   # player vox line (Sfx.vox: character 0 in solo)
 	return b

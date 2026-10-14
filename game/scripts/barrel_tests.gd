@@ -112,8 +112,14 @@ func _barrel_test() -> void:
 	_check(TAG, zs[2].state != Zombie.State.DEAD and zs[2].crawler, "tough zombie is a crawler")
 	_check(TAG, float(r.get("player", 0.0)) == 0.0, "player not hurt")
 	_check(TAG, is_instance_valid(b) and b.state == ExplosiveBarrels.Barrel.BURNING, "chain: neighbour burning")
-	await get_tree().create_timer(0.3).timeout
+	await get_tree().create_timer(0.1).timeout
+	await _views("barrel_fireball", c, dir)        # iw_emitter.gd: fireball + sparks
+	await get_tree().create_timer(0.2).timeout
 	await _shot("barrel_after_blast", c + dir * 4.0 + Vector3.UP * 1.6, c + Vector3.UP * 0.5)
+	await get_tree().create_timer(0.7).timeout
+	await _views("barrel_smoke", c, dir)
+	await _shot("barrel_smoke_far", c + dir * 7.0 + Vector3.UP * 2.0, c + Vector3.UP * 1.8)
+	await _shot("barrel_smoke_far_side", c + dir.cross(Vector3.UP).normalized() * 7.0 + Vector3.UP * 2.0, c + Vector3.UP * 1.8)
 	while is_instance_valid(b) and b.state == ExplosiveBarrels.Barrel.BURNING:
 		await get_tree().physics_frame
 	var ev := x.log.filter(func(e): return e[1] == "BarrelExplosive3" and e[2] == "explode")

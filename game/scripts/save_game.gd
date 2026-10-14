@@ -467,7 +467,7 @@ class Watcher:
 				if Achievements.instance and Achievements.instance.test_mode:
 					return
 				SaveGame.save(game)
-				if game.hud:
+				if game.hud and Settings.get_value("auto_pause"):   # option "Auto-Pause"
 					game.hud.open_pause()
 			NOTIFICATION_WM_CLOSE_REQUEST:
 				SaveGame.save(game)

@@ -147,6 +147,7 @@ func _give(player: Player) -> void:
 	state = State.IDLE
 	_weapon = {}
 	Sfx.instance.play("buy_success")
+	VoxLines.say("packapunch")   # character line (vox_lines.gd)
 	player.changed.emit()
 
 

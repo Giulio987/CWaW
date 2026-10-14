@@ -80,6 +80,7 @@ func _ready() -> void:
 	changed.connect(_sync_viewmodel)
 	add_child(GrenadeBelt.new())   # frag grenades (grenade_belt.gd)
 	add_child(BettyBelt.new())     # Bouncing Betties (betty_belt.gd)
+	add_child(MolotovBelt.new())   # Molotov cocktails from the mystery box (molotov_belt.gd)
 	add_child(BowieKnife.new())    # Bowie knife wall buy, Der Riese (bowie_knife.gd)
 	give_weapon("colt45")
 	max_health = base_health(false)
@@ -213,7 +214,10 @@ func melee() -> void:
 # World at War knife: always 150 damage (one stab at round 1, two at round 2...)
 func knife_damage(_z: Zombie) -> float:
 	var bowie := BowieKnife.damage_of(self)   # CItemKnife bowieKnife: 1000
-	return bowie if bowie > 0.0 else KNIFE_DAMAGE
+	if bowie > 0.0:
+		return bowie
+	var shovel := float(get_meta("shovel_damage", 0.0))   # CItemKnife shovel: 400 (wunder_grave.gd)
+	return shovel if shovel > 0.0 else KNIFE_DAMAGE
 
 
 func switch_weapon() -> void:
@@ -867,7 +871,7 @@ func interact() -> void:
 			add_points(-t.cost)
 			t.open()
 			Sfx.instance.play("buy_success")
-			Sfx.instance.play_at("dooropen", t.global_position)
+			Sfx.instance.play_at(t.open_sound, t.global_position)   # its ASM's sound (debris.gd)
 		else:
 			Sfx.instance.play("buy_fail")
 	elif t is Dictionary:

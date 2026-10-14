@@ -98,6 +98,7 @@ const DISPLAY := {
 	"mp40": "MP40", "stg44": "STG-44", "type100": "Type 100", "garand": "M1 Garand", "g43": "Gewehr 43", "ppsh": "PPSh-41",
 	"mg42": "MG42", "browning": "Browning M1919", "fg42": "FG42", "ptrs": "PTRS-41", "springfield": "Springfield", "raygun": "Ray Gun",
 	"wunderwaffe": "Wunderwaffe DG-2", "magnum": ".357 Magnum",
+	"arisaka": "Arisaka",
 }
 
 const LOC_HEAD := 0

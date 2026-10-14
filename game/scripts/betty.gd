@@ -2,8 +2,9 @@
 #   CItemBetty "betty" (player group): in-hand model 88149b6a (skinned, with the pin
 #     animations fae9e306 / 8a758615 / 8a7361c3), world spec list 7b8c2195 (CIwSpecList)
 #   world entity (7b8c2195): CIwRenderableModelSpec 881a509f (static betty),
-#     CIwColliderSpec + CIwVolumeCylinder radius 300 units (0.75 m), CTriggerVolumeSpec
-#     with target mask 0x4000 (zombies and dogs; the splash uses the same mask, so the
+#     CIwColliderSpec + CIwVolumeCylinder radius 300 units, HEIGHT 0, base (0,60,0) (serializer
+#     0x1286ec): a flat disc 60 units above the betty's origin (which is 55 units underground,
+#     so ~1.25 cm above the floor); CTriggerVolumeSpec with target mask 0x4000 (zombies and dogs; the splash uses the same mask, so the
 #     player neither triggers it nor is hurt), CActionBettySpec {0x14 = 1840, 0x18 = 640,
 #     0x1c = sound 106207e0}
 #   CActionBetty (kiwi code 0xc2634: triggered -> plays spec 0x1c at the betty and starts
@@ -13,14 +14,22 @@
 #     to everything within 1700 units = 4.25 m, line of sight beyond 2.4 m, damage type 2
 #     (explosive: legs off, explosion.gd)
 #   BettyPlantedDepth -55 units (kiwi 0x1aa400 default): planted 0.1375 m into the ground
-# No arming delay was found: the trigger volume is live as soon as the betty is planted.
+#   cylinder-cylinder test (kiwi 0x1ca348): the radii add up and the zombie / dog cylinder is
+#     r 180 h 750 units -> it fires when the horizontal centre distance is < 480 units (1.2 m)
+#     and the zombie's feet are between disc_y - 750 units (1.875 m) and disc_y
+#   MaxBettiesInWorld default 0x20: the CActionBetty pool is sized for 32 betties (kiwi
+#     0x12b67c); with 32 in the world planting fails and the betty stays in the belt (that
+#     last part is our choice: the pooled create just has no free slot)
+# No arming delay (confirmed): the trigger volume is live as soon as the betty is planted.
 class_name Betty
 extends Node3D
 
 const PLANTED_MODEL := "881a509f"       # CIwRenderableModelSpec of the betty entity
 const HAND_MODEL := "res://assets/characters/ingame/player/88149b6a.glb"   # CItemBetty model
-const TRIGGER_RADIUS := 0.75            # CIwVolumeCylinder 300 units
-const TRIGGER_HEIGHT := 1.2             # zombie feet within this height of the betty (inferred)
+const TRIGGER_RADIUS := 1.2             # CIwVolumeCylinder r 300 + zombie/dog cylinder r 180 units
+const TRIGGER_DISC_Y := 0.15            # disc base (0,60,0) above the betty origin (60 units)
+const TRIGGER_DEPTH := 1.875            # zombie/dog cylinder height 750 units: feet down to this below the disc
+const MAX_IN_WORLD := 32                # MaxBettiesInWorld default 0x20
 const RISE_SPEED := 4.6                 # CActionBettySpec 0x14 = 1840 units/s
 const RISE_HEIGHT := 1.6                # CActionBettySpec 0x18 = 640 units
 const PLANTED_DEPTH := 0.1375           # BettyPlantedDepth -55
@@ -92,6 +101,8 @@ static func plant(game: Node3D, at: Vector3, yaw: float, player: Player) -> Bett
 	var hit := space.intersect_ray(q)
 	if hit.is_empty():
 		return null
+	if game.get_tree().get_nodes_in_group("betties").size() >= MAX_IN_WORLD:
+		return null
 	var b := Betty.new()
 	b.by = player
 	game.add_child(b)
@@ -131,8 +142,9 @@ func _zombie_in_volume() -> bool:
 		var z := n as Zombie
 		if z == null or z.state == Zombie.State.DEAD:
 			continue
-		var d: Vector3 = z.global_position - _ground
-		if Vector2(d.x, d.z).length() < TRIGGER_RADIUS and absf(d.y) < TRIGGER_HEIGHT:
+		# flat disc at origin + 60 units; the zombie cylinder (feet up 750 units) must cross it
+		var d: Vector3 = z.global_position - (global_position + Vector3.UP * TRIGGER_DISC_Y)
+		if Vector2(d.x, d.z).length() < TRIGGER_RADIUS and d.y <= 0.0 and d.y >= -TRIGGER_DEPTH:
 			return true
 	return false
 

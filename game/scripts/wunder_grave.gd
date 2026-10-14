@@ -18,14 +18,23 @@
 # The grave models (closed 0f870b7a, open 4aea0959: CIwRenderableModelSpec of the
 # WunderwaffeGrave<Closed|Open><n> entities) are not in the static scene: they come from
 # the level's dynamics and are placed at the entities here.
-# SetUsingShovel turns the melee item into the "shovel" CItemKnife (400 damage against the
-# knife's 200 in the original); the remake keeps its knife (150) and only digs here.
+# SetUsingShovel turns the melee item into the "shovel" CItemKnife (player group 1bb91af6,
+# CItemKnife::Serialise va 0xfef00: damage 400 against the knife's 200, first-person model
+# 423ce590): here knife_damage 400 (player.gd, via the "shovel_damage" meta; the base knife
+# stays 150) and the shovel model in the remake's procedural slash (viewmodel.gd
+# set_knife_model, as the Bowie knife). Kept for the rest of the game (in the save).
 extends Node3D
 
 const COUNT := 9
 const START_DELAY := 2.0     # Game.Timeout(2000, "WunderwaffeStart")
 const MESSAGE_TIME := 8.0
 const DIG_RANGE := 1.6       # metres from the trigger entity (its collider size is not decoded)
+const SHOVEL_DAMAGE := 400.0 # CItemKnife "shovel"
+const SHOVEL_MODEL := "423ce590"
+# the model: handle up +Y, blade down -Y, 0.88 m in the export (the Bowie's layout): turned so
+# it runs along +X like knife_lod1 and scaled like the Bowie (bowie_knife.gd)
+const SHOVEL_SCALE := 0.5
+const SHOVEL_GRIP := 0.035
 
 var level: Level
 var number := 0              # Game.GetWunderWaffeNumber (0 = not drawn yet)
@@ -36,6 +45,7 @@ var _all_open := false       # Script.AllAreasUnlocked
 var _timer := -1.0
 var _poll := 0.0
 var _models := {}            # entity name -> Node3D
+var _shovel_on: Player       # player the shovel was given to
 
 
 func setup(level_: Level) -> void:
@@ -61,16 +71,16 @@ func save_key() -> String:
 
 
 func save_state() -> Dictionary:
-	return {"number": number, "started": started, "found": found}
+	return {"number": number, "started": started, "found": found, "shovel": shovel}
 
 
 func load_state(d: Dictionary) -> void:
 	number = int(d.get("number", 0))
 	found = bool(d.get("found", false))
 	started = bool(d.get("started", false)) and number > 0
+	shovel = bool(d.get("shovel", started))
 	if started:   # WunderwaffeReload
 		_all_open = true
-		shovel = true
 		_place()
 		_render("WunderwaffeGraveOpen%d" % number, found)
 		_render("WunderwaffeGraveClosed%d" % number, not found)
@@ -89,6 +99,8 @@ func all_areas_open() -> bool:   # Script.CheckAllAreasUnlocked
 
 
 func _process(delta: float) -> void:
+	if shovel:
+		_apply_shovel()
 	if _timer >= 0.0:
 		_timer -= delta
 		if _timer < 0.0:
@@ -112,9 +124,26 @@ func start(n := 0) -> void:
 	shovel = true
 	_place()
 	_render("WunderwaffeGraveClosed%d" % number, true)
+	_apply_shovel()
 	var g := game()
 	if g and g.hud:
 		g.hud.show_message("Tutte le aree sbloccate, ora trova la tomba!", MESSAGE_TIME)
+
+
+# Game.SetUsingShovel(true): the melee item becomes the shovel (once the player and its
+# view model exist; also after a resume)
+func _apply_shovel() -> void:
+	var g := game()
+	var p: Player = g.player if g else null
+	if p == null or p == _shovel_on:
+		return
+	var vm := p.get("_viewmodel") as Viewmodel
+	if vm == null:
+		return
+	p.set_meta("shovel_damage", SHOVEL_DAMAGE)
+	var fix := Basis(Vector3.RIGHT, PI / 2) * Basis(Vector3.BACK, PI / 2)
+	vm.set_knife_model(SHOVEL_MODEL, fix.scaled(Vector3.ONE * SHOVEL_SCALE), SHOVEL_GRIP)
+	_shovel_on = p
 
 
 func _place() -> void:
