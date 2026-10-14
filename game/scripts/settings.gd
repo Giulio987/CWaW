@@ -177,6 +177,8 @@ static func apply_audio() -> void:
 		var v: float = values.get(pair[1], 1.0)
 		AudioServer.set_bus_volume_db(i, linear_to_db(maxf(v, 0.0001)))
 		AudioServer.set_bus_mute(i, v <= 0.001)
+	if OS.get_environment("CODZ_MUTE") == "1":  # tools/run_godot.sh: silent test runs, players still advance
+		AudioServer.set_bus_mute(_bus("Master"), true)
 
 
 static func _on_node_added(n: Node) -> void:

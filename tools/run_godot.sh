@@ -18,7 +18,8 @@ trap 'rm -rf "$LOCK"' EXIT INT TERM
 MARK="$LOCK/start"
 touch "$MARK"
 LIMIT=$1; shift
-/Applications/Godot.app/Contents/MacOS/Godot --path "$ROOT/game" "$@" &
+# silent by default (Master bus muted in settings.gd); CODZ_MUTE=0 to hear it
+CODZ_MUTE=${CODZ_MUTE:-1} /Applications/Godot.app/Contents/MacOS/Godot --path "$ROOT/game" "$@" &
 PID=$!
 i=0
 while kill -0 $PID 2>/dev/null; do
