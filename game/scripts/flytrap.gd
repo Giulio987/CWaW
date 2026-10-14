@@ -75,6 +75,7 @@ static func create(game_: Game) -> FlyTrap:
 	var f := FlyTrap.new()
 	f.name = "FlyTrap"
 	f.game = game_
+	f.add_to_group(SaveGame.PROVIDER_GROUP)   # fly trap progress (save_game.gd)
 	f.level = lv
 	game_.add_child(f)
 	f._build()
@@ -278,6 +279,42 @@ func _process(delta: float) -> void:
 	var qa := Quaternion(0, a[2], 0, a[3]).normalized()
 	var qb := Quaternion(0, b[2], 0, b[3]).normalized()
 	_ring.global_transform = _ring_base * Transform3D(Basis(qa.slerp(qb, f)), pos)
+
+
+# ------------------------------------------------------------------ save provider (save_game.gd)
+
+func save_key() -> String:
+	return "flytrap"
+
+
+func save_state() -> Dictionary:
+	var got := []
+	if "items" in events:
+		for n in items:
+			var tn := "flyTrapItem%dTrigger" % n
+			if triggers.has(tn) and not triggers[tn].enabled:
+				got.append(n)
+	return {"activated": activated, "found_items": got}
+
+
+# Activated: the ring and its voices are skipped, the items are out at once and the
+# ones already found stay hidden.
+func load_state(d: Dictionary) -> void:
+	if not d.get("activated", false):
+		return
+	activated = true
+	if triggers.has(TRIGGER):
+		triggers[TRIGGER].enabled = false
+	_set_up()
+	found = 0
+	for n in d.get("found_items", []):
+		var i := int(n)
+		var tn := "flyTrapItem%dTrigger" % i
+		if triggers.has(tn):
+			triggers[tn].enabled = false
+		for o in items.get(i, []):
+			o.visible = false
+		found += 1
 
 
 # A shootable trigger (layer RadioEggs.TRIGGER_LAYER: player.gd's RadioEggs.bullet finds it)

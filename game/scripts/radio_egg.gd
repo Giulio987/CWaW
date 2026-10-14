@@ -85,6 +85,7 @@ static func create(game_: Game) -> RadioEggs:
 	var e := RadioEggs.new()
 	e.name = "RadioEggs"
 	e.game = game_
+	e.add_to_group(SaveGame.PROVIDER_GROUP)   # easter egg progress (save_game.gd)
 	e.level = game_.level
 	game_.add_child(e)
 	e._build()
@@ -310,6 +311,50 @@ func _start_radio(r: String) -> void:
 			_disable(String(start_radio_used[0]) + "Static1")
 			_disable(String(start_radio_used[1]) + "Static2")
 			_enable(r + "Message")
+
+
+# ------------------------------------------------------------------ save provider (save_game.gd)
+
+func save_key() -> String:
+	return "eggs"
+
+
+func save_state() -> Dictionary:
+	var off := []
+	for n in triggers:
+		if not triggers[n].enabled:
+			off.append(n)
+	return {"radio_channel": radio_channel, "telephone": telephone_state, "meteor": meteor_shot,
+		"start_radios": start_radio_used.duplicate(), "storage_radio": storage_radio_used,
+		"doctors_radio": doctors_radio_used, "spinal_columns": spinal_columns_used.duplicate(),
+		"triggers_off": off}
+
+
+# Progress comes back without replaying the one-shot lines; what loops keeps looping
+# (the Nacht radio track, the Shi No Numa start radios' static).
+func load_state(d: Dictionary) -> void:
+	for n in d.get("triggers_off", []):
+		_disable_trigger(String(n))
+	radio_channel = clampi(int(d.get("radio_channel", 1)), 1, 4)
+	if radio_channel > 1:
+		_enable("RadioTrack%d" % (radio_channel - 1))   # the track the last hit turned on
+	meteor_shot = bool(d.get("meteor", false))
+	storage_radio_used = bool(d.get("storage_radio", false))
+	doctors_radio_used = bool(d.get("doctors_radio", false))
+	spinal_columns_used = (d.get("spinal_columns", []) as Array).map(func(x): return String(x))
+	start_radio_used = (d.get("start_radios", []) as Array).map(func(x): return String(x))
+	if start_radio_used.size() == 1:
+		_enable(String(start_radio_used[0]) + "Static1")
+	elif start_radio_used.size() == 2:
+		_enable(String(start_radio_used[0]) + "Static1")
+		_enable(String(start_radio_used[1]) + "Static2")
+	var phone := String(d.get("telephone", "OffStart"))
+	if phone != "OffStart" or "TelephoneNoiseTrigger" in d.get("triggers_off", []):
+		# used (or ringing when saved): the song is not playing, the next hit plays it again
+		telephone_state = "Off"
+		_disable("TelephoneOffHookEmitter")
+		if triggers.has("TelephoneNoiseTrigger"):
+			triggers["TelephoneNoiseTrigger"].enabled = true
 
 
 # A shootable trigger volume (CHealthSpec + CTriggerDamageSpec): player.gd calls

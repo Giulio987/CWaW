@@ -76,6 +76,7 @@ func setup(level_: Level, entity_: String) -> void:
 	level = level_
 	entity = entity_
 	var e: Dictionary = level.entities[entity]
+	add_to_group(SaveGame.PROVIDER_GROUP)   # running / cooling down state (save_game.gd)
 	cost = int(e.get("params", {}).get("cost", 1000))
 	kind = "flogger" if "flogger" in entity.to_lower() else "electric"
 	var root := level.entity_transform(entity)
@@ -471,3 +472,30 @@ func _process(delta: float) -> void:
 			im.surface_add_vertex(p)
 			prev = p
 	im.surface_end()
+
+
+# ------------------------------------------------------------------ save provider (save_game.gd)
+
+func save_key() -> String:
+	return "trap:" + entity
+
+
+func save_state() -> Dictionary:
+	return {"state": State.keys()[state], "timer": _timer}
+
+
+# A running trap keeps running for the time it had left, a cooling one keeps cooling.
+func load_state(d: Dictionary) -> void:
+	var t := float(d.get("timer", 0.0))
+	match String(d.get("state", "IDLE")):
+		"ACTIVE":
+			if t > 0.0:
+				activate()
+				_timer = t
+		"COOLDOWN":
+			if t > 0.0:
+				state = State.COOLDOWN
+				armed = false
+				_turned_off = false
+				_timer = t
+				_lever_pose(LEVER_COOL)

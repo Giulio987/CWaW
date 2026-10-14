@@ -88,6 +88,7 @@ func _write_phase() -> void:
 		var other: Array = box.locations.filter(func(n): return n != box.entity)
 		if not other.is_empty():
 			box.call("_place", other[0])
+	await _write_extras(want)
 	await _wait(3.0)
 	_check(SaveGame.save(game), "saved")
 	var d := SaveGame.capture(game)
@@ -131,8 +132,129 @@ func _check_phase() -> void:
 	var pos: Array = want["pos"]
 	_check(p.global_position.distance_to(Vector3(pos[0], pos[1], pos[2])) < 1.0, "position")
 	_check(not SaveGame.load_save().is_empty(), "save kept while playing")
+	_check_extras(want)
 	await _shot("save_resume")
 	_finish()
+
+
+# Save version 2 parts: boards, power-ups and pickups, box counters, traps, easter
+# eggs, fly trap, teleporter count, zipline, achievement session, providers.
+func _write_extras(want: Dictionary) -> void:
+	var p := game.player
+	var lv := game.level
+	if not lv.windows.is_empty():
+		var w: Barricade = lv.windows[0]
+		w.tear_board()
+		w.tear_board()
+		want["window"] = String(w.name)
+		want["window_boards"] = w.boards
+	game._timers["doublepoints"] = 25.0
+	game.points_multiplier = 2
+	var spot := p.global_position + p.global_transform.basis.x * 6.0
+	game.spawn_powerup("maxammo", spot)
+	want["pickup"] = [spot.x, spot.y, spot.z]
+	if not lv.boxes.is_empty():
+		lv.boxes[0].used_count = 7
+	if lv.teleporters:
+		lv.teleporters.teleports = 3
+	var ach := Achievements.instance
+	if ach and ach.game == game:
+		ach.session["session_shotsfire"] = 42
+		want["ach_shots"] = 42
+	# traps: one running, one cooling down
+	if lv.traps.size() > 0:
+		lv.traps[0].activate()
+		lv.traps[0]._timer = 28.0
+		want["trap_active"] = lv.traps[0].entity
+	if lv.traps.size() > 1:
+		lv.traps[1].activate()
+		lv.traps[1].call("_stop")
+		want["trap_cool"] = lv.traps[1].entity
+	# easter eggs of the map
+	var eggs := game.get_node_or_null("RadioEggs") as RadioEggs
+	if eggs:
+		var hits := []
+		match lv.level_name:
+			"nacht":
+				hits = ["RadioVolume", "RadioVolume"]
+			"verruckt":
+				hits = ["DentistChairVolume"]
+			"derriese":
+				hits = ["Radio1Trigger", "SpinalColumn1Trigger", "SpinalColumn2Trigger"]
+			"shinonuma":
+				hits = ["StartRadio1Trigger", "MeteorTrigger", "StorageRadioTrigger"]
+		for h in hits:
+			if eggs.triggers.has(h):
+				eggs.trigger(h, p)
+		want["eggs"] = eggs.save_state()
+	# fly trap: activated, items out, one found (with a Pack-a-Punched gun)
+	var ft := game.get_node_or_null("FlyTrap") as FlyTrap
+	if ft:
+		ft.activated = true
+		ft.triggers[FlyTrap.TRIGGER].enabled = false
+		ft.call("_set_up")
+		var was: bool = p.weapon().get("upgraded", false)
+		p.weapon()["upgraded"] = true
+		ft.trigger("flyTrapItem2Trigger", p)
+		p.weapon()["upgraded"] = was
+		want["flytrap"] = ft.save_state()
+	if lv.zipline:
+		lv.zipline.switch_fired()   # car goes down empty
+		want["zip_bottom"] = true
+	await _wait(0.2)
+
+
+# equal once both went through JSON (numbers become floats)
+static func _same(a, b) -> bool:
+	return JSON.parse_string(JSON.stringify([a])) == JSON.parse_string(JSON.stringify([b]))
+
+
+func _check_extras(want: Dictionary) -> void:
+	var lv := game.level
+	if want.has("window"):
+		var ws := lv.windows.filter(func(w): return String(w.name) == want["window"])
+		var b: int = ws[0].boards if not ws.is_empty() else -1
+		# zombies may have torn more since the resume, never repaired
+		_check(b >= 0 and b <= int(want["window_boards"]), "window %s boards %d (saved %d)" % [want["window"], b, int(want["window_boards"])])
+	_check(game._timers.get("doublepoints", 0.0) > 0.0 and game.points_multiplier == 2,
+		"Double Points running (%.1f s left)" % game._timers.get("doublepoints", 0.0))
+	var at: Array = want["pickup"]
+	var spot := Vector3(at[0], at[1], at[2])
+	_check(game.get_children().any(func(n): return n is Powerup and n.kind == "maxammo" \
+		and n.global_position.distance_to(spot + Vector3.UP * 0.6) < 0.5 and float(n.get("_age")) > 0.0), "Max Ammo pickup on the ground")
+	if not lv.boxes.is_empty():
+		_check(lv.boxes[0].used_count == 7, "box used_count %d" % lv.boxes[0].used_count)
+	if lv.teleporters:
+		_check(lv.teleporters.teleports == 3, "teleports %d" % lv.teleporters.teleports)
+	if want.has("ach_shots"):
+		var s := float(Achievements.instance.session.get("session_shotsfire", 0))
+		_check(s >= 42.0, "achievement session shots %d" % s)
+	for k in ["trap_active", "trap_cool"]:
+		if want.has(k):
+			var ts := lv.traps.filter(func(t): return t.entity == want[k])
+			_check(not ts.is_empty() and ts[0].state != Trap.State.IDLE, "%s %s %s" % [k, want[k], Trap.State.keys()[ts[0].state] if not ts.is_empty() else "?"])
+	if want.has("eggs"):
+		var eggs := game.get_node_or_null("RadioEggs") as RadioEggs
+		var now := eggs.save_state() if eggs else {}
+		var w: Dictionary = want["eggs"]
+		for k in w:
+			_check(_same(now.get(k), w[k]), "egg %s = %s" % [k, now.get(k)])
+	if want.has("flytrap"):
+		var ft := game.get_node_or_null("FlyTrap") as FlyTrap
+		var now := ft.save_state() if ft else {}
+		_check(_same(now, want["flytrap"]), "fly trap %s" % now)
+		_check(ft != null and ft.triggers["flyTrapItem1Trigger"].enabled and not ft.triggers["flyTrapItem2Trigger"].enabled, "fly trap items out, item 2 found")
+	var ex := lv.nav_region.get_node_or_null("DerrieseExtras") as DerrieseExtras
+	if ex and want.has("pad"):
+		# map boards re-synced with the restored teleporters and box
+		_check(ex.tele_map_state == "tele1", "teleporter map board %s" % ex.tele_map_state)
+		var pose: String = DerrieseExtras.BOX_MAP_ANIMS.get(lv.boxes[0].entity, "")
+		_check(pose != "" and ex.mystery_map_pose == pose, "mystery box map board %s" % ex.mystery_map_pose)
+	if want.has("zip_bottom"):
+		var z := lv.zipline
+		_check(z.activated and z.car_state == Zipline.Car.AT_BOTTOM and z.car.global_position.distance_to((z.get("_b") as Transform3D).origin) < 0.1,
+			"zipline car at the bottom")
+	_check(int(SaveGame.load_save().get("version", 0)) == SaveGame.VERSION, "save version %d" % SaveGame.VERSION)
 
 
 func _hud_test() -> void:

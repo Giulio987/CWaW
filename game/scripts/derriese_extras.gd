@@ -77,6 +77,7 @@ var tele_map_state := ""     # "", "off", "tele", "tele1", ... (tests)
 var tele_map_blinking := false
 var mystery_map_pose := ""   # current pose (tests)
 var see_teleporter_done := false
+var resumed := false         # set by load_state (save_game.gd)
 var steam := []
 var start_log := []          # [seconds since begin, event] (tests)
 var _blink_t := 0.0
@@ -94,6 +95,7 @@ static func create(game_: Game) -> DerrieseExtras:
 	var x := DerrieseExtras.new()
 	x.name = "DerrieseExtras"
 	x.game = game_
+	x.add_to_group(SaveGame.PROVIDER_GROUP)   # resumed game (save_game.gd)
 	x.level = game_.level
 	game_.level.nav_region.add_child(x)   # the dropping doors' colliders shape the navmesh
 	x._build()
@@ -161,6 +163,8 @@ func _begin() -> void:
 	_log("doorClose")
 	if level.teleporters:
 		level.teleporters.close_at_start()
+	if resumed:
+		return   # derriese.lua Resume: no start announcements
 	await get_tree().create_timer(2.0, false).timeout
 	_log("pa_level_start")
 	Sfx.instance.play("pa_level_start")
@@ -363,3 +367,20 @@ func _process(delta: float) -> void:
 		if _see_timer <= 0.0:
 			_see_timer = 0.1
 			_check_see_teleporter()
+
+
+# ------------------------------------------------------------------ save provider (save_game.gd)
+# Doors, boards and arcs follow the power, the teleporters and the box (restored by
+# save_game.gd, which re-emits their signals); only the one-time look line is kept here.
+
+func save_key() -> String:
+	return "derriese_extras"
+
+
+func save_state() -> Dictionary:
+	return {"see_teleporter_done": see_teleporter_done}
+
+
+func load_state(d: Dictionary) -> void:
+	resumed = true
+	see_teleporter_done = bool(d.get("see_teleporter_done", see_teleporter_done))
