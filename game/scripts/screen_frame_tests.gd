@@ -177,7 +177,7 @@ func _game(level: String) -> void:
 	await _shot("pause")
 	var opt: Button = null
 	for n in pm._pages["main"].find_children("*", "Button", true, false):
-		if (n as Button).text == "Opzioni":
+		if (n as Button).text == Lang.t("Opzioni"):
 			opt = n
 	await _click(opt, true)
 	await _wait(0.2)

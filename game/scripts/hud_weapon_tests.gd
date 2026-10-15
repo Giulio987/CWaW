@@ -122,7 +122,22 @@ static func run(at: Node) -> void:
 		p.give_weapon("kar98")
 		var two := box.prompt(p)
 		box.state = st
-		check.call(one.begins_with("Premi E per prendere") and two.begins_with("Premi E per scambiare le armi"), "box prompts '%s' / '%s'" % [one, two])
+		var mp40 := Weapons.display("mp40")
+		check.call(one == Lang.prompt("prendere %s" % mp40, "Take %s" % mp40)
+			and two == Lang.prompt("scambiare le armi: %s" % mp40, Lang.resolve("#0b5844dc", "Trade Weapons") + ": " + mp40),
+			"box prompts '%s' / '%s'" % [one, two])
+	# a wall buy prompt in the HUD (lang.gd: the key on a Mac, the hand with touch controls)
+	if not game.wall_buys.is_empty():
+		var wb: Dictionary = game.wall_buys[0]
+		var wpos: Vector3 = wb["position"]
+		var back_to := p.global_position
+		p.global_position = Vector3(wpos.x, p.global_position.y, wpos.z)
+		await at.get_tree().create_timer(0.3).timeout
+		var key := "E" in p.prompt.substr(0, 20)
+		check.call(p.prompt != "" and key != Lang.touch(), "wall buy prompt '%s'" % p.prompt.replace("\n", " | "))
+		await _snap(at, "hudw_prompt")
+		p.global_position = back_to
+		await at.get_tree().create_timer(0.2).timeout
 	# layout of the original frames: points / perks / round top left, power-ups top,
 	# message at 42 %, prompt at the top
 	for k in ["jugga", "speed", "dbtap"]:

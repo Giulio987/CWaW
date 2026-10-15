@@ -71,7 +71,7 @@ func _ready() -> void:
 	else:
 		FrontendArt.background(root, Color(0.5, 0.5, 0.55))
 		FrontendArt.blood_splats(root, s, 11)
-	FrontendArt.title_bar(root, s, "Obiettivi")
+	FrontendArt.title_bar(root, s, Lang.t("Obiettivi"))
 	var vw := root.get_viewport().get_visible_rect().size.x / s
 	var list_w := vw - 202.0
 
@@ -81,7 +81,7 @@ func _ready() -> void:
 	FrontendArt.place(tabs, s, 8, 50, list_w - 8, 20)
 	for t in TABS:
 		var b := Button.new()
-		b.text = t[0]
+		b.text = Lang.maybe(t[0])
 		b.toggle_mode = true
 		b.add_theme_font_override("font", UiArt.font())
 		b.add_theme_font_size_override("font_size", int(9 * s))
@@ -113,9 +113,9 @@ func _ready() -> void:
 	var gap := Control.new()
 	gap.custom_minimum_size = Vector2(0, 4 * s)
 	info.add_child(gap)
-	_info_label(info, 10, FrontendArt.RED_TEXT, true).text = "Punteggio:"
+	_info_label(info, 10, FrontendArt.RED_TEXT, true).text = Lang.t("Punteggio:")
 	_d_score = _info_label(info, 11, Color.WHITE, true)
-	_info_label(info, 10, FrontendArt.RED_TEXT, true).text = "Completamento:"
+	_info_label(info, 10, FrontendArt.RED_TEXT, true).text = Lang.t("Completamento:")
 	_d_complete = _info_label(info, 11, Color.WHITE, true)
 	_stamp = FrontendArt.image(root, FrontendArt.tex(FrontendArt.TEX + FrontendArt.STAMP_COMPLETED + ".png"))
 	FrontendArt.place(_stamp, s, 0, 0, 256, 128, 2, 0)
@@ -134,9 +134,9 @@ func _ready() -> void:
 	totals.add_theme_constant_override("v_separation", 0)
 	root.add_child(totals)
 	FrontendArt.place(totals, s, -5, -4, 190, 40, 2, 2)
-	_info_label(totals, 10, Color.BLACK, true).text = "Totale"
+	_info_label(totals, 10, Color.BLACK, true).text = Lang.t("Totale")
 	_total = _info_label(totals, 10, Color.WHITE, true)
-	_info_label(totals, 10, Color.BLACK, true).text = "Completati"
+	_info_label(totals, 10, Color.BLACK, true).text = Lang.t("Completati")
 	_completed = _info_label(totals, 10, Color.WHITE, true)
 	for l in [_total, _completed]:
 		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -221,7 +221,7 @@ func _fill() -> void:
 
 func _row(e: Dictionary, done: bool) -> Button:
 	var s := _s
-	var b := FrontendArt.row(String(e["it_name"]), s, show_entry.bind(String(e["id"])), 11.0)
+	var b := FrontendArt.row(Achievements.title_of(e), s, show_entry.bind(String(e["id"])), 11.0)
 	b.custom_minimum_size = Vector2(0, ROW_H * s)
 	b.clip_text = true
 	for k in ["normal", "disabled", "hover", "pressed", "focus", "hover_pressed"]:
@@ -269,13 +269,13 @@ func show_entry(id: String) -> void:
 		return
 	var e: Dictionary = a.by_id[id.to_lower()]
 	var done := a.unlocked.has(String(e["id"]))
-	_d_name.text = e["it_name"]
-	var text: String = e["it_desc"]
+	_d_name.text = Achievements.title_of(e)
+	var text: String = Achievements.desc_of(e)
 	if not e["available"]:
-		text += "\n(non disponibile in questa versione)"
+		text += "\n" + Lang.t("(non disponibile in questa versione)")
 	if done:
 		var when := Time.get_datetime_dict_from_unix_time(int(a.unlocked[String(e["id"])]) + _tz())
-		text += "\nSbloccato il %02d/%02d/%d" % [when["day"], when["month"], when["year"]]
+		text += "\n" + Lang.t("Sbloccato il %02d/%02d/%d") % [when["day"], when["month"], when["year"]]
 	_d_desc.text = text
 	_d_score.text = str(e["points"])
 	var pr := a.progress(e["num"])

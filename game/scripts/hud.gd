@@ -75,6 +75,11 @@ func bind(g: Game) -> void:
 	_msg = _label(int(22 * UI_SCALE), Color.WHITE, Control.PRESET_TOP_WIDE, Vector2.ZERO)
 	_msg.add_theme_font_override("font", UiArt.font())
 	_msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# long messages (both languages, narrow screens) wrap instead of leaving the screen
+	for l in [_msg, _prompt]:
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.offset_left = 24
+		l.offset_right = -24
 	_reticle = AimingReticle.new()
 	_reticle.player = g.player
 	add_child(_reticle)

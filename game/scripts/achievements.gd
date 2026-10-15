@@ -45,6 +45,16 @@ const SHOTGUNS := ["shotgun", "sawnoff", "trenchgun"]
 # (magnum 73/78, Bouncing Betty 56, Bowie knife 101: betty.gd, bowie_knife.gd)
 const UNAVAILABLE := [8, 15, 35, 36, 37, 38, 55, 74]
 
+# Name / description of an entry in the current language: Italian from IT below, English the
+# original's (lang.gd).
+static func title_of(e: Dictionary) -> String:
+	return String(e["en_name"] if Lang.is_en() else e["it_name"])
+
+
+static func desc_of(e: Dictionary) -> String:
+	return String(e["en_desc"] if Lang.is_en() else e["it_desc"])
+
+
 # Italian names and descriptions, by list number
 const IT := {
 	1: ["Silenzio radio?", "Colpisci la radio in Nacht der Untoten"],
@@ -251,6 +261,8 @@ func _load_data() -> void:
 		e["map"] = GROUP_MAP.get(e["group"], "")
 		e["it_name"] = IT.get(n, [e["name"], e["desc"]])[0]
 		e["it_desc"] = IT.get(n, [e["name"], e["desc"]])[1]
+		e["en_name"] = String(e["name"])   # the original English name/description (achievements.json)
+		e["en_desc"] = String(e["desc"])
 		e["available"] = not n in UNAVAILABLE
 		by_num[n] = e
 		by_id[String(e["id"]).to_lower()] = e
@@ -881,19 +893,19 @@ func _show_popup(e: Dictionary) -> void:
 	col.add_theme_constant_override("separation", 0)
 	row.add_child(col)
 	var title := Label.new()
-	title.text = "Obiettivo sbloccato"
+	title.text = Lang.t("Obiettivo sbloccato")
 	title.add_theme_font_override("font", UiArt.font())
 	title.add_theme_font_size_override("font_size", 20)
 	title.add_theme_color_override("font_color", UiArt.RED.lightened(0.15))
 	col.add_child(title)
 	var label := Label.new()
-	label.text = "%s  (%d)" % [e["it_name"], e["points"]]
+	label.text = "%s  (%d)" % [title_of(e), e["points"]]
 	label.add_theme_font_override("font", UiArt.font())
 	label.add_theme_font_size_override("font_size", 28)
 	label.add_theme_color_override("font_color", Color(0.95, 0.92, 0.85))
 	col.add_child(label)
 	var desc := Label.new()
-	desc.text = e["it_desc"]
+	desc.text = desc_of(e)
 	desc.add_theme_font_size_override("font_size", 14)
 	desc.add_theme_color_override("font_color", Color(0.75, 0.72, 0.68))
 	col.add_child(desc)

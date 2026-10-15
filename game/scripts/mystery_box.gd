@@ -201,13 +201,13 @@ func _pose(a: String) -> void:
 func prompt(player: Player) -> String:
 	match state:
 		State.CLOSED:
-			return "Premi E per la Mystery Box [%d]" % COST
+			return Lang.prompt("la Mystery Box", "#683ec28f", COST)   # "Buy Random Weapon\n[Cost: 950]"
 		State.OFFERED, State.LOWERING:
 			if player == _buyer:
 				# the box ASM's "Trade Weapons" (0b5844dc): the offered gun replaces the one in hand
 				if player.weapons.size() >= 2 and not player.weapons.any(func(w): return w["name"] == offered):
-					return "Premi E per scambiare le armi: %s" % Weapons.display(offered)
-				return "Premi E per prendere %s" % Weapons.display(offered)
+					return Lang.prompt("scambiare le armi: %s" % Weapons.display(offered), Lang.resolve("#0b5844dc", "Trade Weapons") + ": " + Weapons.display(offered))
+				return Lang.prompt("prendere %s" % Weapons.display(offered), "Take %s" % Weapons.display(offered))
 	return ""
 
 

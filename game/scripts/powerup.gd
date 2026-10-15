@@ -5,10 +5,10 @@ class_name Powerup
 extends Node3D
 
 # "label": the pickup message (localisation "Max. Ammo!", "Insta-Kill!", "Double Points!",
-# "Atomic Bomb!", "Carpenter!"; the Italian table keeps the English text)
+# "Atomic Bomb!", "Carpenter!": English through lang.gd, Italian here)
 const KINDS := {
-	"maxammo":      {"model": "7c941e6f", "voice": "maxammo",      "label": "Max Ammo!"},
-	"instakill":    {"model": "105caeb0", "voice": "instakill",    "label": "Insta-Kill!"},
+	"maxammo":      {"model": "7c941e6f", "voice": "maxammo",      "label": "Munizioni al massimo!"},
+	"instakill":    {"model": "105caeb0", "voice": "instakill",    "label": "Uccisione istantanea!"},
 	"doublepoints": {"model": "005979ef", "voice": "doublepoints", "label": "Doppi punti!"},
 	"nuke":         {"model": "7c94b345", "voice": "nuke",         "label": "Bomba atomica!"},
 	"carpenter":    {"model": "0190717f", "voice": "carpenter",    "label": "Carpentiere!"},

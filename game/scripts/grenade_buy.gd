@@ -36,7 +36,7 @@ func prompt(player: Player) -> String:
 	var belt := GrenadeBelt.of(player)
 	if belt == null or belt.count >= GrenadeBelt.MAX:
 		return ""
-	return "Premi E per comprare granate [%d]" % cost
+	return Lang.prompt("comprare granate", "#655806c4", cost)   # "Buy Stielhandgranate\n[Cost: %d]"
 
 
 func interact(player: Player) -> void:

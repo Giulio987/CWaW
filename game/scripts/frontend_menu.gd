@@ -13,7 +13,8 @@
 #   sv_description (right edge 15, y 120, 175 wide). Hover (or a first tap) shows a map,
 #   a click (second tap) plays it. The DEBUG switch of the remake sits at the bottom.
 # - fe_extras: Achievements, Leaderboards, Credits, About (Profile left out)
-# - fe_options: Settings, Help, Default Settings (Controls and Language left out)
+# - fe_options: Settings, Language (Italiano / English, lang.gd), Help, Default Settings
+#   (Controls left out)
 # Every page but the title has the CGuiFrameBloodSplat splats and a Back item (Esc).
 # The music mx_frontend and menu_press come from ui_sound.gd; the pages of Extras/Options
 # open over the menu (extras_screen.gd, options_screen.gd, achievements_screen.gd).
@@ -21,6 +22,7 @@ class_name FrontendMenu
 extends Control
 
 static var title_seen := false   # fe_title only once, at start-up
+static var current: FrontendMenu   # the pages on screen (Default Settings may change the language)
 
 var menu: Menu
 var page := ""
@@ -56,8 +58,10 @@ func _ready() -> void:
 	_build_list("extras", "Extra", [["Obiettivi", func(): menu.show_achievements()],
 		["Classifiche", open_page.bind("leaderboard")], ["Riconoscimenti", open_page.bind("credits")],
 		["Informazioni", open_page.bind("about")]], "main")
-	_build_list("options", "Opzioni", [["Impostazioni", open_options], ["Aiuto", open_page.bind("help")],
+	_build_list("options", "Opzioni", [["Impostazioni", open_options],
+		[FrontendOptions.language_label(), _switch_language], ["Aiuto", open_page.bind("help")],
 		["Impostazioni predefinite", open_defaults]], "main")
+	current = self
 	show_page("main" if title_seen else "title")
 	title_seen = true
 
@@ -203,7 +207,7 @@ func _build_single() -> void:
 		for m in Menu.MAPS:
 			if m["id"] == map_name:
 				map_name = m["name"]
-		note.text = "%s · round %d · %d punti" % [map_name, int(save["round"]), int(save["points"])]
+		note.text = Lang.t("%s · round %d · %d punti") % [map_name, int(save["round"]), int(save["points"])]
 		note.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		note.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		note.add_theme_font_size_override("font_size", int(9 * _s))
@@ -217,7 +221,7 @@ func _build_single() -> void:
 
 func _show_difficulty() -> void:
 	var recruit := bool(Settings.get_value("recruit"))
-	_diff_value.text = "Recluta" if recruit else "Regolare"
+	_diff_value.text = Lang.t("Recluta" if recruit else "Regolare")
 	_diff_desc.text = ExtrasScreen.text("recruit_desc" if recruit else "regular_desc")
 
 
@@ -277,8 +281,8 @@ func _build_select() -> void:
 	# remake: debug start (round 5, Ray Gun, points; no achievements)
 	var dbg := CheckButton.new()
 	dbg.name = "DEBUG"
-	dbg.text = "DEBUG: round %d · Ray Gun · %d punti" % [Game.DEBUG_ROUND, Game.DEBUG_POINTS]
-	dbg.tooltip_text = "Gli obiettivi non si sbloccano in questa modalità"
+	dbg.text = Lang.t("DEBUG: round %d · Ray Gun · %d punti") % [Game.DEBUG_ROUND, Game.DEBUG_POINTS]
+	dbg.tooltip_text = Lang.t("Gli obiettivi non si sbloccano in questa modalità")
 	dbg.add_theme_font_size_override("font_size", int(7.5 * _s))
 	dbg.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	dbg.button_pressed = Game.debug_start
@@ -303,7 +307,7 @@ func selected(map_id: String) -> void:
 		return
 	var m: Dictionary = ExtrasScreen.data().get("maps", {}).get(map_id, {})
 	_title.text = String(m.get("title", ""))
-	_desc.text = String(m.get("desc", "")).replace("\n\n", "\n")
+	_desc.text = Lang.map_desc(map_id).replace("\n\n", "\n")
 	for i in Menu.MAPS.size():
 		if Menu.MAPS[i]["id"] == map_id:
 			_thumb.texture = FrontendArt.tex("res://assets/textures/frontend/mapinfo/%s.png" % Menu.MAPS[i]["preview"])
@@ -341,6 +345,14 @@ func open_options() -> OptionsScreen:
 	o.open_options()
 	_overlay = o
 	return o
+
+
+# fe_options "Language": the other language, saved and applied at once (the pages are rebuilt
+# by Menu.relocalize, back on Options)
+func _switch_language() -> void:
+	Lang.set_language(Lang.next_language())
+	Settings.save()
+	menu.relocalize.call_deferred("options")
 
 
 # fe_options "Default Settings" -> fe_restoretofactoryyesno

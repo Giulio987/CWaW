@@ -39,6 +39,8 @@ static func data() -> Dictionary:
 
 
 static func text(key: String, fallback := "") -> String:
+	if not Lang.is_en() and Lang.IT_TEXT.has(key):   # Italian translation of an original text
+		return Lang.IT_TEXT[key]
 	return String(data().get("text", {}).get(key, fallback))
 
 
@@ -59,7 +61,7 @@ func _ready() -> void:
 	FrontendArt.background(frame, Color(0.35, 0.35, 0.4))
 	FrontendArt.blood_splats(frame, s, page.length() + 20)
 	var t: String = TITLES.get(page, page.to_upper())
-	FrontendArt.title_bar(frame, s, t.substr(0, 1) + t.substr(1).to_lower())
+	FrontendArt.title_bar(frame, s, Lang.t(t.substr(0, 1) + t.substr(1).to_lower()))
 
 	var root := VBoxContainer.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -119,7 +121,7 @@ func _process(delta: float) -> void:
 
 func _tab(parent: Node, label: String, cb: Callable) -> void:
 	var b := Button.new()
-	b.text = label
+	b.text = Lang.maybe(label)
 	b.toggle_mode = true
 	b.add_theme_font_override("font", UiArt.font())
 	b.add_theme_font_size_override("font_size", 24)
@@ -163,7 +165,7 @@ func _label(parent: Node, t: String, size: int, color: Color, hud_font := false)
 # Help sections: the original wraps its lines by hand for 480 px; here the text reflows.
 func _help(which: String) -> void:
 	var list := _clear()
-	for sec in data().get("help", {}).get(which, []):
+	for sec in Lang.help(which):
 		_label(list, String(sec[0]), 30, Color(0.95, 0.85, 0.75), true)
 		if String(sec[1]) != "":
 			_label(list, _unwrap(String(sec[1])), 19, Color(0.82, 0.8, 0.78))
@@ -211,14 +213,14 @@ func _about() -> void:
 	var title := _label(list, "Call of Duty: World at War – Zombies", 36, Color(0.95, 0.85, 0.75), true)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var about: Dictionary = data().get("about", {})
-	var v := _label(list, String(about.get("version", "")), 22, Color(0.8, 0.8, 0.8))
+	var v := _label(list, String(about.get("version", "")).replace("Version:", Lang.t("Versione:")), 22, Color(0.8, 0.8, 0.8))
 	v.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var gap := Control.new()
 	gap.custom_minimum_size = Vector2(0, 20)
 	list.add_child(gap)
 	var c := _label(list, String(about.get("copyright", "")), 18, Color(0.7, 0.7, 0.7))
 	c.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	var note := _label(list, "\nRemake personale in Godot %s degli asset e degli script originali (iOS 1.5.0, Ideaworks Airplay SDK). Non distribuito." % Engine.get_version_info()["string"], 16, Color(0.5, 0.5, 0.5))
+	var note := _label(list, "\n" + Lang.t("Remake personale in Godot %s degli asset e degli script originali (iOS 1.5.0, Ideaworks Airplay SDK). Non distribuito.") % Engine.get_version_info()["string"], 16, Color(0.5, 0.5, 0.5))
 	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 
 
@@ -235,7 +237,7 @@ func _leaderboard(m: String) -> void:
 	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	list.add_child(grid)
 	for h in ["", "Round", "Punti", "Uccisioni", "Colpi alla testa", "Data"]:
-		_label(grid, h, 24, Color(0.95, 0.85, 0.75), true).autowrap_mode = TextServer.AUTOWRAP_OFF
+		_label(grid, Lang.maybe(h), 24, Color(0.95, 0.85, 0.75), true).autowrap_mode = TextServer.AUTOWRAP_OFF
 	var rows := Leaderboard.entries(m)
 	for i in Leaderboard.ROWS:
 		var e: Dictionary = rows[i] if i < rows.size() else {}
@@ -249,7 +251,7 @@ func _leaderboard(m: String) -> void:
 			var l := _label(grid, cells[j], 28 if j < 5 else 20, RED.lightened(0.3) if j == 0 else Color(0.88, 0.88, 0.88), j < 5)
 			l.autowrap_mode = TextServer.AUTOWRAP_OFF
 	if rows.is_empty():
-		var none := _label(list, "\nNessuna partita registrata su questa mappa (le partite in Recluta e in modalità DEBUG non contano).", 18, Color(0.6, 0.6, 0.6))
+		var none := _label(list, "\n" + Lang.t("Nessuna partita registrata su questa mappa (le partite in Recluta e in modalità DEBUG non contano)."), 18, Color(0.6, 0.6, 0.6))
 		none.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 
 

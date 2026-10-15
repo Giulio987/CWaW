@@ -123,7 +123,7 @@ func start(n := 0) -> void:
 	_apply_shovel()
 	var g := game()
 	if g and g.hud:
-		g.hud.show_message("Tutte le aree sbloccate, ora trova la tomba!", MESSAGE_TIME)
+		g.hud.show_message(Lang.t("Tutte le aree sbloccate, ora trova la tomba!"), MESSAGE_TIME)
 
 
 # Game.SetUsingShovel(true): the melee item becomes the shovel (once the player and its
@@ -161,7 +161,7 @@ func usable_from(p: Vector3) -> bool:
 
 
 func prompt(_player: Player) -> String:
-	return "Premi E per scavare la tomba" if started and not found else ""
+	return Lang.prompt("scavare la tomba", "#7d99c02d") if started and not found else ""   # "Dig"
 
 
 func interact(player: Player) -> void:

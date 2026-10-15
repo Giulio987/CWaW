@@ -46,6 +46,7 @@ var dead := false
 var weapons := []          # [{name, mag, reserve}]
 var current := 0
 var prompt := ""           # interaction hint for the HUD
+var prompt_repair := false  # the prompt is the barricade repair (no hold progress)
 var move_input := Vector2.ZERO   # set by touch controls (mobile)
 var fire_held := false           # set by touch controls (mobile)
 
@@ -940,21 +941,24 @@ func _self_revive() -> void:
 
 func _update_prompt() -> void:
 	prompt = ""
+	prompt_repair = false
 	var t = _interaction_target()
 	if t == null:
 		return
 	if t is MysteryBox or t is PerkMachine or (t is Object and t in game.level.interactables):
 		prompt = t.prompt(self)
 	elif t is Barricade:
-		prompt = "Tieni premuto E per riparare la barricata"
+		prompt = Lang.prompt("riparare la barricata", "#89101fc2", -1, true)   # "Repair Barricade"
+		prompt_repair = true
 	elif t is Debris:
-		prompt = "Tieni premuto E per %s [%d]" % [t.action_text(), t.cost]   # Open Door / Clear Debris
+		prompt = Lang.prompt(t.action_text(), t.action_en(), t.cost, true)   # Open Door / Clear Debris
 	elif t is Dictionary:
 		var has := weapons.any(func(w): return w["name"] == t["weapon"])
 		if has:
-			prompt = "Tieni premuto E per le munizioni %s [%d]" % [Weapons.display(t["weapon"]), t["ammo_cost"]]
+			prompt = Lang.prompt("le munizioni %s" % Weapons.display(t["weapon"]), "LS_BUY_AMMO", t["ammo_cost"], true)
 		else:
-			prompt = "Tieni premuto E per comprare %s [%d]" % [Weapons.display(t["weapon"]), t["cost"]]
+			# the original "Buy Thompson\n[Cost: %d]"... (one string per weapon, same form)
+			prompt = Lang.prompt("comprare %s" % Weapons.display(t["weapon"]), "Buy %s" % Weapons.display(t["weapon"]), t["cost"], true)
 
 
 func _interaction_target():
@@ -1051,6 +1055,6 @@ func _mark_interacted() -> bool:
 
 
 func interact_progress() -> float:
-	if _interact_hold <= 0.0 or _interact_done or prompt == "" or prompt.begins_with("Tieni premuto E per riparare"):
+	if _interact_hold <= 0.0 or _interact_done or prompt == "" or prompt_repair:
 		return -1.0
 	return clampf(_interact_hold / INTERACT_TIME, 0.0, 1.0)

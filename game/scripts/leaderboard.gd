@@ -39,6 +39,6 @@ static func add(map: String, rounds: int, points: int, kills: int, headshots: in
 	return rank if rank <= ROWS else 0
 
 
-# LS_RANK_*: Italian ordinals are written 1°, 2°...
+# LS_RANK_*: 1st, 2nd... in English; Italian ordinals are written 1°, 2°... (Lang.rank)
 static func rank_text(n: int) -> String:
-	return "%d°" % n
+	return Lang.rank(n)

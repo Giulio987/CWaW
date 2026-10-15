@@ -18,7 +18,7 @@ func prompt(player: Player) -> String:
 	var b := BowieKnife.of(player)
 	if b == null or b.owned:
 		return ""
-	return "Tieni premuto E per comprare il coltello Bowie [%d]" % cost
+	return Lang.prompt("comprare il coltello Bowie", "#40a610a8", cost, true)   # "Buy Bowie Knife\n[Cost: %d]\n(one time only)"
 
 
 func interact(player: Player) -> void:

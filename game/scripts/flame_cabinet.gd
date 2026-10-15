@@ -91,10 +91,10 @@ func price(player: Player) -> int:
 
 func prompt(player: Player) -> String:
 	if not is_open:
-		return "Tieni premuto E per aprire l'armadio [%d]" % cost
+		return Lang.prompt("aprire l'armadio", "#2d430fc8", cost, true)   # "Open Cabinet\n[Cost: 2000]"
 	if _owned(player):
-		return "Tieni premuto E per le munizioni %s [%d]" % [Weapons.display(weapon), ammo_cost]
-	return "Tieni premuto E per comprare %s [%d]" % [Weapons.display(weapon), cost]
+		return Lang.prompt("le munizioni %s" % Weapons.display(weapon), "LS_BUY_AMMO", ammo_cost, true)
+	return Lang.prompt("comprare %s" % Weapons.display(weapon), "Buy %s" % Weapons.display(weapon), cost, true)
 
 
 func interact(player: Player) -> void:

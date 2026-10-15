@@ -212,6 +212,7 @@ func _process(delta: float) -> void:
 	var empty := mag == 0 and reserve == 0
 	_count.visible = not flame and not empty
 	_no_ammo.visible = not flame and empty
+	_no_ammo.text = Lang.t("Munizioni finite")   # follows a language change
 	if _count.visible:
 		_count.text = str(reserve)
 		var full := int(s["reserve"])

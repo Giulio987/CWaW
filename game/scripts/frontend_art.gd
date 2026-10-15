@@ -115,7 +115,7 @@ static func title_bar(parent: Node, s: float, text: String) -> Label:
 	var bar := image(parent, UiArt.region(TITLE_BAR))
 	place(bar, s, 0, 8, 480, 40)
 	var l := Label.new()
-	l.text = text
+	l.text = Lang.maybe(text)
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	l.add_theme_font_override("font", UiArt.font())
 	l.add_theme_font_size_override("font_size", int(24 * s))
@@ -129,7 +129,7 @@ static func title_bar(parent: Node, s: float, text: String) -> Label:
 # a menu row (CGuiTouchButtonMenuItem): highlight strip when hovered, focused or pressed
 static func row(text: String, s: float, cb: Callable, size := 22.0) -> Button:
 	var b := Button.new()
-	b.text = text
+	b.text = Lang.maybe(text)   # the node keeps the Italian name (tests find rows by it)
 	b.name = text.to_upper()
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.add_theme_font_override("font", UiArt.font())
@@ -171,7 +171,7 @@ static func rows(parent: Node, s: float, specs: Array, w := 0.0, y := 60.0) -> V
 # "Back" at the bottom-left
 static func back_button(parent: Node, s: float, cb: Callable, text := "Indietro") -> Button:
 	var b := Button.new()
-	b.text = text
+	b.text = Lang.maybe(text)
 	b.name = "BACK"
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.add_theme_font_override("font", UiArt.font())

@@ -243,7 +243,7 @@ class ZipCar extends Node3D:
 
 	func prompt(_player: Player) -> String:
 		if zip.car_state in [Zipline.Car.AT_TOP, Zipline.Car.AT_BOTTOM]:
-			return "Premi E per attivare la teleferica [%d]" % zip.cost
+			return Lang.prompt("attivare la teleferica", "#50ce302d", zip.cost)   # "Activate Zipline\n[Cost: %d]"
 		return ""
 
 	func interact(player: Player) -> void:
@@ -286,9 +286,9 @@ class ZipSwitch extends Node3D:
 	func prompt(_player: Player) -> String:
 		match state:
 			S.OFF:
-				return "Premi E per attivare la teleferica"
+				return Lang.prompt("attivare la teleferica", "#084edc4e")   # "Activate Zipline"
 			S.IDLE:
-				return "Premi E per chiamare la teleferica [%d]" % Zipline.CALL_COST
+				return Lang.prompt("chiamare la teleferica", "#6a946bd9", Zipline.CALL_COST)   # "Call Zipline\n[Cost: 1500]"
 		return ""
 
 	func interact(player: Player) -> void:
@@ -354,7 +354,7 @@ class ZipGate extends Node3D:
 		return not is_open and Vector2(p.x - use_point.x, p.z - use_point.z).length() < 2.2 and absf(p.y - use_point.y) < 2.0
 
 	func prompt(_player: Player) -> String:
-		return "" if is_open else "La teleferica deve essere attivata prima"
+		return "" if is_open else Lang.t("La teleferica deve essere attivata prima")
 
 	func interact(_player: Player) -> void:
 		pass

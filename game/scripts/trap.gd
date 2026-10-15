@@ -303,15 +303,16 @@ func door_open() -> bool:
 
 func prompt(_player: Player) -> String:
 	if not door_open():   # flogger ASM b373d4cb: "The door must be opened first" (bcf369e3)
-		return "Prima bisogna aprire la porta"
+		return Lang.t("Prima bisogna aprire la porta")
 	if not gen_on:
-		return "Serve la corrente"
+		return Lang.t("Serve la corrente")
 	match state:
 		State.ACTIVE:
 			return ""
 		State.COOLDOWN:
-			return "Trappola in ricarica"
-	return "Premi E per attivare la trappola [%d]" % cost
+			return Lang.t("Trappola in ricarica")
+	# "Activate Flogger\n[Cost: %d]" / "Activate Electric Barrier [Cost: %d]"
+	return Lang.prompt("attivare la trappola", "#37ef76ce" if kind == "flogger" else "#7214cf9f", cost)
 
 
 func interact(player: Player) -> void:

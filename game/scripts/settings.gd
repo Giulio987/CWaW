@@ -42,6 +42,9 @@ const DEFAULTS := {
 	# borders, clear of the Dynamic Island / rounded corners; default from the safe area
 	# (ScreenFrame.auto_scale, 1.0 on the Mac), see ensure_loaded / restore_defaults
 	"screen_scale": 1.0,
+	# Options -> Language (fe_options "Language" of the original): "it" / "en"; default the
+	# build's language (lang.gd Lang.build_default), see ensure_loaded / restore_defaults
+	"language": "",
 }
 
 static var values := {}
@@ -64,6 +67,8 @@ static func ensure_loaded() -> void:
 		values["auto_aim"] = DisplayServer.is_touchscreen_available()
 	if not cfg.has_section_key("settings", "screen_scale"):
 		values["screen_scale"] = ScreenFrame.auto_scale()
+	if not String(values["language"]) in Lang.LANGS:
+		values["language"] = Lang.build_default()
 	apply_audio()
 	apply_detail()
 	apply_brightness()
@@ -117,6 +122,7 @@ static func restore_defaults() -> void:
 	values["recruit"] = keep
 	values["auto_aim"] = DisplayServer.is_touchscreen_available()   # as in ensure_loaded
 	values["screen_scale"] = ScreenFrame.auto_scale()
+	values["language"] = Lang.build_default()
 	apply_audio()
 	apply_detail()
 	apply_brightness()

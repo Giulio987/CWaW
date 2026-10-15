@@ -59,7 +59,10 @@ static func give(p: Player) -> MolotovBelt:
 		return null
 	b.set_count(MAX)
 	if p.game and p.game.hud and not b.selected:
-		p.game.hud.show_message("Molotov x%d: premi T per selezionarle" % MAX, 3.0)
+		# the key T on a Mac, a double tap on the special item button with touch controls
+		var how := "Molotov x%d: doppio tocco sull'oggetto speciale" if Lang.touch() \
+			else "Molotov x%d: premi T per selezionarle"
+		p.game.hud.show_message(Lang.t(how) % MAX, 3.0)
 	return b
 
 

@@ -27,6 +27,11 @@ func _ready() -> void:
 	_shade.color = Color(0, 0, 0, 0.72)
 	_shade.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(_shade)
+	_build_pages()
+	UiSound.install()                 # menu_press on the buttons
+
+
+func _build_pages() -> void:
 	_pages["main"] = _page("PAUSA", [
 		["Riprendi", close],
 		# ig_pause "options" -> ig_options (Settings, Help, Default Settings: frontend_options.gd)
@@ -44,7 +49,17 @@ func _ready() -> void:
 	], 44)
 	_pages["settings"] = _settings_page()
 	FrontendOptions.add_pages(self)   # restart / default settings / reset confirmations
-	UiSound.install()                 # menu_press on the buttons
+
+
+# Options -> Language: every page again in the new language, back on `page`.
+func relocalize(page := "options") -> void:
+	for k in _pages:
+		_pages[k].queue_free()
+	_pages = {}
+	_build_pages()
+	if _info:
+		_update_info()
+	_show(page)
 
 
 func is_open() -> bool:
@@ -127,9 +142,9 @@ func _update_info() -> void:
 	var pos: Vector3 = p.global_position
 	var lvl = game.get("level")
 	var sector: String = lvl.sector_at(pos) if lvl and lvl.has_method("sector_at") else ""
-	_info.text = "FOTO (debug) · %s · round %d · pos (%.2f, %.2f, %.2f)%s · yaw %.0f° pitch %.0f° · trascina per girare · Esc o doppio tocco: torna" % [
+	_info.text = Lang.t("FOTO (debug) · %s · round %d · pos (%.2f, %.2f, %.2f)%s · yaw %.0f° pitch %.0f° · trascina per girare · Esc o doppio tocco: torna") % [
 		game.get("level_name"), game.get("round_number"), pos.x, pos.y, pos.z,
-		(" · settore " + sector) if sector != "" else "",
+		(Lang.t(" · settore ") + sector) if sector != "" else "",
 		rad_to_deg(p.rotation.y), rad_to_deg(cam.rotation.x) if cam else 0.0]
 
 
@@ -172,8 +187,12 @@ func _to_main_menu() -> void:
 
 func _title(text: String, size: int) -> Label:
 	var l := Label.new()
-	l.text = text
+	l.text = Lang.maybe(text)
 	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# long questions (the original English ones have no line break) wrap within the screen
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size.x = 1100
+	l.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	l.add_theme_font_override("font", UiArt.font())
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", UiArt.RED.lightened(0.15))
@@ -182,7 +201,7 @@ func _title(text: String, size: int) -> Label:
 
 func _button(text: String, cb: Callable, size := 44) -> Button:
 	var b := Button.new()
-	b.text = text
+	b.text = Lang.maybe(text)
 	b.custom_minimum_size = Vector2(420, 58)
 	b.add_theme_font_override("font", UiArt.font())
 	b.add_theme_font_size_override("font_size", size)
@@ -276,7 +295,7 @@ func _settings_page() -> VBoxContainer:
 
 func _row_label(grid: GridContainer, text: String) -> void:
 	var l := Label.new()
-	l.text = text
+	l.text = Lang.maybe(text)
 	l.add_theme_font_size_override("font_size", 24)
 	grid.add_child(l)
 

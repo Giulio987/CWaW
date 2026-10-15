@@ -103,7 +103,9 @@ static func run(at: Node) -> void:
 			interact_ok = Input.is_action_pressed("interact")
 			await _snap(at, "touch_interact_" + tag)
 			_touch(at, tc, 7, (r["interact"] as Rect2).get_center(), false)
-	check.call(interact_ok, "interact button shown and held near a wall buy (prompt '%s')" % p.prompt)
+	check.call(interact_ok, "interact button shown and held near a wall buy (prompt '%s')" % p.prompt.replace("\n", " | "))
+	check.call(not "E per" in p.prompt and not p.prompt.begins_with("Hold E") and not p.prompt.begins_with("Press E"),
+		"the touch prompt names the hand, not a key (lang.gd)")
 	# melee
 	_touch(at, tc, 8, c.call("melee"), true)
 	await _wait(at, 0.05)

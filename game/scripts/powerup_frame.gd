@@ -113,5 +113,5 @@ func _process(delta: float) -> void:
 # "repair": the local player holds interact at a barricade that can take boards
 # (the remake's barricade prompt is only offered then, player.gd _update_prompt).
 static func repairing(player: Node) -> bool:
-	return player != null and String(player.get("prompt")).begins_with("Tieni premuto E per riparare") \
+	return player != null and bool(player.get("prompt_repair")) \
 		and Input.is_action_pressed("interact")

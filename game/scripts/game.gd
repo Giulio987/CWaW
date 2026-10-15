@@ -256,7 +256,7 @@ func start(level_name_: String) -> void:
 			centre += o.global_position
 		w.finalize(level, centre / room.size() if room.size() > 2 else level.player_spawn.origin)
 	_collect_area_points()
-	hud.message("Caricamento navigazione…")
+	hud.message(Lang.t("Caricamento navigazione…"))
 	level.navigation_ready.connect(_begin, CONNECT_ONE_SHOT)
 	level.bake_navigation()
 
@@ -1000,7 +1000,7 @@ func apply_powerup(kind: String, at := Vector3.INF) -> void:
 		at = player.global_position + Vector3.UP * 0.6
 	Sfx.instance.play("14c4f851")  # pickup sting, then the announcer (as in the original sequences)
 	get_tree().create_timer(0.3, false).timeout.connect(Sfx.instance.play.bind(kind))
-	_show_powerup(Powerup.KINDS[kind]["label"])
+	_show_powerup(Lang.t(Powerup.KINDS[kind]["label"]))
 	Achievements.powerup(kind)   # before the nuke kills (achievements.gd)
 	match kind:
 		"maxammo":

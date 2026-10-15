@@ -36,7 +36,7 @@ func prompt(player: Player) -> String:
 	var belt := BettyBelt.of(player)
 	if belt == null or belt.count >= BettyBelt.MAX:
 		return ""
-	return "Premi E per comprare le Bouncing Betty [%d]" % cost
+	return Lang.prompt("comprare le Bouncing Betty", "#40a0899a", cost)   # "Buy Bouncing Betty\n[Cost: %d]\n(one time only)"
 
 
 func interact(player: Player) -> void:

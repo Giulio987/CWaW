@@ -176,7 +176,7 @@ static func stats_of(w: Dictionary) -> Dictionary:
 
 static func display_of(w: Dictionary) -> String:
 	if w.get("upgraded", false) and UPGRADES.has(w["name"]):
-		return UPGRADES[w["name"]]["name"]
+		return Lang.maybe(UPGRADES[w["name"]]["name"])   # "Arisaka (potenziato)" -> "(Upgraded)"
 	return display(w["name"])
 
 

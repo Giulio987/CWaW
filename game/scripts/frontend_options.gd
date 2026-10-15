@@ -5,7 +5,7 @@
 #   (Settings "detail_level", "auto_pause"; settings.gd apply_detail, save_game.gd Watcher)
 # - ig_options (from ig_pause "Options"): Settings, Help (ig_help: the help pages of
 #   extras_screen.gd), Default Settings (restoretofactory) with ig_restoretofactoryyesno
-#   "Are you sure you want to reset your settings?" (Controls and Language left out)
+#   "Are you sure you want to reset your settings?" and Language (lang.gd; Controls left out)
 # - a reset of achievements and statistics (not in the original), with confirmation; it
 #   writes Achievements' current file (achievements_test.cfg in tests)
 # - ig_pause "resetlevel" with ig_resetlevelyesno "Are you sure you want to restart the
@@ -24,7 +24,7 @@ static func add_rows(pm: PauseMenu, grid: GridContainer, box: VBoxContainer) -> 
 	pm._row_label(grid, "Livello di dettaglio")
 	var opt := OptionButton.new()
 	for t in DETAIL:
-		opt.add_item(t)
+		opt.add_item(Lang.t(t))
 	opt.select(clampi(int(Settings.get_value("detail_level")), 0, 2))
 	opt.item_selected.connect(func(i: int): Settings.set_value("detail_level", i))
 	opt.name = "detail_level"
@@ -64,11 +64,13 @@ static func add_rows(pm: PauseMenu, grid: GridContainer, box: VBoxContainer) -> 
 static func add_pages(pm: PauseMenu) -> void:
 	pm._pages["options"] = pm._page("OPZIONI", [
 		["Impostazioni", pm._show.bind("settings")],
+		[language_label(), func(): switch_language(pm)],   # ig_options "Language"
 		["Aiuto", func(): pm.add_child(ExtrasScreen.new("help"))],
 		["Impostazioni predefinite", pm._show.bind("defaults")],
 		["Indietro", pm._show.bind("main")],
 	])
 	pm._pages["options"].get_child(pm._pages["options"].get_child_count() - 2).name = "defaults"
+	pm._pages["options"].get_child(3).name = "language"
 	pm._pages["restart"] = pm._page("Ricominciare il livello?\nI progressi andranno persi.", [
 		["No", pm._show.bind("main")],
 		["Sì", restart_level.bind(pm)],
@@ -85,8 +87,28 @@ static func add_pages(pm: PauseMenu) -> void:
 		pm._pages[k].visible = false
 
 
+# The Language entry of fe_options / ig_options (the original lists Language between Controls
+# and Help): "Lingua: Italiano" / "Language: English", a tap switches to the other language.
+static func language_label() -> String:
+	return "%s: %s" % [Lang.t("Lingua"), Lang.NAMES[Lang.code()]]
+
+
+# Applied at once: saved, then the pause menu's pages are rebuilt in the new language (the
+# HUD and prompts follow by themselves; the main menu rebuilds its pages, frontend_menu.gd).
+static func switch_language(pm: PauseMenu) -> void:
+	Lang.set_language(Lang.next_language())
+	Settings.save()
+	pm.relocalize("options")
+
+
 static func restore_defaults(pm: PauseMenu) -> void:
+	var lang := Lang.code()
 	Settings.restore_defaults()
+	if Lang.code() != lang:   # Default Settings brings back the build's language
+		if FrontendMenu.current and is_instance_valid(FrontendMenu.current):
+			FrontendMenu.current.menu.relocalize("options")   # under the options screen
+		pm.relocalize("options")
+		return
 	# rebuild the settings page so its sliders show the defaults
 	var old: Control = pm._pages["settings"]
 	pm._pages["settings"] = pm._settings_page()

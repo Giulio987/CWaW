@@ -49,6 +49,22 @@ func _select(i: int) -> void:
 		extras.selected(MAPS[i]["id"])
 
 
+# Options -> Language: the pages built again in the new language, on `page` (no title page;
+# the menu music goes on where it was: the old pages' player is freed with them).
+func relocalize(page := "options") -> void:
+	var old := extras
+	var music := old.get_node_or_null("MenuMusic") as AudioStreamPlayer if old else null
+	var at := music.get_playback_position() if music and music.playing else -1.0
+	extras = FrontendMenu.attach(self)
+	var fresh := extras.get_node_or_null("MenuMusic") as AudioStreamPlayer
+	if fresh and at >= 0.0:
+		fresh.play(at)
+	if old:
+		old.queue_free()
+	extras.show_page(page)
+	_select(_selected)
+
+
 # achievement list over the menu (achievements_screen.gd)
 func show_achievements() -> AchievementsScreen:
 	if _achievements == null:

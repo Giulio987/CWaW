@@ -90,20 +90,20 @@ func usable_from(p: Vector3) -> bool:
 
 func prompt(player: Player) -> String:
 	if not level.power_on:
-		return "Serve la corrente"
+		return Lang.t("Serve la corrente")
 	if not enabled():
-		return "Collega i teletrasporti al mainframe"
+		return Lang.t("Collega i teletrasporti al mainframe")
 	match state:
 		State.WORKING:
 			return ""
 		State.READY:
-			return "Premi E per prendere %s" % Weapons.UPGRADES[_weapon["name"]]["name"]
+			return Lang.prompt("prendere %s" % Lang.maybe(Weapons.UPGRADES[_weapon["name"]]["name"]), "#15b32245")   # "Take your upgraded weapon"
 	var w := player.weapon()
 	if w.get("upgraded", false):
-		return "Arma già potenziata"
+		return Lang.t("Arma già potenziata")
 	if not Weapons.can_upgrade(w["name"]):
 		return ""
-	return "Premi E per potenziare l'arma [%d]" % cost
+	return Lang.prompt("potenziare l'arma", "#704072b0", cost)   # "Buy Pack a Punch Upgrade\n[Cost: %d]"
 
 
 func interact(player: Player) -> void:

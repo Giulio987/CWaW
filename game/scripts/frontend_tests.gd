@@ -121,7 +121,7 @@ func _menu() -> void:
 	await _shot("menu_single")
 	var diff_before := bool(Settings.get_value("recruit"))
 	(menu.find_child("DIFFICOLTA", true, false) as Button).pressed.emit()
-	_check(bool(Settings.get_value("recruit")) != diff_before and "Recruit" in menu.extras._diff_desc.text,
+	_check(bool(Settings.get_value("recruit")) != diff_before and ("Recruit" if Lang.is_en() else "Recluta") in menu.extras._diff_desc.text,
 		"difficulty toggle with the original description")
 	(menu.find_child("DIFFICOLTA", true, false) as Button).pressed.emit()
 	menu.extras.show_page("select")
@@ -131,7 +131,7 @@ func _menu() -> void:
 	_check("47a34869" in src, "music is mx_frontend (%s)" % src)
 	menu._select(2)
 	var desc: String = menu.extras._desc.text
-	_check("swamp" in desc, "map description of Shi No Numa: %s" % desc.replace("\n", " / "))
+	_check(("swamp" if Lang.is_en() else "palude") in desc, "map description of Shi No Numa: %s" % desc.replace("\n", " / "))
 	_check(menu.extras._thumb.texture != null, "map thumbnail in the white frame")
 	await _shot("menu_select")
 	menu.extras.show_page("extras")
@@ -140,6 +140,24 @@ func _menu() -> void:
 	menu.extras.show_page("options")
 	await _wait(0.2)
 	await _shot("menu_options")
+	# Options -> Language: saved and applied at once (pages rebuilt, back on Options), then back
+	var lang0 := Lang.code()
+	var saved_lang = Settings.get_value("language")
+	var override := Lang._override
+	menu.extras._switch_language()
+	await _wait(0.3)
+	var help_row := menu.extras.find_child("AIUTO", true, false) as Button
+	var music2 := menu.extras.find_child("MenuMusic", true, false) as AudioStreamPlayer
+	_check(Lang.code() != lang0 and menu.extras.page == "options" and help_row != null
+		and help_row.text == ("Help" if Lang.is_en() else "Aiuto") and music2 != null and music2.playing,
+		"Language %s -> %s at once (Help row '%s', music on)" % [lang0, Lang.code(), help_row.text if help_row else "?"])
+	await _shot("menu_options_lang")
+	menu.extras._switch_language()
+	await _wait(0.3)
+	_check(Lang.code() == lang0, "Language back to %s" % lang0)
+	Settings.set_value("language", saved_lang)   # as before the test (and --lang)
+	Lang._override = override
+	Settings.save()
 	# achievements: the COMPLETED! stamp on an unlocked one
 	var ach := Achievements.instance
 	var first_id := String(ach.entries[0]["id"])
@@ -297,9 +315,24 @@ func _pause(level: String) -> void:
 	pm._show("options")
 	await _wait(0.2)
 	await _shot("pause_options")
+	# ig_options Language: the pause pages rebuilt in the other language, still on Options
+	var lang0 := Lang.code()
+	var saved_lang = Settings.get_value("language")
+	var override := Lang._override
+	FrontendOptions.switch_language(pm)
+	await _wait(0.2)
+	var lrow := pm._pages["options"].find_child("language", false, false) as Button
+	_check(Lang.code() != lang0 and pm._pages["options"].visible and lrow != null
+		and lrow.text == FrontendOptions.language_label(), "pause Language %s -> %s ('%s')" % [lang0, Lang.code(), lrow.text if lrow else "?"])
+	await _shot("pause_options_lang")
+	FrontendOptions.switch_language(pm)
+	await _wait(0.2)
+	Settings.set_value("language", saved_lang)   # as before the test (and --lang)
+	Lang._override = override
+	Settings.save()
 	var help_btn: Button = null
 	for b in pm._pages["options"].find_children("*", "Button", true, false):
-		if (b as Button).text == "Aiuto":
+		if (b as Button).text == Lang.t("Aiuto"):
 			help_btn = b
 	if help_btn:
 		help_btn.pressed.emit()

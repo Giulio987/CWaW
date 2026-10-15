@@ -10,6 +10,8 @@ english_uk: italian.dat is an untranslated copy of it, only its "Boilerplate" li
 - credits: the CGuiLabels of fe_credits (CGuiSimpleScrollingFrame "scroller") in order
 - about:   fe_about texts (copyright, LS_ABOUT_VERSION) and the bundle version (Info.plist)
 - text:    other labels used by the menus (pause, options, confirmations), by name
+- loc:     every localisation string by hash ("%08x"): the original English texts the
+           remake shows in English (game/scripts/lang.gd: prompts, HUD messages, LS_* strings)
 """
 import json
 import os
@@ -108,6 +110,7 @@ def main(out):
         "credits": credits,
         "about": {"copyright": about[1], "version": loc[iw_hash("LS_ABOUT_VERSION")] % info.get("CFBundleVersion", "")},
         "text": {k: loc[v] for k, v in TEXT.items() if v in loc},
+        "loc": {"%08x" % k: v for k, v in sorted(loc.items())},
     }
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:

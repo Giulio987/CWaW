@@ -163,6 +163,11 @@ func action_text() -> String:
 	return "aprire la porta"
 
 
+# The original English prompt: "Clear Debris\n[Cost: %d]" (5952252b) or "Open Door\n[Cost: %d]" (fa34aba6).
+func action_en() -> String:
+	return "#fa34aba6" if action_text() == "aprire la porta" else "#5952252b"
+
+
 func open() -> void:
 	opened.emit(self)
 	for c in _body.get_children():

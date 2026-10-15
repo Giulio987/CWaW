@@ -30,7 +30,10 @@ var _dead_page: Control
 
 
 static func survived_text(rounds: int) -> String:
-	return ("You Have Survived %d Round" if rounds == 1 else "You Have Survived %d Rounds") % rounds
+	if not Lang.is_en():
+		return "Sei sopravvissuto a %d round" % rounds
+	return Lang.resolve("LS_YOU_HAVE_SURVIVED1" if rounds == 1 else "LS_YOU_HAVE_SURVIVED",
+		"You Have Survived %d Round" if rounds == 1 else "You Have Survived %d Rounds") % rounds
 
 
 func _ready() -> void:
@@ -57,7 +60,7 @@ func _ready() -> void:
 
 # "Game Over" and the survived label, centred; `top` moves them up for the stats page
 func _titles(parent: Control, top: float) -> void:
-	for row in [["Game Over", 72, RED, -110.0], [survived_text(_rounds), 46, Color.WHITE, -20.0]]:
+	for row in [[Lang.t("Partita finita"), 72, RED, -110.0], [survived_text(_rounds), 46, Color.WHITE, -20.0]]:
 		var l := _label(row[0], row[1], row[2], parent)
 		l.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 		l.offset_left = -600
@@ -133,7 +136,7 @@ func _build_stats() -> void:
 	stats.offset_bottom = 60
 	add_child(stats)
 	for row in [["Punti", _score], ["Uccisioni", _kills], ["Colpi alla testa", _headshots]]:
-		var k := _label(row[0], 34, GREY, stats)
+		var k := _label(Lang.t(row[0]), 34, GREY, stats)
 		k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var v := _label(str(row[1]), 40, UiArt.POINTS, stats)
 		v.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -146,14 +149,14 @@ func _build_stats() -> void:
 	board.offset_top = -170
 	board.offset_bottom = 120
 	add_child(board)
-	_label("Classifica · %s" % _map_name(map), 30, RED, board)
+	_label(Lang.t("Classifica · %s") % _map_name(map), 30, RED, board)
 	var grid := GridContainer.new()
 	grid.columns = 5
 	grid.add_theme_constant_override("h_separation", 26)
 	grid.add_theme_constant_override("v_separation", 4)
 	board.add_child(grid)
 	for h in ["", "Round", "Punti", "Uccisioni", "Testa"]:
-		_label(h, 20, Color(0.6, 0.6, 0.6), grid)
+		_label(Lang.maybe(h), 20, Color(0.6, 0.6, 0.6), grid)
 	var list := Leaderboard.entries(map)
 	for i in Leaderboard.ROWS:
 		var mine := i + 1 == rank
@@ -175,9 +178,9 @@ func _build_stats() -> void:
 	buttons.offset_top = -150
 	buttons.offset_bottom = -70
 	add_child(buttons)
-	var retry := _button("RIPROVA", buttons)
+	var retry := _button(Lang.t("RIPROVA"), buttons)
 	retry.pressed.connect(_retry)
-	var menu := _button("MENU PRINCIPALE", buttons)
+	var menu := _button(Lang.t("MENU PRINCIPALE"), buttons)
 	menu.pressed.connect(_to_menu)
 	retry.grab_focus.call_deferred()
 

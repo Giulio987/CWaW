@@ -1,6 +1,8 @@
 #!/bin/sh
 # Build the game for iPhone into build/ (gitignored: it contains the original game data, never share it).
-#   tools/build_ios.sh [TEAM_ID]
+#   tools/build_ios.sh [--lang en|it] [TEAM_ID]
+# --lang: the app's default language (English without it; the player can change it in Options ->
+# Language): the custom feature lang_en / lang_it of the export preset (read by lang.gd).
 # Without TEAM_ID: exports the Xcode project and compiles an UNSIGNED build/CWaW-unsigned.ipa, to sign
 # and install yourself (Xcode, Sideloadly, AltStore...). With TEAM_ID (Xcode > Settings > Accounts)
 # the Xcode project carries your team: open build/ios/CWaW.xcodeproj and press Run with the iPhone attached.
@@ -8,6 +10,14 @@
 # (Godot editor > Editor > Manage Export Templates, or ios.zip from the release's export templates).
 set -e
 cd "$(dirname "$0")/.."
+LANG_CODE=en
+if [ "$1" = "--lang" ]; then
+  case "$2" in
+    en|it) LANG_CODE=$2 ;;
+    *) echo "--lang: en or it" >&2; exit 1 ;;
+  esac
+  shift 2
+fi
 GODOT=${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}
 VER=$("$GODOT" --version | sed 's/\.official.*//; s/\.custom.*//')
 TPL="$HOME/Library/Application Support/Godot/export_templates/$VER"
@@ -21,6 +31,8 @@ TEAM=${1:-UNSIGNED00}
 cp game/export_presets.cfg build_presets.bak
 trap 'mv -f build_presets.bak game/export_presets.cfg' EXIT
 sed -i '' "s/^application\/app_store_team_id=.*/application\/app_store_team_id=\"$TEAM\"/" game/export_presets.cfg
+sed -i '' "s/^custom_features=.*/custom_features=\"lang_$LANG_CODE\"/" game/export_presets.cfg
+echo "Language: $LANG_CODE (custom feature lang_$LANG_CODE)"
 rm -rf build/ios
 mkdir -p build/ios
 "$GODOT" --headless --path game --import

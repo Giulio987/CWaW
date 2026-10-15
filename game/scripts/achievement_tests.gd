@@ -141,7 +141,7 @@ func _achievement_test() -> void:
 	await get_tree().process_frame
 	var btn: Button = null
 	for b in game.hud.find_children("*", "Button", true, false):
-		if (b as Button).text == "Obiettivi":
+		if (b as Button).text == Lang.t("Obiettivi"):
 			btn = b
 	if btn:
 		btn.pressed.emit()

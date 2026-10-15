@@ -239,20 +239,20 @@ func linking_pad() -> Pad:
 
 func prompt_for(pad: Pad, _player: Player) -> String:
 	if not level.power_on:
-		return "Serve la corrente" if not pad.is_mainframe else ""
+		return Lang.t("Serve la corrente") if not pad.is_mainframe else ""
 	if pad.is_mainframe:
 		if linking_pad() != null:
-			return "Premi E per collegare il teletrasporto"
+			return Lang.prompt("collegare il teletrasporto", "#5094f8ba")   # "Link peer teleporter"
 		return ""
 	if linking_pad() != null:
-		return "Collegamento in corso"                      # LS_TELEPORTER_LINKING
+		return Lang.t("Collegamento in corso")              # LS_TELEPORTER_LINKING
 	if pad.start_timer > 0.0 or pad.cooldown > 0.0:
-		return "Il teletrasporto si sta ricaricando"        # LS_TELEPORTER_TELEPORTING
+		return Lang.t("Il teletrasporto si sta ricaricando")   # LS_TELEPORTER_TELEPORTING
 	if pads.any(func(p): return p.incoming):
-		return "Temporaneamente non disponibile"            # LS_TELEPORTER_TEMPUNAVAIL
+		return Lang.t("Temporaneamente non disponibile")   # LS_TELEPORTER_TEMPUNAVAIL
 	if pad.state != "linked":
-		return "Premi E per collegare il teletrasporto al mainframe"   # LS_TELEPORTER_LINK
-	return "Premi E per teletrasportarti [%d]" % COST    # LS_TELEPORTER_BUY
+		return Lang.prompt("collegare il teletrasporto al mainframe", "LS_TELEPORTER_LINK")
+	return Lang.prompt("teletrasportarti", "LS_TELEPORTER_BUY", COST)
 
 
 func _usable(pad: Pad) -> bool:

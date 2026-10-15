@@ -6,6 +6,9 @@ class_name PerkMachine
 extends Node3D
 
 const USE_RANGE := 2.4   # metres from the machine centre
+# the original English prompts (Lang.prompt): "Buy Jugger-Nog\n[Cost: %d]", "Buy Speed Cola...",
+# "Buy Double Tap Root Beer...", "Buy Revive Soda..."
+const BUY_TEXT := {"jugga": "#68752f96", "speed": "#79ffcbe9", "dbtap": "#9f3a6291", "revive": "#7a0530e3"}
 
 var kind := ""        # jugga, speed, dbtap, revive or power
 var cost := 0
@@ -195,12 +198,13 @@ func usable_from(p: Vector3) -> bool:
 
 func prompt(player: Player) -> String:
 	if kind == "power":
-		return "" if level.power_on else "Premi E per accendere la corrente"
+		return "" if level.power_on else Lang.prompt("accendere la corrente", "#de612059")   # "Turn on Electricity"
 	if player.has_perk(kind) or (hut != Hut.NONE and hut != Hut.READY):
 		return ""
 	if not level.power_on:
-		return "Serve la corrente"
-	return "Premi E per comprare %s [%d]" % [Perks.display(kind), cost]
+		return Lang.t("Serve la corrente")
+	# the original's "Buy Jugger-Nog\n[Cost: %d]"... per perk
+	return Lang.prompt("comprare %s" % Perks.display(kind), String(BUY_TEXT.get(kind, "Buy " + Perks.display(kind))), cost)
 
 
 func interact(player: Player) -> void:
