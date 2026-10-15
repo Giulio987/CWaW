@@ -20,7 +20,7 @@ const DETAIL := ["Alto (più lento)", "Medio", "Basso (più veloce)"]
 
 
 static func add_rows(pm: PauseMenu, grid: GridContainer, box: VBoxContainer) -> void:
-	grid.add_theme_constant_override("v_separation", 6)
+	grid.add_theme_constant_override("v_separation", 2)   # 15 rows in 720 px (with "Dimensione schermo")
 	pm._row_label(grid, "Livello di dettaglio")
 	var opt := OptionButton.new()
 	for t in DETAIL:
@@ -32,6 +32,18 @@ static func add_rows(pm: PauseMenu, grid: GridContainer, box: VBoxContainer) -> 
 	grid.add_child(opt)
 	grid.add_child(Control.new())
 	pm._check(grid, "Pausa automatica", "auto_pause")
+	# "Dimensione schermo" (not in the original, screen_frame.gd): applied when the slider is
+	# released or moved by keys / a tap, not while dragging (it would move under the finger)
+	pm._slider(grid, "Dimensione schermo", "screen_scale", ScreenFrame.MIN, 1.0, 0.01, "pct")
+	var ss := grid.get_node("screen_scale") as HSlider
+	var drag := {"on": false}
+	ss.drag_started.connect(func(): drag["on"] = true)
+	ss.drag_ended.connect(func(_changed: bool):
+		drag["on"] = false
+		Settings.apply_screen_scale())
+	ss.value_changed.connect(func(_x: float):
+		if not drag["on"]:
+			Settings.apply_screen_scale())
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 16)

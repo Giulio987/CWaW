@@ -59,8 +59,10 @@ static func run(at: Node) -> void:
 	var up := ev.duplicate()
 	up.pressed = false
 	at.get_viewport().push_input(up)
+	at.get_viewport().push_input(ev.duplicate())   # double tap (a single tap reloads)
+	at.get_viewport().push_input(up.duplicate())
 	await at.get_tree().process_frame
-	check.call(p.current != before, "touching the gun icon switches weapon (%s)" % p.weapon()["name"])
+	check.call(p.current != before, "double tap on the gun icon switches weapon (%s)" % p.weapon()["name"])
 	# no ammo
 	p.weapon()["mag"] = 0
 	p.weapon()["reserve"] = 0

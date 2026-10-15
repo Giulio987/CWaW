@@ -12,11 +12,7 @@ var _hurt: ColorRect
 var _perks: HBoxContainer
 var _shown_perks := []
 var _touch := false
-var _stick_id := -1
-var _stick_origin := Vector2.ZERO
-var _look_id := -1
-var _stick_knob: Control
-var _stick_base: Control
+var touch_ui: TouchControls         # original touch buttons (touch_controls.gd)
 var _pause: PauseMenu      # pause_menu.gd
 var _shown_points := -1    # for the +/- points popups
 var _over := false
@@ -32,7 +28,8 @@ const MESSAGE_Y := 0x6b8 / 4096.0   # MessageLabel y (fraction of the screen hei
 
 func bind(g: Game) -> void:
 	game = g
-	_touch = DisplayServer.is_touchscreen_available()
+	# --touch-ui: the touch controls on a Mac too (tests, screenshots)
+	_touch = DisplayServer.is_touchscreen_available() or OS.get_cmdline_user_args().has("--touch-ui")
 	_hurt = ColorRect.new()   # kept for a faint full-screen tint; the strips carry the damage
 	_hurt.color = Color(0.6, 0, 0, 0)
 	_hurt.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -196,6 +193,9 @@ func pickup_message(t: String) -> void:
 
 func game_over(rounds: int) -> void:
 	_over = true
+	if touch_ui:
+		touch_ui.release_all()
+		touch_ui.visible = false
 	_msg.text = ""
 	_msg_t = 0.0
 	var screen := GameOverScreen.new()   # game_over_screen.gd (ig_gameover + local leaderboard)
@@ -206,63 +206,12 @@ func game_over(rounds: int) -> void:
 # ------------------------------------------------------------------ touch
 
 func _build_touch() -> void:
-	_stick_base = Panel.new()
-	_stick_base.size = Vector2(180, 180)
-	_stick_base.modulate = Color(1, 1, 1, 0.25)
-	_stick_base.visible = false
-	add_child(_stick_base)
-	_stick_knob = Panel.new()
-	_stick_knob.size = Vector2(70, 70)
-	_stick_knob.modulate = Color(1, 1, 1, 0.5)
-	_stick_knob.visible = false
-	add_child(_stick_knob)
-	_button("FUOCO", Vector2(-200, -260), Vector2(170, 170), func(down): game.player.fire_held = down)
-	_button("E", Vector2(-330, -150), Vector2(100, 100), func(down):
-		if down:
-			Input.action_press("interact")
-		else:
-			Input.action_release("interact"))
-	_button("R", Vector2(-120, -420), Vector2(90, 90), func(down):
-		if down:
-			game.player.reload())
-	_button("⇄", Vector2(-230, -420), Vector2(90, 90), func(down):
-		if down:
-			game.player.switch_weapon())
-	_button("🔪", Vector2(-340, -420), Vector2(90, 90), func(down):
-		if down:
-			game.player.melee())
-	# aim down the sights: ToggleAimIcon (toggleAim) toggles
-	_button("◎", Vector2(-450, -260), Vector2(110, 110), func(down):
-		if down:
-			game.player.toggle_aim())
-	# frag grenade: hold to cook, release to throw (grenade_belt.gd)
-	_button("💣", Vector2(-450, -420), Vector2(90, 90), func(down):
-		var belt := GrenadeBelt.of(game.player)
-		if belt:
-			belt.set_held(down))
-	# pause button (original HUD atlas icon), top right
-	var pb := TextureButton.new()
-	pb.texture_normal = UiArt.region(UiArt.PAUSE_ICON)
-	pb.ignore_texture_size = true
-	pb.stretch_mode = TextureButton.STRETCH_KEEP_ASPECT_CENTERED
-	pb.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	pb.position += Vector2(-90, 20)
-	pb.size = Vector2(64, 64)
-	pb.modulate = Color(1, 1, 1, 0.8)
-	pb.pressed.connect(open_pause)
-	add_child(pb)
-
-
-func _button(text: String, offset: Vector2, size: Vector2, cb: Callable) -> void:
-	var b := Button.new()
-	b.text = text
-	b.size = size
-	b.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	b.position += offset
-	b.modulate = Color(1, 1, 1, 0.6)
-	b.button_down.connect(func(): cb.call(true))
-	b.button_up.connect(func(): cb.call(false))
-	add_child(b)
+	# the original buttons (touch_controls.gd), under the weapon icon so that it gets
+	# its touches first; full rect of this layer: laid out on the visible area
+	touch_ui = TouchControls.new()
+	touch_ui.game = game
+	add_child(touch_ui)
+	move_child(touch_ui, _weapon_hud.get_index())
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -280,35 +229,3 @@ func open_pause() -> void:
 		_pause.game = game
 		add_child(_pause)
 	_pause.open()
-
-
-func _input(event: InputEvent) -> void:
-	if not _touch or game == null or game.player == null:
-		return
-	var half := get_viewport().get_visible_rect().size.x * 0.5
-	if event is InputEventScreenTouch:
-		if event.pressed:
-			if event.position.x < half and _stick_id == -1:
-				_stick_id = event.index
-				_stick_origin = event.position
-				_stick_base.position = event.position - _stick_base.size / 2
-				_stick_base.visible = true
-				_stick_knob.visible = true
-				_stick_knob.position = event.position - _stick_knob.size / 2
-			elif event.position.x >= half and _look_id == -1:
-				_look_id = event.index
-		else:
-			if event.index == _stick_id:
-				_stick_id = -1
-				game.player.move_input = Vector2.ZERO
-				_stick_base.visible = false
-				_stick_knob.visible = false
-			elif event.index == _look_id:
-				_look_id = -1
-	elif event is InputEventScreenDrag:
-		if event.index == _stick_id:
-			var v: Vector2 = (event.position - _stick_origin).limit_length(90.0)
-			_stick_knob.position = _stick_origin + v - _stick_knob.size / 2
-			game.player.move_input = v / 90.0
-		elif event.index == _look_id:
-			game.player.look(event.relative * 0.005 * Settings.touch_sens())

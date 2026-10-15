@@ -38,6 +38,10 @@ const DEFAULTS := {
 	# se_brightnessslider position 0..1 (apply_brightness); 0.32 -> IwGx ScreenBrightness 10,
 	# the neutral value (estimate: the original's default is not in the data)
 	"brightness": 0.32,
+	# "Dimensione schermo" (not in the original, screen_frame.gd): the picture shrunk with black
+	# borders, clear of the Dynamic Island / rounded corners; default from the safe area
+	# (ScreenFrame.auto_scale, 1.0 on the Mac), see ensure_loaded / restore_defaults
+	"screen_scale": 1.0,
 }
 
 static var values := {}
@@ -58,9 +62,12 @@ static func ensure_loaded() -> void:
 			values["fov_version"] = DEFAULTS["fov_version"]
 	if not cfg.has_section_key("settings", "auto_aim"):
 		values["auto_aim"] = DisplayServer.is_touchscreen_available()
+	if not cfg.has_section_key("settings", "screen_scale"):
+		values["screen_scale"] = ScreenFrame.auto_scale()
 	apply_audio()
 	apply_detail()
 	apply_brightness()
+	apply_screen_scale()
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree:
 		if not tree.node_added.is_connected(_on_node_added):   # ensure_loaded again (tests)
@@ -97,7 +104,8 @@ static func save() -> void:
 
 
 static func path() -> String:
-	return PATH_TEST if OS.get_cmdline_user_args().has("--frontend-test") else PATH
+	var args := OS.get_cmdline_user_args()
+	return PATH_TEST if args.has("--frontend-test") or args.has("--frame-test") else PATH
 
 
 # "Default Settings" (restoretofactory, kiwi 0x180694: the settings back to their defaults,
@@ -108,9 +116,11 @@ static func restore_defaults() -> void:
 	values = DEFAULTS.duplicate()
 	values["recruit"] = keep
 	values["auto_aim"] = DisplayServer.is_touchscreen_available()   # as in ensure_loaded
+	values["screen_scale"] = ScreenFrame.auto_scale()
 	apply_audio()
 	apply_detail()
 	apply_brightness()
+	apply_screen_scale()
 	set_value("fov", values["fov"])
 	save()
 
@@ -167,13 +177,22 @@ static func apply_brightness() -> void:
 		quad.color = Color(g, g, g, 1.0)
 
 
+# "Dimensione schermo": set_value only stores it; the settings slider applies it when released
+# (applied while dragging, the slider would move under the finger).
+static func apply_screen_scale() -> void:
+	ScreenFrame.apply(float(values.get("screen_scale", 1.0)))
+
+
 # --- shortcuts used by gameplay code
+# Both multiply an event's relative motion, which the root maps through the screen frame's
+# canvas transform: with the picture shrunk (screen_frame.gd) it grows by 1 / scale, so the
+# scale here keeps the turn per pixel moved as at 100 %.
 static func mouse_sens() -> float:
-	return float(get_value("mouse_sens"))
+	return float(get_value("mouse_sens")) * ScreenFrame.scale
 
 
 static func touch_sens() -> float:
-	return float(get_value("touch_sens"))
+	return float(get_value("touch_sens")) * ScreenFrame.scale
 
 
 static func invert_y() -> bool:

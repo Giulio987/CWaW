@@ -26,6 +26,8 @@ func _ready() -> void:
 		_hud_test.call_deferred()
 	elif args.has("--hud-weapon-test"):   # weapon icon, ammo, reticle, headshot icon (hud_weapon_tests.gd)
 		(func(): load("res://scripts/hud_weapon_tests.gd").run(self)).call_deferred()
+	elif args.has("--touch-test"):   # original touch buttons, with --touch-ui (touch_hud_tests.gd)
+		(func(): load("res://scripts/touch_hud_tests.gd").run(self)).call_deferred()
 	elif args.has("--weapon-test"):   # grenade | raygun | flame | buy (weapon_tests.gd)
 		(func(): WeaponTests.run(self)).call_deferred()
 	elif args.has("--drink-test") or args.has("--teddy-test") or args.has("--music-test") or args.has("--egg-test") or args.has("--monkey-test"):   # extra_tests.gd
@@ -49,7 +51,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if OS.get_cmdline_user_args().has("--hud-test") or OS.get_cmdline_user_args().has("--hud-weapon-test"):
+	if OS.get_cmdline_user_args().has("--hud-test") or OS.get_cmdline_user_args().has("--hud-weapon-test") or OS.get_cmdline_user_args().has("--touch-test"):
 		return
 	if OS.get_cmdline_user_args().has("--weapon-test") or OS.get_cmdline_user_args().has("--zombie-test") or OS.get_cmdline_user_args().has("--swamp-test") or OS.get_cmdline_user_args().has("--wunder-test") or OS.get_cmdline_user_args().has("--endgame-test"):
 		return

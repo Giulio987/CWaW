@@ -3,7 +3,7 @@
 #
 # "hud_guns" (CIwGuiFrame, right-aligned at the top, 219x62): a dark smear (atlas
 # 295,39-514,101 at +60,-5) and "gunIcon", a CGuiTouchButtonIcon over the whole frame
-# whose CGuiTouchActionPlayerInput switches weapon when touched. Inside, a 130x40
+# whose CGuiTouchActionPlayerInput reloads (tap) or switches weapon (double tap). Inside, a 130x40
 # frame at the right edge holds "gunImageFrame", a CIwGuiMultiFrame with one bitmap
 # per gun, named after the gun: CGuiInGameHud (kiwi va 0x129730..0x1297a8) shows the
 # child named like the held CItemGun, or like its base gun for a Pack-a-Punch
@@ -264,7 +264,13 @@ func _draw_clip() -> void:
 				y += bar.y * 2.0
 
 
-# gunIcon (CGuiTouchButtonIcon): touching / clicking the weapon icon switches weapon.
+# gunIcon (CGuiTouchButtonIcon): as the original help text (4cd406ec) says, a tap on the
+# ammo icon reloads, a double tap changes weapon (the switch drops the reload begun by the
+# first tap). Mouse clicks do the same.
+const DOUBLE_TAP := 0.3   # estimated
+var _last_tap := -10.0
+
+
 func _input(event: InputEvent) -> void:
 	if player == null or get_tree().paused:
 		return
@@ -280,4 +286,10 @@ func _input(event: InputEvent) -> void:
 	var local: Vector2 = (event.position - position) / SCALE
 	if GUNS_FRAME.has_point(local):
 		get_viewport().set_input_as_handled()
-		player.switch_weapon()
+		var now := Time.get_ticks_msec() / 1000.0
+		if now - _last_tap < DOUBLE_TAP:
+			_last_tap = -10.0
+			player.switch_weapon()
+		else:
+			_last_tap = now
+			player.reload()

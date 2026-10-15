@@ -1,11 +1,17 @@
 #!/bin/sh
+[ -e "$(dirname "$0")/../.tests_paused" ] && [ "$GODOT_NOLOCK" != 1 ] && { echo "run_godot.sh: test in pausa (.tests_paused)" >&2; exit 1; }
 # Run the game with a hard time limit so a stuck test never hangs:
 #   tools/run_godot.sh <seconds> [-- game args...]
-# One instance at a time: concurrent callers wait for a lock. With PREVIEW_TO=<dir>,
+# One instance at a time: concurrent callers wait for a lock (GODOT_NOLOCK=1 skips it). With PREVIEW_TO=<dir>,
 # the screenshots this run wrote to analysis/preview are copied there before the lock
 # is released (parallel callers would overwrite each other's view_0.png...).
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOCK="$ROOT/.godot_run.lock"
+if [ "$GODOT_NOLOCK" = 1 ]; then
+  # GODOT_NOLOCK=1: run alongside the others (screenshots go to the same analysis/preview: use distinct names)
+  LOCK=$(mktemp -d)
+  trap 'rm -rf "$LOCK"' EXIT INT TERM
+else
 while ! mkdir "$LOCK" 2>/dev/null; do
   # stale lock: its owner is gone
   if [ -f "$LOCK/pid" ] && ! kill -0 "$(cat "$LOCK/pid")" 2>/dev/null; then
@@ -15,6 +21,7 @@ while ! mkdir "$LOCK" 2>/dev/null; do
 done
 echo $$ > "$LOCK/pid"
 trap 'rm -rf "$LOCK"' EXIT INT TERM
+fi
 MARK="$LOCK/start"
 touch "$MARK"
 LIMIT=$1; shift

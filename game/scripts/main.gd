@@ -13,6 +13,9 @@ func _ready() -> void:
 	if args.has("--frontend-test"):
 		FrontendTests.start(self, args, level)   # frontend_tests.gd
 		return
+	if args.has("--frame-test"):
+		ScreenFrameTests.start(self, args, level)   # screen_frame_tests.gd ("Dimensione schermo")
+		return
 	if level == "":
 		if args.is_empty():   # a plain start only: splash logos + intro video (intro.gd)
 			var intro := IntroSequence.new()

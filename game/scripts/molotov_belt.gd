@@ -233,18 +233,7 @@ func _build_hud() -> void:
 	_icon_tex = AtlasTexture.new()
 	_icon_tex.atlas = load(ICON_ATLAS) as Texture2D
 	_icon_tex.region = ICON_RECT
-	if DisplayServer.is_touchscreen_available() or OS.get_cmdline_user_args().has("--touch-ui"):
-		_touch_btn = Button.new()
-		_touch_btn.text = "⇄"
-		_touch_btn.icon = _icon_tex
-		_touch_btn.expand_icon = true
-		_touch_btn.size = Vector2(90, 90)
-		_touch_btn.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-		_touch_btn.position += Vector2(-450, -530)   # above the 💣 button (hud.gd)
-		_touch_btn.modulate = Color(1, 1, 1, 0.6)
-		_touch_btn.visible = false
-		_touch_btn.button_down.connect(cycle)
-		layer.add_child(_touch_btn)
+	# touch: the special button of the original HUD (touch_controls.gd) plants / cycles
 	_refresh()
 
 
