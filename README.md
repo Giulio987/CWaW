@@ -16,14 +16,8 @@ Data source: `Call_of_Duty__Zombies_1.5.0_ios_3.0.ipa` (armv6, Ideaworks **Airpl
 Maps: Nacht der Untoten, Verrückt, Shi No Numa, Der Riese (single player).
 
 ## Getting your copy of the game
-You need your own copy of **Call of Duty: Zombies 1.5.0 for iOS** (`.ipa`) that you obtained legitimately, for
-example from your Apple ID purchase history, an old iTunes/Finder backup, or a tool such as `ipatool` if the app is
-still among your purchases. Only the `*.dz` data archives, `Info.plist` and the executable are read.
-
-> **Note on encrypted executables.** App Store copies have an encrypted (FairPlay) executable. The game data still
-> extracts fine, but `strings` on the executable (`analysis/kiwi_strings.txt`, the name dictionary built by
-> `tools/build_assets.sh`) finds no names, so some internal entity names stay as hex hashes and may not work. This
-> setup has only been tested with a decrypted executable and on an Apple Silicon Mac (Intel Macs are untested).
+You need your own copy of **Call of Duty: Zombies 1.5.0 for iOS** (`.ipa`) (you can download it https://archive.org/ or 
+in other sites.
 
 ## Requirements
 - A Mac with:
