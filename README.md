@@ -40,7 +40,7 @@ tools/build_assets.sh                                       # -> extracted/ e ga
      l'iPhone e premi ▶︎.
 5. Al primo avvio: *Impostazioni → Generali → VPN e gestione dispositivi* → autorizza il certificato sviluppatore.
 
-Con un Apple ID gratuito l'app scade dopo **7 giorni**: basta ripetere il punto 5. Con l'Apple Developer Program
+Con un Apple ID gratuito l'app scade dopo **7 giorni**: va firmata e installata di nuovo (punto 4). Con l'Apple Developer Program
 (99 €/anno) dura un anno.
 
 ## Struttura
