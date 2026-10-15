@@ -1,6 +1,6 @@
-# CoD Zombies Remake (iOS 2010) – motore non ufficiale
+# CWaW – remake non ufficiale di Call of Duty: Zombies (iOS 2010)
 
-Ricostruzione in **Godot 4** di "Call of Duty: Zombies" per iPhone (2010, Ideaworks / Activision), che sui
+**CWaW** è una ricostruzione in **Godot 4** di "Call of Duty: Zombies" per iPhone (2010, Ideaworks / Activision), che sui
 dispositivi moderni a 64 bit non funziona più. Questo repository contiene **solo il codice**: il motore di gioco
 (script GDScript) e gli strumenti che leggono i dati del gioco originale. **Nessun contenuto del gioco originale è
 incluso** (modelli, texture, suoni, musiche, video, testi, script): ognuno li ricava dalla **propria copia**
@@ -33,7 +33,7 @@ tools/build_assets.sh                                       # -> extracted/ e ga
 2. **Xcode**: *Settings → Accounts* → aggiungi il tuo Apple ID (va bene anche gratuito). Annota il *Team ID*.
 3. **iPhone**: collegalo via cavo, *Impostazioni → Privacy e sicurezza → Modalità sviluppatore* → attiva (si riavvia).
 4. **Export**: `tools/build_ios.sh [TEAM_ID]` → crea il progetto Xcode in `build/ios/` (ignorato da git).
-5. **Installa**: apri `build/ios/CoDZombiesRemake.xcodeproj`, in *Signing & Capabilities* scegli il tuo team
+5. **Installa**: apri `build/ios/CWaW.xcodeproj`, in *Signing & Capabilities* scegli il tuo team
    (e, se serve, un bundle identifier tuo), seleziona l'iPhone e premi ▶︎. Al primo avvio:
    *Impostazioni → Generali → VPN e gestione dispositivi* → autorizza il certificato sviluppatore.
 
@@ -138,4 +138,4 @@ Gameplay in `game/scripts/`: `level.gd` (mappa, collisioni, navmesh, entità), `
 - Scala: 400 unità = 1 m; UV s16 con 4096 = 1.0; tempi animazione in 1/4096 s; quaternioni "smallest three" 3×10 bit.
 
 
-/Applications/Godot.app/Contents/MacOS/Godot --path ~/Desktop/Giulio/CoDZombiesRemake/game
+/Applications/Godot.app/Contents/MacOS/Godot --path ~/Desktop/Giulio/CWaW/game

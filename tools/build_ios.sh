@@ -18,9 +18,9 @@ if [ -n "$1" ]; then
 fi
 mkdir -p build/ios
 "$GODOT" --headless --path game --import
-"$GODOT" --headless --path game --export-debug "iOS" ../build/ios/CoDZombiesRemake.xcodeproj
+"$GODOT" --headless --path game --export-debug "iOS" ../build/ios/CWaW.xcodeproj
 if [ -n "$1" ]; then
   git checkout -- game/export_presets.cfg 2>/dev/null || true
 fi
-echo "Done: open build/ios/CoDZombiesRemake.xcodeproj in Xcode, pick your team under Signing & Capabilities,"
+echo "Done: open build/ios/CWaW.xcodeproj in Xcode, pick your team under Signing & Capabilities,"
 echo "connect the iPhone (Developer Mode on) and press Run."
