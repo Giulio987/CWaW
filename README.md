@@ -3,19 +3,29 @@
 # CWaW – unofficial remake of Call of Duty: Zombies (iOS, 2010)
 
 **CWaW** is a **Godot 4** reimplementation of "Call of Duty: Zombies" for iPhone (2010, Ideaworks / Activision), which
-no longer runs on modern 64-bit devices. This repository contains **code only**: the game engine (GDScript scripts)
+no longer runs on modern 64-bit devices. This repository contains **code only** (plus a few screenshots): the game engine (GDScript scripts)
 and the tools that read the original game's data. **No original game content is included** (models, textures,
 sounds, music, videos, text, scripts): everyone extracts it from **their own copy** of the app, as with OpenMW and
 other reimplemented engines.
 
 > **Legal notice.** This is an unofficial fan project. It is not affiliated with, endorsed by, sponsored by or
 > approved by Activision, Treyarch or Ideaworks. "Call of Duty" is a trademark of Activision Publishing, Inc.; all
-> original game content belongs to its respective owners. This repository contains **no original game content**, and
-> none may be added to it. Never share `original/`, `extracted/`, `game/assets/` or any build (`build/`, `.ipa`,
+> original game content belongs to its respective owners. Apart from a few illustrative screenshots in `docs/screenshots/`, this repository contains
+> **no original game content**. Never share `original/`, `extracted/`, `game/assets/` or any build (`build/`, `.ipa`,
 > `.app`): they contain the game's data. Builds are for your own devices only.
 
 Data source: `Call_of_Duty__Zombies_1.5.0_ios_3.0.ipa` (armv6, Ideaworks **Airplay SDK 4.3** engine, logic in **Lua 5.1**).
 Maps: Nacht der Untoten, Verrückt, Shi No Numa, Der Riese (single player).
+
+## Screenshots
+<p align="center">
+  <img src="docs/screenshots/nacht_zombie.jpg" width="49%" alt="Nacht der Untoten">
+  <img src="docs/screenshots/derriese.jpg" width="49%" alt="Der Riese">
+  <img src="docs/screenshots/nacht_barricade.jpg" width="49%" alt="Nacht der Untoten, barricade">
+  <img src="docs/screenshots/verruckt.jpg" width="49%" alt="Verrückt">
+</p>
+
+<sub>Screenshots of the remake running on a Mac. The game art they show (maps, characters, weapons, HUD) is © Activision and appears here for illustration only; it is not covered by this repository's license.</sub>
 
 ## Getting your copy of the game
 You need your own copy of **Call of Duty: Zombies 1.5.0 for iOS** (`.ipa`) (you can download it https://archive.org/ or 
