@@ -72,7 +72,7 @@ func _ready() -> void:
 	shape.position.y = 0.84
 	add_child(shape)
 	_camera = Camera3D.new()
-	_camera.position.y = 1.6
+	_camera.position.y = EYE
 	_camera.fov = Settings.fov()  # user setting (pause menu)
 	_camera.near = 0.05
 	_camera.far = 400
@@ -351,7 +351,28 @@ func _keep_in_bounds(before: Vector3) -> void:
 		print("[bounds] kept in at %s (%s)" % [global_position.snapped(Vector3.ONE * 0.01), "air" if air else "floor"])
 
 
+# Camera smoothing between physics ticks. The body moves at the physics rate (60 Hz) but the
+# screen refreshes faster (120 Hz ProMotion iPhones and Macs): without this the view stood
+# still on every other frame while walking, and the stop-and-go strafe was seen as a doubled
+# "ghost" image of the scene and the arms. Each frame the camera is put where the body was
+# at this moment between the last two ticks (at most one tick, 1/60 s, behind); turning is
+# applied per frame already (look()) and is not delayed. Jumps over 1 m between two ticks
+# (teleporters, respawns, scripts) are not smoothed.
+const EYE := 1.6
+var _tick_from := Vector3.INF   # body position at the start of the last physics tick
+
+
+func _process(_delta: float) -> void:
+	var to := global_position
+	var from := _tick_from
+	if from == Vector3.INF or from.distance_squared_to(to) > 1.0:
+		from = to
+	var at := from.lerp(to, Engine.get_physics_interpolation_fraction())
+	_camera.position = Vector3(0.0, EYE, 0.0) + global_basis.inverse() * (at - to)
+
+
 func _physics_process(delta: float) -> void:
+	_tick_from = global_position
 	if dead:
 		return
 	_cooldown -= delta

@@ -55,6 +55,8 @@ func _start(level: String, args: PackedStringArray) -> void:
 		preload("res://scripts/box_anim_tests.gd").start(self, game, args)   # box_anim_tests.gd (box timeline shots)
 	if args.has("--view"):
 		_view_shots(game)
+	if args.has("--ghost-test"):
+		preload("res://scripts/ghost_tests.gd").start(self, game, args)   # ghost_tests.gd (frames while strafing)
 	if args.has("--bounds-test"):
 		preload("res://scripts/bounds_tests.gd").start(self, game, args)   # bounds_tests.gd (player kept in the map)
 	if args.has("--walk"):

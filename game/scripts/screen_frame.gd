@@ -38,7 +38,12 @@ var _borders: CanvasLayer
 # picture that keeps clear of the side insets (Dynamic Island / notch, rounded corners) and
 # the top one. The bottom inset (home indicator, a thin bar drawn over apps) is not counted.
 # Elsewhere (Mac) 1.0: the safe area there is the usable rect (menu bar, Dock), not a cut-out.
+# "--auto-scale 0.86" pretends this value (Settings "full_screen" / "screen_scale" defaults).
 static func auto_scale() -> float:
+	var args := OS.get_cmdline_user_args()
+	var i := args.find("--auto-scale")   # debug: an iPhone's automatic value on the Mac
+	if i >= 0 and i + 1 < args.size():
+		return clampf(float(args[i + 1]), MIN, 1.0)
 	if not (OS.has_feature("ios") or OS.has_feature("android")):
 		return 1.0
 	var screen := Vector2(DisplayServer.screen_get_size())

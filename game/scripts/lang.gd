@@ -219,6 +219,7 @@ const EN := {
 	"Basso (più veloce)": "@detail_low",
 	"Pausa automatica": "@auto_pause",
 	"Dimensione schermo": "Screen size",
+	"Schermo intero": "Full screen",
 	# help, credits, about, leaderboards (extras_screen.gd)
 	"Gioco": "@help_game",
 	"Prestazioni": "@help_performance",

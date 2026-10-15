@@ -1,6 +1,8 @@
 # "Dimensione schermo" checks (screen_frame.gd), screenshots analysis/preview/margini_<tag>_*.png:
 #   -- --frame-test menu [--screen-scale 0.8]          main menu, Options -> Impostazioni page,
-#                                                         a click and a touch on its buttons
+#                                                         a click and a touch on its buttons,
+#      [--auto-scale 0.86]                                "Schermo intero" / slider / restart /
+#                                                         Default Settings (as an iPhone's auto value)
 #   -- <map> --frame-test game [--screen-scale 0.8]    in game (HUD), the pause menu and its
 #                                                         settings page, clicks on the buttons
 # Uses user://settings_test.cfg (Settings.path). Window size from --resolution.
@@ -22,6 +24,8 @@ static func start(main_: Node, args: PackedStringArray, level: String) -> void:
 	Settings.ensure_loaded()
 	var sc := ScreenFrame.cmdline_scale()
 	t.tag = "%s_%d_%dx%d" % [mode, roundi((sc if sc > 0.0 else 1.0) * 100.0), DisplayServer.window_get_size().x, DisplayServer.window_get_size().y]
+	if ScreenFrame.cmdline_scale() < 0.0 and args.has("--auto-scale"):
+		t.tag += "_auto%d" % roundi(ScreenFrame.auto_scale() * 100.0)
 	if mode == "game":
 		t._game(level if level != "" else "nacht")
 	else:
@@ -119,21 +123,45 @@ func _menu() -> void:
 	await _wait(0.2)
 	_check(o._pages["settings"].visible, "touch at the shrunk button's screen position works")
 	if ScreenFrame.cmdline_scale() < 0.0:
-		# the slider (moved by keys / a tap: applied at once), saved, then Default Settings
+		var root := get_tree().root
+		var auto := ScreenFrame.auto_scale()
+		var fs := o._pages["settings"].find_child("full_screen", true, false) as CheckButton
+		_check(fs != null and fs.button_pressed == (auto >= 0.999) and sl.editable == not fs.button_pressed,
+			"Schermo intero defaults to the automatic choice (%s)" % (auto >= 0.999))
+		# "Schermo intero" off: the slider is used (moved by keys / a tap: applied at once)
+		fs.button_pressed = false
+		await _wait(0.2)
 		sl.value = 0.85
 		await _wait(0.3)
-		_check(is_equal_approx(ScreenFrame.scale, 0.85) and get_tree().root.disable_3d, "slider applies 85 %")
+		_check(is_equal_approx(ScreenFrame.scale, 0.85) and root.disable_3d and sl.editable, "slider applies 85 %")
 		await _shot("slider85")
+		# "Schermo intero" on: 100 % whatever the slider says
+		fs.button_pressed = true
+		await _wait(0.3)
+		_check(ScreenFrame.scale == 1.0 and not root.disable_3d and not sl.editable, "Schermo intero on: 100 %, slider greyed")
+		await _shot("fullscreen")
 		Settings.save()
 		var cfg := ConfigFile.new()
 		cfg.load(Settings.path())
-		_check(is_equal_approx(float(cfg.get_value("settings", "screen_scale", 0.0)), 0.85), "screen_scale saved in the settings file")
+		_check(is_equal_approx(float(cfg.get_value("settings", "screen_scale", 0.0)), 0.85)
+			and cfg.get_value("settings", "full_screen", false) == true, "screen_scale and full_screen saved in the settings file")
+		# a restart (settings read again from the file): the saved choice wins over the automatic value
+		Settings._loaded = false
+		Settings.ensure_loaded()
+		await _wait(0.2)
+		_check(ScreenFrame.scale == 1.0 and bool(Settings.get_value("full_screen")), "after a restart: still full screen (auto %.2f)" % auto)
 		FrontendOptions.restore_defaults(o)
 		await _wait(0.3)
-		var root := get_tree().root
-		_check(ScreenFrame.scale == ScreenFrame.auto_scale() and float(Settings.get_value("screen_scale")) == ScreenFrame.auto_scale()
+		_check(ScreenFrame.scale == auto and float(Settings.get_value("screen_scale")) == auto
+			and bool(Settings.get_value("full_screen")) == (auto >= 0.999)
 			and (ScreenFrame.scale < 1.0 or (not root.disable_3d and root.global_canvas_transform == Transform2D())),
-			"Default Settings: back to the automatic value (%.2f)" % ScreenFrame.auto_scale())
+			"Default Settings: back to the automatic value (%.2f)" % auto)
+		# from the main menu Default Settings closes the options screen: a new one shows the switch
+		o = menu.extras.open_options()
+		await _wait(0.3)
+		var fs2 := o._pages["settings"].find_child("full_screen", true, false) as CheckButton
+		_check(fs2.button_pressed == (auto >= 0.999) and sl != fs2, "Default Settings: the switch shows the automatic choice")
+		await _shot("defaults")
 	print("[margini] RESULT %s (%d failures)" % ["OK" if fails == 0 else "FAIL", fails])
 	get_tree().quit()
 

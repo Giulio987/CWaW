@@ -42,6 +42,10 @@ const DEFAULTS := {
 	# borders, clear of the Dynamic Island / rounded corners; default from the safe area
 	# (ScreenFrame.auto_scale, 1.0 on the Mac), see ensure_loaded / restore_defaults
 	"screen_scale": 1.0,
+	# "Schermo intero": the picture over the whole screen whatever screen_scale says (true
+	# ignores the slider). Default: automatic, on where auto_scale is 1.0 (the Mac), off where
+	# the safe area shrinks it (iPhone); saved once chosen, so the player's choice wins
+	"full_screen": true,
 	# Options -> Language (fe_options "Language" of the original): "it" / "en"; default the
 	# build's language (lang.gd Lang.build_default), see ensure_loaded / restore_defaults
 	"language": "",
@@ -67,6 +71,9 @@ static func ensure_loaded() -> void:
 		values["auto_aim"] = DisplayServer.is_touchscreen_available()
 	if not cfg.has_section_key("settings", "screen_scale"):
 		values["screen_scale"] = ScreenFrame.auto_scale()
+	if not cfg.has_section_key("settings", "full_screen"):
+		# files from before the option: full screen if the slider was at 100 %
+		values["full_screen"] = float(values["screen_scale"]) >= 0.999
 	if not String(values["language"]) in Lang.LANGS:
 		values["language"] = Lang.build_default()
 	apply_audio()
@@ -94,6 +101,8 @@ static func set_value(key: String, v: Variant) -> void:
 		apply_detail()
 	elif key == "brightness":
 		apply_brightness()
+	elif key == "full_screen":
+		apply_screen_scale()
 	elif key == "fov":
 		var tree := Engine.get_main_loop() as SceneTree
 		var cam := tree.root.get_viewport().get_camera_3d() if tree else null
@@ -122,6 +131,7 @@ static func restore_defaults() -> void:
 	values["recruit"] = keep
 	values["auto_aim"] = DisplayServer.is_touchscreen_available()   # as in ensure_loaded
 	values["screen_scale"] = ScreenFrame.auto_scale()
+	values["full_screen"] = ScreenFrame.auto_scale() >= 0.999
 	values["language"] = Lang.build_default()
 	apply_audio()
 	apply_detail()
@@ -185,8 +195,9 @@ static func apply_brightness() -> void:
 
 # "Dimensione schermo": set_value only stores it; the settings slider applies it when released
 # (applied while dragging, the slider would move under the finger).
+# "Schermo intero" on: 100 % whatever the slider says.
 static func apply_screen_scale() -> void:
-	ScreenFrame.apply(float(values.get("screen_scale", 1.0)))
+	ScreenFrame.apply(1.0 if bool(values.get("full_screen", true)) else float(values.get("screen_scale", 1.0)))
 
 
 # --- shortcuts used by gameplay code

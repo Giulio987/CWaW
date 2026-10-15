@@ -20,7 +20,9 @@ const DETAIL := ["Alto (più lento)", "Medio", "Basso (più veloce)"]
 
 
 static func add_rows(pm: PauseMenu, grid: GridContainer, box: VBoxContainer) -> void:
-	grid.add_theme_constant_override("v_separation", 2)   # 15 rows in 720 px (with "Dimensione schermo")
+	# 16 rows in 720 px (with "Schermo intero", "Dimensione schermo"), above the headphones note
+	grid.add_theme_constant_override("v_separation", 0)
+	box.add_theme_constant_override("separation", 4)
 	pm._row_label(grid, "Livello di dettaglio")
 	var opt := OptionButton.new()
 	for t in DETAIL:
@@ -34,8 +36,24 @@ static func add_rows(pm: PauseMenu, grid: GridContainer, box: VBoxContainer) -> 
 	pm._check(grid, "Pausa automatica", "auto_pause")
 	# "Dimensione schermo" (not in the original, screen_frame.gd): applied when the slider is
 	# released or moved by keys / a tap, not while dragging (it would move under the finger)
+	# "Schermo intero" (Settings "full_screen"): an explicit choice over the automatic value
+	# from the safe area; on, the slider below is greyed out and ignored
+	pm._check(grid, "Schermo intero", "full_screen")
 	pm._slider(grid, "Dimensione schermo", "screen_scale", ScreenFrame.MIN, 1.0, 0.01, "pct")
 	var ss := grid.get_node("screen_scale") as HSlider
+	var fs := grid.get_node("full_screen") as CheckButton
+	var dim := func(on: bool):
+		ss.editable = not on
+		ss.modulate.a = 0.4 if on else 1.0
+		var i := ss.get_index()
+		for c in [grid.get_child(i - 1), grid.get_child(i + 1)]:   # its label and value
+			(c as CanvasItem).modulate.a = 0.4 if on else 1.0
+	dim.call(fs.button_pressed)
+	fs.toggled.connect(func(on: bool):
+		# off with the slider at 100 % would change nothing: start from the automatic value
+		if not on and ss.value >= 0.999 and ScreenFrame.auto_scale() < 0.999:
+			ss.value = ScreenFrame.auto_scale()
+		dim.call(on))
 	var drag := {"on": false}
 	ss.drag_started.connect(func(): drag["on"] = true)
 	ss.drag_ended.connect(func(_changed: bool):
@@ -54,11 +72,18 @@ static func add_rows(pm: PauseMenu, grid: GridContainer, box: VBoxContainer) -> 
 		b.name = spec[1]
 		row.add_child(b)
 	# the page's "Indietro" (added after these rows) goes on the same line, to fit 720 px
+	# (by instance id: the page can be freed before the deferred call, e.g. Default Settings
+	# from the main menu closes the options screen right after rebuilding it)
+	var ids := [box.get_instance_id(), row.get_instance_id()]
 	(func():
-		var back := box.get_child(box.get_child_count() - 1) as Control
-		if back != row and back is Button:
-			back.reparent(row)
-			row.move_child(back, 0)).call_deferred()
+		var b2 := instance_from_id(ids[0]) as VBoxContainer
+		var r2 := instance_from_id(ids[1]) as HBoxContainer
+		if b2 == null or r2 == null or b2.is_queued_for_deletion():
+			return
+		var back := b2.get_child(b2.get_child_count() - 1) as Control
+		if back != r2 and back is Button:
+			back.reparent(r2)
+			r2.move_child(back, 0)).call_deferred()
 
 
 static func add_pages(pm: PauseMenu) -> void:
