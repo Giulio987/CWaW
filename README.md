@@ -32,10 +32,13 @@ tools/build_assets.sh                                       # -> extracted/ e ga
    *Editor → Manage Export Templates → Download and Install*.
 2. **Xcode**: *Settings → Accounts* → aggiungi il tuo Apple ID (va bene anche gratuito). Annota il *Team ID*.
 3. **iPhone**: collegalo via cavo, *Impostazioni → Privacy e sicurezza → Modalità sviluppatore* → attiva (si riavvia).
-4. **Export**: `tools/build_ios.sh [TEAM_ID]` → crea il progetto Xcode in `build/ios/` (ignorato da git).
-5. **Installa**: apri `build/ios/CWaW.xcodeproj`, in *Signing & Capabilities* scegli il tuo team
-   (e, se serve, un bundle identifier tuo), seleziona l'iPhone e premi ▶︎. Al primo avvio:
-   *Impostazioni → Generali → VPN e gestione dispositivi* → autorizza il certificato sviluppatore.
+4. **Build**:
+   - `tools/build_ios.sh` → `build/CWaW-unsigned.ipa`, **non firmato** (più il progetto Xcode in `build/ios/`):
+     firmalo e installalo con lo strumento che preferisci (Xcode, Sideloadly, AltStore...);
+   - oppure `tools/build_ios.sh <TEAM_ID>` → solo il progetto Xcode `build/ios/CWaW.xcodeproj` con il tuo team:
+     aprilo, in *Signing & Capabilities* scegli il team (e, se serve, un bundle identifier tuo), seleziona
+     l'iPhone e premi ▶︎.
+5. Al primo avvio: *Impostazioni → Generali → VPN e gestione dispositivi* → autorizza il certificato sviluppatore.
 
 Con un Apple ID gratuito l'app scade dopo **7 giorni**: basta ripetere il punto 5. Con l'Apple Developer Program
 (99 €/anno) dura un anno.
