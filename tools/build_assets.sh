@@ -6,6 +6,9 @@ PY=.venv/bin/python
 [ -x "$PY" ] || { python3 -m venv .venv && .venv/bin/pip install -q numpy pillow texture2ddecoder scipy; }
 for f in original/kiwi.app/*.dz; do n=$(basename "$f" .dz); $PY -I tools/dz_extract.py "$f" "extracted/${n#_}" > /dev/null; done
 G=$(find extracted -name '*.group.bin' | sort)
+# name dictionary from the original executable (strings of kiwi; generated, not in the repository)
+mkdir -p analysis
+strings original/kiwi.app/kiwi > analysis/kiwi_strings.txt
 A=game/assets
 $PY -I tools/textures.py "$A/textures" $G
 $PY -I tools/sounds.py "$A/sounds" $G
@@ -15,6 +18,7 @@ for f in $(find "$A/lua_bytecode" -name '*.luac'); do
   o="$A/lua/${f#$A/lua_bytecode/}"; o="${o%c}"; mkdir -p "$(dirname "$o")"
   java -jar tools/bin/unluac.jar "$f" > "$o"
 done
+$PY -I tools/lua_strings.py "$A/lua" analysis/lua_strings.txt
 for l in nacht verruckt shinonuma derriese; do
   E=extracted/$l/levels/$l
   D=$(ls $E/dynamics/*.bin)
@@ -46,3 +50,4 @@ $PY -I tools/frontend_text.py "$A/frontend_text.json"
 $PY -I tools/hit_fx.py "$A/effects/hit_fx.json"
 sh tools/intro_video.sh   # needs Godot (OGV writer); assets/videos/intro.ogv
 echo "assets rebuilt"
+$PY -I tools/weapon_stats.py analysis/weapon_stats.json > /dev/null

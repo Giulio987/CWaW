@@ -13,3 +13,15 @@ __pycache__/
 
 # iOS/Godot export output (contains the original game data: never commit or share)
 build/
+# generated from the original game by tools/build_assets.sh, or test output (never in the repository)
+analysis/autotest/
+analysis/*.log
+analysis/*.err
+analysis/kiwi_strings.txt
+analysis/lua_strings.txt
+analysis/weapon_stats.json
+analysis/sound_specs.json
+analysis/zombie_anims.tsv
+analysis/nacht_ents.txt
+analysis/music_candidates.html
+analysis/*.npy
