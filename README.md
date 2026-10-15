@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.png" alt="CWaW logo" width="220"></p>
+
 # CWaW – unofficial remake of Call of Duty: Zombies (iOS, 2010)
 
 **CWaW** is a **Godot 4** reimplementation of "Call of Duty: Zombies" for iPhone (2010, Ideaworks / Activision), which
