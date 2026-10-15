@@ -25,3 +25,4 @@ analysis/zombie_anims.tsv
 analysis/nacht_ents.txt
 analysis/music_candidates.html
 analysis/*.npy
+.tests_paused
