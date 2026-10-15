@@ -10,3 +10,6 @@ analysis/characters.log
 __pycache__/
 .DS_Store
 .godot_run.lock/
+
+# iOS/Godot export output (contains the original game data: never commit or share)
+build/

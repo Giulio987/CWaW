@@ -1,26 +1,62 @@
-# CoD Zombies (iOS 2010) – remake per uso personale
+# CoD Zombies Remake (iOS 2010) – motore non ufficiale
 
-Sorgente: `Call_of_Duty__Zombies_1.5.0_ios_3.0.ipa` (armv6, motore Ideaworks **Airplay SDK 4.3**, logica in **Lua 5.1**).
-Obiettivo: estrarre gli asset originali e ricostruire il gioco su un motore moderno (arm64 / iPhone attuale).
+Ricostruzione in **Godot 4** di "Call of Duty: Zombies" per iPhone (2010, Ideaworks / Activision), che sui
+dispositivi moderni a 64 bit non funziona più. Questo repository contiene **solo il codice**: il motore di gioco
+(script GDScript) e gli strumenti che leggono i dati del gioco originale. **Nessun contenuto del gioco originale è
+incluso** (modelli, texture, suoni, musiche, video, testi, script): ognuno li ricava dalla **propria copia**
+dell'app, come per OpenMW o altri motori ricostruiti.
+
+> **Avviso legale.** Progetto amatoriale, non ufficiale, non affiliato né approvato da Activision, Treyarch o
+> Ideaworks. "Call of Duty" è un marchio di Activision Publishing, Inc.; tutti i contenuti del gioco originale
+> appartengono ai rispettivi proprietari. Non condividere `original/`, `extracted/`, `game/assets/` né le build
+> (`build/`, `.ipa`, `.app`): contengono i dati del gioco. Le build sono solo per i tuoi dispositivi.
+
+Sorgente dei dati: `Call_of_Duty__Zombies_1.5.0_ios_3.0.ipa` (armv6, motore Ideaworks **Airplay SDK 4.3**, logica in **Lua 5.1**).
+Mappe: Nacht der Untoten, Verrückt, Shi No Numa, Der Riese (singolo giocatore).
+
+## Requisiti
+- Mac con **Godot 4.7** (`brew install --cask godot`), **Python 3**, **ffmpeg**, **Java** (per unluac), **Lua**
+- La tua copia del gioco: un file `.ipa` di Call of Duty: Zombies 1.5.0 (servono solo gli archivi dati `*.dz`)
+- Per l'iPhone: **Xcode**, un Apple ID, un cavo e i template di export iOS di Godot
+
+## Installazione
+```sh
+tools/import_ipa.sh ~/Downloads/Call_of_Duty_Zombies.ipa   # -> original/kiwi.app (ignorato da git)
+tools/build_assets.sh                                       # -> extracted/ e game/assets/ (ignorati da git)
+/Applications/Godot.app/Contents/MacOS/Godot --headless --path game --import
+/Applications/Godot.app/Contents/MacOS/Godot --path game    # gioca sul Mac
+```
+
+## Build per iPhone
+1. **Template iOS di Godot** (una volta, ~1 GB): apri il progetto nell'editor di Godot (`Godot --path game -e`) →
+   *Editor → Manage Export Templates → Download and Install*.
+2. **Xcode**: *Settings → Accounts* → aggiungi il tuo Apple ID (va bene anche gratuito). Annota il *Team ID*.
+3. **iPhone**: collegalo via cavo, *Impostazioni → Privacy e sicurezza → Modalità sviluppatore* → attiva (si riavvia).
+4. **Export**: `tools/build_ios.sh [TEAM_ID]` → crea il progetto Xcode in `build/ios/` (ignorato da git).
+5. **Installa**: apri `build/ios/CoDZombiesRemake.xcodeproj`, in *Signing & Capabilities* scegli il tuo team
+   (e, se serve, un bundle identifier tuo), seleziona l'iPhone e premi ▶︎. Al primo avvio:
+   *Impostazioni → Generali → VPN e gestione dispositivi* → autorizza il certificato sviluppatore.
+
+Con un Apple ID gratuito l'app scade dopo **7 giorni**: basta ripetere il punto 5. Con l'Apple Developer Program
+(99 €/anno) dura un anno.
 
 ## Struttura
 ```
-original/kiwi.app     bundle originale (non modificare)
-extracted/            contenuto degli archivi .dz (gruppi *.group.bin)
-game/assets/textures       PNG decodificate (per gruppo, nome = hash risorsa)
-game/assets/sounds         WAV PCM 16 bit
-game/assets/lua            script Lua decompilati (logica di gioco, ondate, mappe)
-game/assets/lua_bytecode   bytecode originale
-analysis/             note, dump, anteprime
-tools/                estrattori (Python)
+original/kiwi.app     la tua copia del gioco (non nel repository)
+extracted/            contenuto degli archivi .dz (gruppi *.group.bin; non nel repository)
+game/                 progetto Godot: scripts/ (motore di gioco), shaders/, scenes/, tools/ (anteprime)
+game/assets/          dati convertiti dal gioco originale (non nel repository): textures, sounds,
+                      lua (script decompilati), lua_bytecode, models, characters, levels
+tools/                estrattori e convertitori (Python), build_assets.sh, build_ios.sh, run_godot.sh
+analysis/             note e dump di analisi
+build/                export iOS (non nel repository)
 ```
 
-## Ricostruire gli asset
-Serve: Python 3, ffmpeg, Java (per unluac), Godot 4.7.
-```sh
-tools/build_assets.sh          # original/kiwi.app -> extracted/ -> game/assets/
-/Applications/Godot.app/Contents/MacOS/Godot --headless --path game --import
-```
+## Licenza
+Il codice di questo repository (motore, strumenti, test) è distribuito con licenza **MIT**: vedi [LICENSE](LICENSE).
+La licenza **non** copre il gioco originale né i dati che gli strumenti ne ricavano. `tools/bin/unluac.jar` è
+[unluac](https://sourceforge.net/projects/unluac/) di tehtmi, con la sua licenza (vedi il sito del progetto).
+
 Anteprima di un modello: `Godot --path game -s res://tools/preview.gd -- res://assets/models/levels/nacht/environment.glb out.png 30 -45 0.7`
 
 ## Giocare (prototipo, Mac)
