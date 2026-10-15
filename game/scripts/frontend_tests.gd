@@ -1,10 +1,13 @@
 # Front-end checks (prints OK/FAIL, screenshots analysis/preview/frontend_*.png):
 #   -- --frontend-test intro          splash logos + intro video, skipped by key presses, then the menu
-#   -- --frontend-test menu           menu (music, map text), help/leaderboards/credits/about pages,
-#                                     options: detail level / auto-pause saved and read back,
-#                                     default settings, achievements reset (test files only)
-#   -- <map> --frontend-test pause    pause menu with the new entries, local leaderboard,
-#                                     "Ricomincia livello" -> a new game from round 1
+#   -- --frontend-test menu           title page, menu pages (main, single player, level select with
+#                                     the map text), music, help/leaderboards/credits/about pages,
+#                                     achievements with the COMPLETED! stamp, options: detail level /
+#                                     auto-pause / brightness saved and read back, default settings,
+#                                     achievements reset (test files only)
+#   -- <map> --frontend-test pause    loading page (spinner) until the level is ready, pause menu
+#                                     with the new entries (Opzioni -> Aiuto), local leaderboard,
+#                                     the unlock popup's view page, "Ricomincia livello" -> round 1
 # Test files: user://settings_test.cfg, achievements_test.cfg, leaderboard_test.cfg, savegame_test.json.
 class_name FrontendTests
 extends Node
@@ -107,6 +110,21 @@ func _menu() -> void:
 	await _wait(1.0)
 	var menu := _menu_node()
 	_check(get_tree().root.find_children("*", "IntroSequence", true, false).is_empty(), "no intro with test options")
+	_check(menu.extras.page == "title", "starts on the title page (fe_title)")
+	await _shot("title")
+	(menu.find_child("TITLE_TOUCH", true, false) as Button).pressed.emit()
+	await _wait(0.2)
+	_check(menu.extras.page == "main", "a touch on the title opens the main menu")
+	await _shot("menu")
+	menu.extras.show_page("single")
+	await _wait(0.2)
+	await _shot("menu_single")
+	var diff_before := bool(Settings.get_value("recruit"))
+	(menu.find_child("DIFFICOLTA", true, false) as Button).pressed.emit()
+	_check(bool(Settings.get_value("recruit")) != diff_before and "Recruit" in menu.extras._diff_desc.text,
+		"difficulty toggle with the original description")
+	(menu.find_child("DIFFICOLTA", true, false) as Button).pressed.emit()
+	menu.extras.show_page("select")
 	var music := menu.find_child("MenuMusic", true, false) as AudioStreamPlayer
 	_check(music != null and music.playing, "menu music playing")
 	var src: String = music.stream.resource_path if music and music.stream else ""
@@ -114,7 +132,29 @@ func _menu() -> void:
 	menu._select(2)
 	var desc: String = menu.extras._desc.text
 	_check("swamp" in desc, "map description of Shi No Numa: %s" % desc.replace("\n", " / "))
-	await _shot("menu")
+	_check(menu.extras._thumb.texture != null, "map thumbnail in the white frame")
+	await _shot("menu_select")
+	menu.extras.show_page("extras")
+	await _wait(0.2)
+	await _shot("menu_extras")
+	menu.extras.show_page("options")
+	await _wait(0.2)
+	await _shot("menu_options")
+	# achievements: the COMPLETED! stamp on an unlocked one
+	var ach := Achievements.instance
+	var first_id := String(ach.entries[0]["id"])
+	ach.unlocked[first_id] = int(Time.get_unix_time_from_system())
+	var scr := menu.show_achievements()
+	await _wait(0.3)
+	scr.show_entry(first_id)
+	await _wait(0.1)
+	_check(scr._stamp.visible, "COMPLETED! stamp on an unlocked achievement")
+	await _shot("achievements")
+	scr.show_entry(String(ach.entries[1]["id"]))
+	_check(not scr._stamp.visible or ach.unlocked.has(String(ach.entries[1]["id"])), "no stamp on a locked one")
+	scr.close()
+	ach.unlocked.erase(first_id)
+	await _wait(0.2)
 	# press sound on a button
 	var before := get_tree().root.find_children("MenuPress", "AudioStreamPlayer", true, false).size()
 	(menu.find_child("AIUTO", true, false) as Button).pressed.emit()
@@ -149,6 +189,19 @@ func _menu() -> void:
 	var ap := o.find_child("auto_pause", true, false) as CheckButton
 	ap.button_pressed = false
 	_check(is_equal_approx(get_viewport().scaling_3d_scale, 0.6), "detail Low: 3D render scale 0.6")
+	# Brightness: neutral by default, the slider to the right brightens (grey added)
+	var br := o.find_child("brightness", true, false) as HSlider
+	var quad := get_tree().root.get_node_or_null("Brightness/Quad") as ColorRect
+	_check(br != null and Settings.brightness_level(br.value) == 10 and quad != null and not quad.get_parent().visible,
+		"brightness slider, neutral (IwGx 10) by default")
+	br.value = 1.0
+	await _wait(0.1)
+	_check(Settings.brightness_level(1.0) == 1 and quad.get_parent().visible and is_equal_approx(quad.color.r, 56.0 / 255.0)
+		and (quad.material as CanvasItemMaterial).blend_mode == CanvasItemMaterial.BLEND_MODE_ADD, "brightness max: +56/255 added")
+	await _shot("options_brightness")
+	br.value = 0.0
+	_check(Settings.brightness_level(0.0) == 15 and is_equal_approx(quad.color.a, 21.0 / 255.0), "brightness min: black 21/255 blended")
+	br.value = 0.8
 	var esc := InputEventAction.new()
 	esc.action = "ui_cancel"
 	esc.pressed = true
@@ -158,7 +211,8 @@ func _menu() -> void:
 	_check(not get_tree().paused, "menu not paused after the options")
 	var cfg := ConfigFile.new()
 	_check(cfg.load(Settings.PATH_TEST) == OK and int(cfg.get_value("settings", "detail_level", -1)) == 2 \
-		and cfg.get_value("settings", "auto_pause", true) == false, "options saved to %s" % Settings.PATH_TEST)
+		and cfg.get_value("settings", "auto_pause", true) == false and is_equal_approx(float(cfg.get_value("settings", "brightness", 0)), 0.8),
+		"options saved to %s" % Settings.PATH_TEST)
 	Settings._loaded = false
 	Settings.ensure_loaded()
 	_check(int(Settings.get_value("detail_level")) == 2 and not Settings.get_value("auto_pause"), "options read back")
@@ -173,6 +227,10 @@ func _menu() -> void:
 	await _wait(0.2)
 	_check(int(Settings.get_value("detail_level")) == 0 and Settings.get_value("auto_pause") == true, "defaults restored")
 	_check(is_equal_approx(get_viewport().scaling_3d_scale, 1.0), "detail High again")
+	_check(Settings.brightness_level(Settings.get_value("brightness")) == 10, "brightness neutral again")
+	_check(not is_instance_valid(o) or o.is_queued_for_deletion(), "confirming closes the screen (back to Options)")
+	o = menu.extras.open_options()
+	await _wait(0.2)
 	# achievements reset: only the test file
 	var a := Achievements.instance
 	_check(a.test_mode and String(a.get("_path")) == Achievements.SAVE_TEST, "achievements on the test file")
@@ -194,6 +252,12 @@ func _menu() -> void:
 
 func _pause(level: String) -> void:
 	Leaderboard.add(level, 12, 4321, 150, 40)   # a row to show (test leaderboard)
+	var loading := LoadingScreen.show_over(get_tree())
+	await _wait(0.5)
+	await _shot("loading")
+	var turned: float = loading._spin.rotation
+	var steps := turned / LoadingScreen.STEP
+	_check(turned > 0.0 and absf(steps - roundf(steps)) < 0.01, "spinner turns in steps of 150/4096 turn (%.1f deg)" % rad_to_deg(turned))
 	main._start(level, PackedStringArray())
 	var game: Game = null
 	for c in main.get_children():
@@ -204,13 +268,58 @@ func _pause(level: String) -> void:
 			break
 		await _wait(0.1)
 	await _wait(1.0)
+	_check(not is_instance_valid(loading), "loading page gone once the level is ready")
+	# the unlock popup opens ig_viewachievement
+	var ach := Achievements.instance
+	var aid := String(ach.entries[2]["id"])
+	ach.call("_show_popup", ach.by_id[aid.to_lower()])
+	await _wait(0.5)
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	(ach.get("_popup") as Control).gui_input.emit(click)
+	await _wait(0.3)
+	var viewer: AchievementsScreen = null
+	for n in get_tree().root.get_children():
+		if n is AchievementsScreen:
+			viewer = n
+	_check(viewer != null and viewer.only_id == aid and viewer._rows.size() == 1 and get_tree().paused,
+		"touching the popup opens its achievement, game paused")
+	await _shot("view_achievement")
+	if viewer:
+		viewer.close()
+	await _wait(0.2)
+	_check(not get_tree().paused, "closing the view resumes the game")
 	game.hud.open_pause()
 	var pm: PauseMenu = game.hud._pause
 	await _wait(0.2)
 	await _shot("pause")
+	pm._show("options")
+	await _wait(0.2)
+	await _shot("pause_options")
+	var help_btn: Button = null
+	for b in pm._pages["options"].find_children("*", "Button", true, false):
+		if (b as Button).text == "Aiuto":
+			help_btn = b
+	if help_btn:
+		help_btn.pressed.emit()
+	await _wait(0.3)
+	var help: ExtrasScreen = null
+	for c in pm.get_children():
+		if c is ExtrasScreen:
+			help = c
+	_check(help != null and help.page == "help", "pause Opzioni -> Aiuto opens the help (ig_help)")
+	await _shot("pause_help")
+	if help:
+		help.close()
 	pm._show("settings")
 	await _wait(0.2)
 	await _shot("pause_settings")
+	var esc := InputEventAction.new()
+	esc.action = "ui_cancel"
+	esc.pressed = true
+	pm._unhandled_input(esc)
+	_check(pm._pages["options"].visible, "Esc from the settings goes back to Opzioni")
 	pm._show("main")
 	var lb := ExtrasScreen.new("leaderboard", level)
 	pm.add_child(lb)

@@ -58,6 +58,14 @@ static func box_taken(weapon: String) -> void:
 		say("weapon_good")
 
 
+# Headshot streak of 3 / 5 / 7 (HeadshotAnnounceCount, kiwi file 0x1309b4: with player vox the
+# line "killstreak%d" via the vox function 0x191184, player.gd head_popped). The vox table
+# keeps these three lines under their hash (cd0c35ec..ee = killstreak1..3, variants
+# player0_killstreak<n> 29ae5d08..0a).
+static func killstreak(n: int) -> void:
+	say(Sfx.iw_hash("killstreak%d" % n))
+
+
 static func hit_by_enemy() -> void:
 	if instance and instance.game and instance.game.player and not instance.game.player.dead:
 		say("been_hit")

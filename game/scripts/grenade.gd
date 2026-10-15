@@ -62,7 +62,10 @@ static func spawn(parent: Node, pos: Vector3, vel: Vector3, fuse_left: float, pl
 
 func _ready() -> void:
 	collision_layer = 0
-	collision_mask = 1 | 2   # world and zombies (it bounces off them)
+	# world, zombies (it bounces off them) and the levels' invisible walls (shot_blockers.gd)
+	collision_mask = 1 | 2 | ShotBlockers.LAYER
+	# console.bin WorldColliderGravity 4000 units/s² = 10 m/s² (the world collider's fall)
+	gravity_scale = 10.0 / float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8))
 	mass = 0.4
 	continuous_cd = true
 	contact_monitor = true

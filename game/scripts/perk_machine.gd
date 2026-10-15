@@ -125,8 +125,30 @@ func _on_power(on: bool, instant := false) -> void:
 		_anim.pause()
 
 
-# SoundPerkHum* emitters (perkhumloop), enabled with the power
-var _hum_player: AudioStreamPlayer3D
+# SoundPerkHum* emitters (perkhumloop d998719b), enabled with the power (verruckt.lua
+# 316-319, derriese.lua TurnOnGenerator; Shi No Numa: SoundPerkHum<hut>): the level's own
+# CSoundEmitterSpec entity next to the machine (within 3 m; the huts share one between
+# their machines), played like the ambient emitters (AmbientEmitters.Emitter: the spec's
+# volume 0.8 and 0-10.24 m distance, the emitter's height range 1 m, 0.5 m for two of
+# Der Riese's). Without one: the old estimate, the loop at the machine.
+const HUM_SPEC := "d998719b"
+var _hum_player: Node3D
+
+
+func _hum_emitter() -> Dictionary:
+	var best := {}
+	var best_d := 3.0
+	for n in level.entities:
+		var e: Dictionary = level.entities[n]
+		for se in e.get("sound_emitters", []):
+			if String(se["spec"]) == HUM_SPEC and not se.has("child"):
+				var p := Level._to_transform(e["transform"]).origin
+				var d := Vector2(p.x - _centre.x, p.z - _centre.z).length()
+				if d < best_d:
+					best_d = d
+					best = {"name": String(n), "pos": p, "emitter": se}
+	return best
+
 
 func _hum() -> void:
 	if _hum_player or Sfx.instance == null or not is_inside_tree():
@@ -135,6 +157,18 @@ func _hum() -> void:
 		return   # deferred from setup, before _build_perks turned the power off (Verrückt, Der Riese)
 	if hut == Hut.HIDDEN or hut == Hut.HOVER:
 		return   # Shi No Numa: SoundPerkHum<hut> starts at "perkMachineDropping"
+	var src := _hum_emitter()
+	if not src.is_empty():
+		var shared := level.get_node_or_null("Hum_" + String(src["name"]))
+		if shared == null:
+			var em := AmbientEmitters.Emitter.make(src["emitter"])
+			em.name = "Hum_" + String(src["name"])
+			level.add_child(em)
+			em.global_position = src["pos"]
+			em.enable()
+			shared = em
+		_hum_player = shared
+		return
 	var s = Sfx.instance._stream("perk_hum")
 	if not (s is AudioStreamWAV):
 		return
@@ -142,14 +176,15 @@ func _hum() -> void:
 	loop.loop_mode = AudioStreamWAV.LOOP_FORWARD
 	loop.loop_begin = 0
 	loop.loop_end = int(loop.get_length() * loop.mix_rate)
-	_hum_player = AudioStreamPlayer3D.new()
-	_hum_player.stream = loop
-	_hum_player.volume_db = -10.0
-	_hum_player.unit_size = 2.0
-	_hum_player.max_distance = 12.0
-	add_child(_hum_player)
-	_hum_player.global_position = _centre + Vector3.UP
-	_hum_player.play()
+	var pl := AudioStreamPlayer3D.new()
+	pl.stream = loop
+	pl.volume_db = -10.0
+	pl.unit_size = 2.0
+	pl.max_distance = 12.0
+	add_child(pl)
+	pl.global_position = _centre + Vector3.UP
+	pl.play()
+	_hum_player = pl
 
 
 func usable_from(p: Vector3) -> bool:

@@ -334,6 +334,7 @@ func _start_teleport(pad: Pad) -> void:
 		mainframe.splash = true
 		mainframe.splash_timer = 0.0
 	Sfx.instance.play_at(Sfx.iw_hash("tele_teleport_start"), pad.centre + Vector3.UP)
+	TeleFx.teleport(level, pad.entity)   # Event_Teleport(leave): teleporterLeave/Arrive effects
 	_log("start " + pad.entity)
 
 
@@ -444,6 +445,7 @@ func _splash(pad: Pad) -> void:
 			continue
 		if game:
 			game.suppress_kill_points = true
+		HitFx.hit_sound(z, true)   # CHitTemplate splash sound (hit_fx.gd)
 		z.take_damage(SPLASH_DAMAGE, false, null)
 		if game:
 			game.suppress_kill_points = false

@@ -24,6 +24,8 @@ func _ready() -> void:
 		_powerup_test.call_deferred()
 	elif args.has("--hud-test"):
 		_hud_test.call_deferred()
+	elif args.has("--hud-weapon-test"):   # weapon icon, ammo, reticle, headshot icon (hud_weapon_tests.gd)
+		(func(): load("res://scripts/hud_weapon_tests.gd").run(self)).call_deferred()
 	elif args.has("--weapon-test"):   # grenade | raygun | flame | buy (weapon_tests.gd)
 		(func(): WeaponTests.run(self)).call_deferred()
 	elif args.has("--drink-test") or args.has("--teddy-test") or args.has("--music-test") or args.has("--egg-test") or args.has("--monkey-test"):   # extra_tests.gd
@@ -34,6 +36,8 @@ func _ready() -> void:
 		(func(): load("res://scripts/wunder_tests.gd").run(self)).call_deferred()
 	elif args.has("--swamp-test"):   # map | rise | zipline (swamp_tests.gd, Shi No Numa)
 		(func(): load("res://scripts/swamp_tests.gd").run(self)).call_deferred()
+	elif args.has("--endgame-test"):   # nuke | carpenter (endgame_tests.gd, radial power-up waves)
+		(func(): load("res://scripts/endgame_tests.gd").run(self)).call_deferred()
 	if args.has("--life-watch"):   # alongside the bot: round counters and corpses (lifecycle_tests.gd)
 		var lw: Node = load("res://scripts/lifecycle_tests.gd").new()
 		lw.game = game
@@ -45,9 +49,9 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
-	if OS.get_cmdline_user_args().has("--hud-test"):
+	if OS.get_cmdline_user_args().has("--hud-test") or OS.get_cmdline_user_args().has("--hud-weapon-test"):
 		return
-	if OS.get_cmdline_user_args().has("--weapon-test") or OS.get_cmdline_user_args().has("--zombie-test") or OS.get_cmdline_user_args().has("--swamp-test") or OS.get_cmdline_user_args().has("--wunder-test"):
+	if OS.get_cmdline_user_args().has("--weapon-test") or OS.get_cmdline_user_args().has("--zombie-test") or OS.get_cmdline_user_args().has("--swamp-test") or OS.get_cmdline_user_args().has("--wunder-test") or OS.get_cmdline_user_args().has("--endgame-test"):
 		return
 	if OS.get_cmdline_user_args().has("--drink-test") or OS.get_cmdline_user_args().has("--teddy-test") or OS.get_cmdline_user_args().has("--music-test") or OS.get_cmdline_user_args().has("--egg-test") or OS.get_cmdline_user_args().has("--monkey-test"):
 		return

@@ -78,6 +78,8 @@ static func blast(game: Node3D, pos: Vector3, by: Player, cfg: Dictionary, exclu
 				z.lose_head()
 				res["gibs"] += 1
 		z.take_damage(dmg, false, by)
+		if int(cfg.get("damage_type", 0)) != 5:   # CHitTemplate: splash sound; explosive (type 2, legs off) -> ef263f8b
+			HitFx.on_splash_hit(z, float(cfg["crawl_chance"]) > 0.0)
 		if z.state == Zombie.State.DEAD:
 			res["killed"] += 1
 	# the player's own explosives

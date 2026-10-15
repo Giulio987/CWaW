@@ -99,6 +99,7 @@ func _impact(hit: Dictionary) -> void:
 	if target is Zombie and player:
 		direct = target as Zombie
 		var head := pos.y > direct.global_position.y + 1.45 and not direct.crawler
+		HitFx.hit_sound(direct, false)   # CHitTemplate hit sound
 		direct.take_damage(damage * (head_mul if head else 1.0), head, player)
 	var at := pos + normal * 0.1
 	Explosion.blast(game, at, player, Explosion.raygun_cfg(damage), direct)

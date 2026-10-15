@@ -181,7 +181,7 @@ static func capture(g: Game) -> Dictionary:
 	# barricades: boards left per window (only the damaged ones)
 	var boards := {}
 	for w in lv.windows:
-		if is_instance_valid(w) and w.boards < Barricade.MAX_BOARDS:
+		if is_instance_valid(w) and w.boards < w.max_boards:
 			boards[String(w.name)] = w.boards
 	d["boards"] = boards
 	# power-ups running (seconds left) and pickups lying on the ground (kind, place, age)
@@ -332,7 +332,7 @@ static func apply_world(g: Game, d: Dictionary) -> void:
 	if boards is Dictionary:
 		for w in lv.windows:
 			if boards.has(String(w.name)):
-				w.boards = clampi(int(boards[String(w.name)]), 0, Barricade.MAX_BOARDS)
+				w.boards = clampi(int(boards[String(w.name)]), 0, w.max_boards)
 				w.call("_update_boards")
 	load_providers(g, d)
 

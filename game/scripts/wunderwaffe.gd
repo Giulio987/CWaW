@@ -369,6 +369,7 @@ func _zap(z: Zombie) -> void:
 		_kills += 1
 		z.electric_death = true   # damage type 6: a lightning death
 	attach_effect(z)
+	HitFx.hit_sound(z, false)   # CHitTemplate hit sound (type 6, not fire)
 	z.take_damage(maxf(z.health, 1.0), false, player)   # damage = the target's health
 
 

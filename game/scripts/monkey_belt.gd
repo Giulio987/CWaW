@@ -73,6 +73,9 @@ func set_held(down: bool) -> void:
 	holding = true
 	count -= 1
 	_refresh()
+	# state 46 "Throwingmonkeybomb": sequence ee068614 (winding the key, the throw) and one
+	# of the three playSound3 42123fa7 sounds (gun_states.gd)
+	GunStates.state_sounds(GunStates.data().get("monkey_throw"), func(): return not player.dead)
 	if vm:
 		vm.hold_item(MonkeyBomb.model(), Viewmodel.MONKEY_ARMS, Viewmodel.MONKEY_ANIM)
 		var t := vm.throw_item("", Viewmodel.MONKEY_RELEASE)
@@ -112,7 +115,6 @@ func _throw() -> void:
 	var vel := fwd * THROW_SPEED + Vector3.UP * THROW_UP + Vector3(player.velocity.x, 0.0, player.velocity.z)
 	var b := MonkeyBomb.spawn(player.game, from, vel, player)
 	b.rotation.y = player.rotation.y
-	Sfx.instance.play("knife_slash", -10.0, 0.7)   # whoosh
 
 
 func _physics_process(delta: float) -> void:

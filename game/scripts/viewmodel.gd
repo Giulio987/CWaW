@@ -51,6 +51,8 @@ func set_weapon(name: String) -> void:
 	if _weapon:
 		_weapon.queue_free()
 		_weapon = null
+	_gun = name
+	_phase_id += 1
 	var info: Dictionary = _pairs["weapons"].get(name, {})
 	var model: String = info.get("model", "%08x" % iw_hash(name))
 	if not ResourceLoader.exists(DIR + model + ".glb"):
@@ -82,7 +84,7 @@ func set_weapon(name: String) -> void:
 			var own: String = _anims[act][0] if _anims.has(act) else ""
 			_anims[act] = [own, d[act][1]]
 	if not drinking and _item == null and _slash < 0.0:
-		_play(_rest_action(), true)
+		_to_rest()
 
 
 func _no_shadows(n: Node) -> void:
@@ -131,7 +133,7 @@ func _back_to_idle(action: String) -> void:
 	if drinking or _item != null or _slash >= 0.0:
 		return
 	if not _arms_anim.is_playing() or _arms_anim.current_animation == "" or _arms_anim.current_animation == _anims.get(action, ["", ""])[1]:
-		_play(_rest_action(), true)
+		_to_rest()
 
 
 # Aiming down the sights (player.gd): the gun state machine's states 32 (raise to the
@@ -146,11 +148,108 @@ func set_aim(on: bool) -> void:
 	aiming = on
 	if drinking or _item != null or _slash >= 0.0:
 		return
+	_phase_id += 1
 	var t := "aim_in" if on else "aim_out"
 	if _anims.has(t):
 		_play(t)
 	else:
+		_to_rest()
+
+
+# ------------------------------------------------------------------ gun states
+# Animations of the gun's CIsAnimStateMachine states (weapon_states.json, tools/
+# weapon_states.py): rechamber, last round, reload phases and running, each played at its
+# state's speed (a state lasts len(anim) / speed). Sounds: GunStates (player.gd).
+var _gun := ""          # CItemGun name of the gun in hand
+var _phase_id := 0      # bumped by every new action: queued state steps drop out
+var _rechamber_until := 0   # msec: end of the hip-fire rechamber state 53
+var _rechamber_pid := -1    # its _phase_id (another action ends it)
+var running := false    # sprinting (player.gd): states 13 run in, 14 running (loop), 15 run out
+
+
+func _gs(key: String) -> Variant:
+	return GunStates.data().get(_gun, {}).get(key)
+
+
+# in the fire + rechamber states after a hip shot of a bolt-action / pump gun
+func rechambering() -> bool:
+	return Time.get_ticks_msec() < _rechamber_until and _rechamber_pid == _phase_id and _free()
+
+
+func _free() -> bool:
+	return not drinking and _item == null and _slash < 0.0
+
+
+func _has_state(st) -> bool:
+	return st is Dictionary and _arms_anim.has_animation(String(st["arms"]))
+
+
+# Plays a state's arms and weapon animations at the state's speed x rate; returns its
+# length in seconds.
+func _play_state(st: Dictionary, rate := 1.0, loop := false) -> float:
+	var sp := float(st["speed"]) * rate
+	for p in [[_weapon_anim, String(st["weapon"])], [_arms_anim, String(st["arms"])]]:
+		var ap: AnimationPlayer = p[0]
+		if ap and p[1] != "" and ap.has_animation(p[1]):
+			ap.get_animation(p[1]).loop_mode = Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
+			ap.stop()
+			ap.play(p[1], -1, sp)
+	return float(st["ms"]) / 1000.0 / maxf(rate, 0.001)
+
+
+# Steps [state, rate, loop, (seconds)] one after the other, then the rest pose.
+func _sequence(steps: Array, then_rest := true) -> void:
+	if steps.is_empty() or not _free():
+		if then_rest and steps.is_empty() and _free():
+			_to_rest()
+		return
+	var step: Array = steps[0]
+	var length := _play_state(step[0], step[1], step[2])
+	if step.size() > 3:
+		length = step[3]
+	if step[2] and step.size() <= 3:
+		return   # endless loop (running): left by the next action
+	var id := _phase_id
+	var rest := steps.slice(1)
+	get_tree().create_timer(length, false).timeout.connect(func():
+		if id == _phase_id and _free():
+			if rest.is_empty():
+				if then_rest:
+					_to_rest()
+			else:
+				_sequence(rest, then_rest))
+
+
+# The pose between actions: the sights, the running loop or the idle loop.
+func _to_rest() -> void:
+	var run = _gs("run")
+	if running and not aiming and run is Array and run.size() == 3 and _has_state(run[1]):
+		_play_state(run[1], 1.0, true)
+	else:
 		_play(_rest_action(), true)
+
+
+# Sprint (player.gd): from the rest pose the arms go into the running states (13 -> 14),
+# and out of them (15) when the sprint ends; a shot or a reload in progress carries on
+# and ends in the pose that fits.
+func set_run(on: bool) -> void:
+	if on == running:
+		return
+	running = on
+	var run = _gs("run")
+	if not _free() or aiming or not (run is Array and run.size() == 3 and _has_state(run[1])):
+		return
+	var cur := _arms_anim.current_animation
+	var idle: String = _anims.get("idle", ["", ""])[1]
+	var at_rest := cur == "" or not _arms_anim.is_playing() or cur == idle \
+		or cur in [String(run[0]["arms"]), String(run[1]["arms"]), String(run[2]["arms"])]
+	if not at_rest:
+		return
+	_phase_id += 1
+	if on:
+		_sequence([[run[0], 1.0, false], [run[1], 1.0, true]], false)
+	else:
+		_sequence([[run[2], 1.0, false]], true)
 
 
 func _rest_action() -> String:
@@ -199,6 +298,7 @@ func set_knife_model(model: String) -> void:
 func melee(stab := false, anim := "") -> float:
 	if drinking or _item != null:
 		return 0.0
+	_phase_id += 1
 	if _knife == null:
 		if _hand == null:
 			_hand = BoneAttachment3D.new()
@@ -252,7 +352,7 @@ func _end_melee() -> void:
 		_play("pullout")
 	else:
 		_kick = -0.6
-		_play(_rest_action(), true)
+		_to_rest()
 
 
 func _cancel_melee() -> void:
@@ -289,6 +389,7 @@ func drink(perk := "jugga") -> float:
 		_bottle_anim = aps[0] if aps.size() > 0 else null
 	_clear_item()
 	_cancel_melee()
+	_phase_id += 1
 	drinking = true
 	if _weapon:
 		_weapon.visible = false
@@ -353,24 +454,71 @@ func muzzle_position() -> Vector3:
 
 
 func muzzle_flash() -> void:
+	# the gun's own flash entity (CItemGun body 131, hit_fx.gd flash_spec): texture and
+	# size, the pink/purple ones of the Pack-a-Punch guns, the PPSh's cross
+	var p := get_parent().get_parent() as Player
+	var f := HitFx.flash_spec(p.weapon()) if p else {}
 	var m := MeshInstance3D.new()
 	var q := QuadMesh.new()
-	q.size = Vector2.ONE * FLASH_SIZE * randf_range(0.8, 1.2)
-	q.material = WeaponFx.sprite_mat(FLASH_TEX.pick_random(), true, false)
+	var time := FLASH_TIME
+	if f.is_empty():
+		q.size = Vector2.ONE * FLASH_SIZE * randf_range(0.8, 1.2)
+		q.material = WeaponFx.sprite_mat(FLASH_TEX.pick_random(), true, false)
+	else:
+		q.size = Vector2.ONE * randf_range(f["side"][0], f["side"][1])
+		q.material = WeaponFx.sprite_mat(f["tex"], f["additive"], false)
+		time = maxf(float(f["life"]), 0.05)
 	m.mesh = q
 	m.layers = LAYER
 	m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	get_parent().add_child(m)
 	m.global_position = muzzle_position()
-	get_tree().create_timer(FLASH_TIME).timeout.connect(m.queue_free)
+	get_tree().create_timer(time).timeout.connect(m.queue_free)
 
 
-func kick() -> void:
+# One shot: the fire state (16, or 35 aiming), the last round's state (17 / 36) when its
+# animations differ (Garand: the clip flies out; Browning), then the rechamber state
+# (53 / 54: bolt or pump) when the gun has one, `rate` x faster with Double Tap.
+func kick(last := false, rate := 1.0) -> void:
 	_kick = 0.3 if aiming else 1.0
-	_play("aim_shoot" if aiming and _anims.has("aim_shoot") else "shoot")
+	_phase_id += 1
+	var key := "aim_fire" if aiming else "fire"
+	var st = _gs(key)
+	var lst = _gs(key + "_last")
+	if last and lst is Dictionary and st is Dictionary and lst["arms"] != st["arms"] and _has_state(lst):
+		_sequence([[lst, rate, false]], true)
+	else:
+		_play("aim_shoot" if aiming and _anims.has("aim_shoot") else "shoot")
+	var rc = _gs("aim_rechamber" if aiming else "rechamber")
+	_rechamber_until = 0
+	if rc is Dictionary and st is Dictionary and _has_state(rc):
+		if not aiming:
+			_rechamber_until = Time.get_ticks_msec() + int((float(st["ms"]) + float(rc["ms"])) / rate)
+		var id := _phase_id
+		_rechamber_pid = id
+		get_tree().create_timer(float(st["ms"]) / 1000.0 / rate, false).timeout.connect(func():
+			if id == _phase_id and _free():
+				_sequence([[rc, rate, false]], true))
 
 
-func reload(duration: float) -> void:
+# The reload states (GunStates.reload_plan): one state fitted to `duration`, or start /
+# one loop per shell / end for the trench gun.
+func reload(duration: float, key := "reload", cycles := 0) -> void:
+	_phase_id += 1
+	var ph = _gs(key) if key != "" else null
+	if ph is Array and not ph.is_empty() and _has_state(ph[0] if ph.size() == 1 else ph[1]):
+		var orig := 0.0
+		for p in ph:
+			orig += float(p["ms"]) * (cycles if p["loop"] and cycles > 0 else 1)
+		var rate := orig / 1000.0 / duration if duration > 0.0 else 1.0
+		var steps := []
+		for p in ph:
+			if p["loop"] and cycles > 0:
+				steps.append([p, rate, true, float(p["ms"]) * cycles / 1000.0 / rate])
+			else:
+				steps.append([p, rate, false])
+		_sequence(steps, true)
+		return
 	if _play("reload") == 0.0:
 		_kick = -duration  # no reload animation for this weapon: dip instead
 
@@ -421,6 +569,7 @@ func item_position() -> Variant:
 func hold_item(item: Node3D, arms_anim: String, item_anim := "") -> float:
 	_clear_item()
 	_cancel_melee()
+	_phase_id += 1
 	if _weapon:
 		_weapon.visible = false
 	_item = item

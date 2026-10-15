@@ -1,52 +1,125 @@
-# Game over screen after ig_gameover (ui.group.bin): "gos_survivedlabel" with
-# LS_YOU_HAVE_SURVIVED "You Have Survived %d Rounds" (LS_YOU_HAVE_SURVIVED1 for one),
-# "Points" / "Kills" / "Headshots" (gos_points, gos_kills, gos_headshots), the Retry
-# button (gos_retryButton) and the way back to the menu; next to it the map's local
-# leaderboard (ig_local_leaderboard, 5 rows, ranks LS_RANK_*), where the game is added.
+# Game over, as in the original (kiwi va 0x1b2f04 / update 0x1b318c):
+#  - at death the GUI page ig_gameover_dead: the title "Game Over" (7865e519) and
+#    go_survivedlabel LS_YOU_HAVE_SURVIVED "You Have Survived %d Rounds" (LS_YOU_HAVE_SURVIVED1
+#    for one; the Italian table keeps the English text); the GameOverNukeEffect
+#    "nuke_gameover" wave starts at the player (game.gd, radial_effect.gd); timer 3000 ms
+#  - then the camera switches to "cam_flythrough" (end_camera.gd, EndCamera1..5), the
+#    GameOverMusic CVar ("gameover_intro") plays and the page ig_gameover opens: the title,
+#    gos_survivedlabel, "Points" / "Kills" / "Headshots" (gos_points, gos_kills,
+#    gos_headshots) on a panel, the Retry button (gos_retryButton) and the way back to the
+#    menu; next to it the map's local leaderboard (ig_local_leaderboard, 5 rows, ranks
+#    LS_RANK_*), where the game is added. The HUD is hidden from the death on.
+# The numbers are taken at the death (the game over wave still kills zombies afterwards).
 class_name GameOverScreen
 extends Control
 
 const RED := Color(0.75, 0.05, 0.03)
 const GREY := Color(0.85, 0.85, 0.85)
+const DEAD_TIME := 3.0          # ig_gameover_dead timer (kiwi va 0x1b2fcc: 0xbb8 ms)
+const MUSIC := "gameover_intro" # CVar GameOverMusic (va 0x1b3228)
 
 var game: Node   # Game
 var rank := 0
+var stats_shown := false
+var camera: EndCamera
+var _rounds := 0
+var _score := 0
+var _kills := 0
+var _headshots := 0
+var _dead_page: Control
+
+
+static func survived_text(rounds: int) -> String:
+	return ("You Have Survived %d Round" if rounds == 1 else "You Have Survived %d Rounds") % rounds
 
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var g = game
-	var rounds: int = g.round_number
-	var map: String = g.level_name
+	_rounds = g.round_number
+	_score = g.score
+	_kills = g.kills
+	_headshots = g.headshots
 	var record := not Game.no_achievements() or OS.get_cmdline_user_args().has("--gameover-test")
 	if record:
-		rank = Leaderboard.add(map, rounds, g.score, g.kills, g.headshots)
-	var shade := ColorRect.new()
+		rank = Leaderboard.add(g.level_name, _rounds, _score, _kills, _headshots)
+	_hide_hud()
+	_hide_layers()
+	# ig_gameover_dead
+	_dead_page = Control.new()
+	_dead_page.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_dead_page.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_dead_page)
+	_titles(_dead_page, 0.0)
+	get_tree().create_timer(DEAD_TIME, false).timeout.connect(_show_stats)
+
+
+# "Game Over" and the survived label, centred; `top` moves them up for the stats page
+func _titles(parent: Control, top: float) -> void:
+	for row in [["Game Over", 72, RED, -110.0], [survived_text(_rounds), 46, Color.WHITE, -20.0]]:
+		var l := _label(row[0], row[1], row[2], parent)
+		l.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+		l.offset_left = -600
+		l.offset_right = 600
+		l.offset_top = row[3] + top
+		l.offset_bottom = row[3] + top + 90
+		l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		l.add_theme_constant_override("outline_size", 8)
+
+
+# Siblings in the HUD (points, ammo, perks, prompts...): hidden, also if they re-show
+func _hide_hud() -> void:
+	for c in get_parent().get_children():
+		if c != self and c is CanvasItem:
+			(c as CanvasItem).visible = false
+
+
+# the item belts' own layers (grenade, molotov, betty icons: *_belt.gd)
+func _hide_layers() -> void:
+	for l in (game as Node).find_children("*", "CanvasLayer", true, false):
+		if l != get_parent() and not l is GameFader:
+			(l as CanvasLayer).visible = false
+
+
+func _process(_d: float) -> void:
+	_hide_hud()
+
+
+func _show_stats() -> void:
+	if not is_inside_tree() or stats_shown:
+		return
+	stats_shown = true
+	_dead_page.queue_free()
+	_hide_layers()
+	camera = EndCamera.start(game)
+	Sfx.instance.play(MUSIC)
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	_build_stats()
+
+
+func _build_stats() -> void:
+	var g = game
+	var map: String = g.level_name
+	var shade := ColorRect.new()   # light: the fly-through shows behind the page
 	shade.color = Color(0, 0, 0, 0)
 	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(shade)
-	create_tween().tween_property(shade, "color:a", 0.78, 1.5)
+	create_tween().tween_property(shade, "color:a", 0.3, 1.0)
+	_titles(self, -230.0)
 
-	var smear := TextureRect.new()
-	smear.texture = UiArt.region(UiArt.RED_SMEAR)
-	smear.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	smear.stretch_mode = TextureRect.STRETCH_SCALE
-	smear.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	smear.offset_left = -430
-	smear.offset_right = 430
-	smear.offset_top = 40
-	smear.offset_bottom = 150
-	smear.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(smear)
-	var title := _label("Sei sopravvissuto a %d round" % rounds, 54, Color.WHITE)
-	title.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
-	title.offset_left = -500
-	title.offset_right = 500
-	title.offset_top = 58
-	title.offset_bottom = 130
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	# panel behind the numbers (ig_gameover: a CIwGuiBitmap under the labels)
+	var panel := ColorRect.new()
+	panel.color = Color(0, 0, 0, 0.55)
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	panel.offset_left = -600
+	panel.offset_right = 610
+	panel.offset_top = -175
+	panel.offset_bottom = 140
+	add_child(panel)
 
 	# left: this game; right: the leaderboard
 	var stats := GridContainer.new()
@@ -59,7 +132,7 @@ func _ready() -> void:
 	stats.offset_top = -150
 	stats.offset_bottom = 60
 	add_child(stats)
-	for row in [["Punti", g.score], ["Uccisioni", g.kills], ["Colpi alla testa", g.headshots]]:
+	for row in [["Punti", _score], ["Uccisioni", _kills], ["Colpi alla testa", _headshots]]:
 		var k := _label(row[0], 34, GREY, stats)
 		k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var v := _label(str(row[1]), 40, UiArt.POINTS, stats)

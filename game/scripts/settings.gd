@@ -35,6 +35,9 @@ const DEFAULTS := {
 	# apply_detail(); cl_autopausetoggle "Auto-Pause": pause when the app loses focus
 	"detail_level": 0,
 	"auto_pause": true,
+	# se_brightnessslider position 0..1 (apply_brightness); 0.32 -> IwGx ScreenBrightness 10,
+	# the neutral value (estimate: the original's default is not in the data)
+	"brightness": 0.32,
 }
 
 static var values := {}
@@ -57,9 +60,11 @@ static func ensure_loaded() -> void:
 		values["auto_aim"] = DisplayServer.is_touchscreen_available()
 	apply_audio()
 	apply_detail()
+	apply_brightness()
 	var tree := Engine.get_main_loop() as SceneTree
 	if tree:
-		tree.node_added.connect(_on_node_added)
+		if not tree.node_added.is_connected(_on_node_added):   # ensure_loaded again (tests)
+			tree.node_added.connect(_on_node_added)
 		_retag(tree.root)
 
 
@@ -75,6 +80,8 @@ static func set_value(key: String, v: Variant) -> void:
 		apply_audio()
 	elif key == "detail_level":
 		apply_detail()
+	elif key == "brightness":
+		apply_brightness()
 	elif key == "fov":
 		var tree := Engine.get_main_loop() as SceneTree
 		var cam := tree.root.get_viewport().get_camera_3d() if tree else null
@@ -103,6 +110,7 @@ static func restore_defaults() -> void:
 	values["auto_aim"] = DisplayServer.is_touchscreen_available()   # as in ensure_loaded
 	apply_audio()
 	apply_detail()
+	apply_brightness()
 	set_value("fov", values["fov"])
 	save()
 
@@ -116,6 +124,47 @@ static func apply_detail() -> void:
 	var lvl := clampi(int(values.get("detail_level", 0)), 0, 2)
 	tree.root.scaling_3d_scale = [1.0, 0.8, 0.6][lvl]
 	tree.root.mesh_lod_threshold = [1.0, 2.0, 4.0][lvl]
+
+
+# Brightness (fe_settings/ig_settings se_brightnessslider, kiwi va 0x195f20): the slider
+# position v (0..0x1000) becomes BrightnessSettingMinMax "{ 1, 15 }" lerped on 0x1000 - v
+# (right = brighter), stored and passed to IwGx (0x96dcc). After each frame IwGx (0xa6a80)
+# draws a full-screen quad unless the value is 10: above 8 black alpha-blended with alpha
+# 3 * (b - 8) (15 -> 21/255, darker), up to 8 grey (8 - b) * 8 added (1 -> +56/255, brighter).
+static func brightness_level(v: float) -> int:
+	var x := clampi(int(clampf(v, 0.0, 1.0) * 4096.0), 0, 4096)
+	return 1 + (14 * (4096 - x)) / 4096
+
+
+static var _bright_layer: CanvasLayer
+
+
+static func apply_brightness() -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null or tree.root == null:
+		return
+	if _bright_layer == null or not is_instance_valid(_bright_layer):
+		_bright_layer = CanvasLayer.new()
+		_bright_layer.name = "Brightness"
+		_bright_layer.layer = 128
+		var r := ColorRect.new()
+		r.name = "Quad"
+		r.set_anchors_preset(Control.PRESET_FULL_RECT)
+		r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		r.material = CanvasItemMaterial.new()
+		_bright_layer.add_child(r)
+		tree.root.add_child.call_deferred(_bright_layer)
+	var b := brightness_level(float(values.get("brightness", DEFAULTS["brightness"])))
+	var quad := _bright_layer.get_node("Quad") as ColorRect
+	var mat := quad.material as CanvasItemMaterial
+	_bright_layer.visible = b != 10
+	if b > 8:
+		mat.blend_mode = CanvasItemMaterial.BLEND_MODE_MIX
+		quad.color = Color(0, 0, 0, 3.0 * (b - 8) / 255.0)
+	else:
+		mat.blend_mode = CanvasItemMaterial.BLEND_MODE_ADD
+		var g := (8 - b) * 8 / 255.0
+		quad.color = Color(g, g, g, 1.0)
 
 
 # --- shortcuts used by gameplay code

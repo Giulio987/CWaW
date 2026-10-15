@@ -1,5 +1,7 @@
-# Main menu "OPZIONI" (fe_options/fe_settings): the pause menu's settings page on its own,
-# over the menu; going back from it closes the screen.
+# Main menu Options entries (fe_options -> fe_settings, fe_restoretofactoryyesno): the pause
+# menu's settings page (or the Default Settings confirmation) on its own, over the menu; going
+# back to the pause menu's main or options page closes the screen (the menu has its own
+# Options page, frontend_menu.gd).
 class_name OptionsScreen
 extends PauseMenu
 
@@ -11,15 +13,15 @@ func _ready() -> void:
 	_shade.color = Color(0, 0, 0, 0.93)   # over the menu, not over the game
 
 
-func open_options() -> void:
+func open_options(first := "settings") -> void:
 	_opening = true
 	open()
 	_opening = false
-	_show("settings")
+	_show(first)
 
 
 func _show(name: String) -> void:
-	if name == "main" and not _opening:
+	if (name == "main" or name == "options") and not _opening:
 		close()
 		queue_free()
 		return

@@ -49,6 +49,9 @@ TEXT = {   # name -> localisation hash (found in the GUI resources named in the 
     "help_performance": 0xeafaa61d,
     "help_support": 0xea8ebb10,
     "single_player_leaderboards": 0xc653fc55,
+    "regular_desc": 0xfa235ba4,      # fe_singleplayer, shown under si_difficultytoggle
+    "recruit_desc": 0x0a25cbed,
+    "headphones": 0x44ee966e,        # fe_settings / ig_settings note
 }
 
 

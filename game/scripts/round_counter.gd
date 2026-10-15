@@ -4,7 +4,7 @@
 class_name RoundCounter
 extends Control
 
-const SCALE := 2.6          # atlas strokes are 37-41 px tall
+const SCALE := 2.0          # the tally images at 1:1 in the 480x320 HUD, x2 (as Hud.UI_SCALE)
 const DIGIT_SIZE := 110
 const FLASHES := 3
 

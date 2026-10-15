@@ -66,5 +66,5 @@ func _process(delta: float) -> void:
 		return
 	var p := game.player
 	if p and not p.dead and p.global_position.distance_to(global_position) < PICK_RADIUS + 0.6:
-		game.apply_powerup(kind)
+		game.apply_powerup(kind, global_position)   # the nuke and carpenter waves start here
 		queue_free()

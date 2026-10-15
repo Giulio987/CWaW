@@ -221,9 +221,10 @@ func _d_face(p: Vector3) -> void:
 		rotation.y = rotate_toward(rotation.y, _heading, DOG_TURN_RENDER * dt)
 
 
-func take_damage(amount: float, headshot: bool, by: Player, knife := false, _hit_pos := Vector3.INF) -> void:
+func take_damage(amount: float, headshot: bool, by: Player, knife := false, hit_pos := Vector3.INF) -> void:
 	if state == State.DEAD:
 		return
+	HitFx.on_hit(self, amount, hit_pos, by, knife)   # the dogs' CHitTemplate 1d1ca339 (hit_fx.gd)
 	var g := get_parent() as Game
 	if g and g.insta_kill:
 		amount = health

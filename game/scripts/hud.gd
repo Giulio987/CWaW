@@ -5,7 +5,7 @@ extends CanvasLayer
 var game: Game
 var _round: RoundCounter   # WaW tally marks / digits (round_counter.gd)
 var _points: Label
-var _ammo: Label
+var _weapon_hud: WeaponHud           # hud_guns icon + ammos_container (weapon_hud.gd)
 var _prompt: Label
 var _msg: Label
 var _hurt: ColorRect
@@ -23,16 +23,11 @@ var _over := false
 var _damage: DamageOverlay          # DamageBitmapTop/Bottom (damage_overlay.gd)
 var _powerups: PowerupFrame         # CGuiFramePowerup + pickup message (powerup_frame.gd)
 var _msg_t := 0.0                   # show_message timer
-var _low_ammo := false              # LowClipPercentage / LowAmmoPercentage reached
-var _blink_t := 0.0
 var _last_health := -1.0
-var _cross: Label                   # reticle, hidden while aiming down the sights
+var _reticle: AimingReticle         # CGuiFrameAimingReticle (aiming_reticle.gd)
 var _hold_bar: ProgressBar          # InteractTime hold progress
-# console.bin: the clip blinks at LowClipPercentage 35 % of the magazine, the
-# reserve at LowAmmoPercentage 20 % of the full reserve, every AmmoBlinkTime 500 ms
-const LOW_CLIP := 0.35
-const LOW_AMMO := 0.20
-const AMMO_BLINK := 0.5
+const UI_SCALE := 2.0               # original 480x320 HUD pixels -> screen (as WeaponHud)
+const MESSAGE_Y := 0x6b8 / 4096.0   # MessageLabel y (fraction of the screen height)
 
 
 func bind(g: Game) -> void:
@@ -51,29 +46,48 @@ func bind(g: Game) -> void:
 	_powerups = PowerupFrame.new()
 	_powerups.game = g
 	add_child(_powerups)
+	# Layout of the original HUD (ui.group.bin, 480x320, here x UI_SCALE from the top
+	# left; units: 1 = pixels, 2 = parent size + value, 8 = fraction of the parent):
+	# "wave_indicator" 100x50 centred at 55,65 (tally images at 1:1 -> bottom at 90)
 	_round = RoundCounter.new()
-	_round.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_round.position += Vector2(28, -28)
+	_round.position = Vector2(5, 90) * UI_SCALE
 	add_child(_round)
-	# perk icons in a row above the round number
+	# CGuiFramePerkDisplay (17daefa2): at 122,0, 86x34, 34x34 icons 17 px apart, overlapping
 	_perks = HBoxContainer.new()
-	_perks.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	_perks.position += Vector2(24, -150)
-	_perks.add_theme_constant_override("separation", 6)
+	_perks.position = Vector2(122, 0) * UI_SCALE
+	_perks.add_theme_constant_override("separation", int(-17 * UI_SCALE))
 	_perks.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_perks)
-	_points = _label(46, UiArt.POINTS, Control.PRESET_BOTTOM_RIGHT, Vector2(-220, -158))
+	# "points_container" 120x50 at 0,0: a 100x50 red smear (atlas 192,61-292,101) and
+	# "points_count" at 30 % (36), 0, 96x40, HUD font, left / top aligned
+	var smear := TextureRect.new()
+	smear.texture = UiArt.region(Rect2(192, 61, 100, 40))
+	smear.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	smear.size = Vector2(100, 50) * UI_SCALE
+	smear.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(smear)
+	_points = _label(int(22 * UI_SCALE), UiArt.POINTS, Control.PRESET_TOP_LEFT, Vector2(36, 0) * UI_SCALE)
 	_points.add_theme_font_override("font", UiArt.font())
 	_points.add_theme_constant_override("outline_size", 0)
-	_ammo = _label(22, Color.WHITE, Control.PRESET_BOTTOM_RIGHT, Vector2(-320, -80))
-	_prompt = _label(22, Color.WHITE, Control.PRESET_CENTER_BOTTOM, Vector2(-260, -200))
-	_msg = _label(30, Color.WHITE, Control.PRESET_CENTER, Vector2(-200, -100))
-	_cross = _label(26, Color(1, 1, 1, 0.7), Control.PRESET_CENTER, Vector2(-7, -18))
-	_cross.text = "+"
+	# CGuiLabelInteractMessage of the control frames: top, full width, 65 px high, centred
+	_prompt = _label(22, Color.WHITE, Control.PRESET_TOP_WIDE, Vector2.ZERO)
+	_prompt.custom_minimum_size.y = 65 * UI_SCALE
+	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_prompt.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	# "MessageLabel" ("Round 1"...): centred on x 50 %, y 0x6b8 / 4096 (42 %), HUD font
+	_msg = _label(int(22 * UI_SCALE), Color.WHITE, Control.PRESET_TOP_WIDE, Vector2.ZERO)
+	_msg.add_theme_font_override("font", UiArt.font())
+	_msg.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_reticle = AimingReticle.new()
+	_reticle.player = g.player
+	add_child(_reticle)
+	_weapon_hud = WeaponHud.new()   # top right, as hud_guns / ammos_container
+	_weapon_hud.player = g.player
+	add_child(_weapon_hud)
 	# InteractTime hold progress (player.gd interact_progress), under the prompt
 	_hold_bar = ProgressBar.new()
-	_hold_bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	_hold_bar.position += Vector2(-110, -168)
+	_hold_bar.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_hold_bar.position += Vector2(-110, 65 * UI_SCALE)
 	_hold_bar.size = Vector2(220, 12)
 	_hold_bar.show_percentage = false
 	_hold_bar.max_value = 1.0
@@ -105,16 +119,22 @@ func _refresh() -> void:
 	var p := game.player
 	_points.text = str(p.points)
 	if _shown_points >= 0 and p.points != _shown_points:
-		PointsPopup.spawn(self, p.points - _shown_points, _points.position)
+		# the counter is top left as in the original: popups go to its right / below
+		# (CGuiInGameHud's own animation, startPtAnim 40,40 towards -200,-200 over
+		# pointAnimationTime 500 ms, would leave the screen at once: not reproduced)
+		var pp := PointsPopup.spawn(self, p.points - _shown_points, _points.position)
+		var w := _points.get_minimum_size().x
+		if p.points > _shown_points:
+			pp.position = _points.position + Vector2(w + 20 + randf() * 30, randf_range(0, 40))
+			pp._vel = Vector2(randf_range(60, 110), randf_range(-30, 50))
+		else:
+			pp.position = _points.position + Vector2(w * 0.3, 50)
+			pp._vel = Vector2(10, 22)
 	_shown_points = p.points
-	var w := p.weapon()
-	_ammo.text = "%s   %d / %d" % [Weapons.display_of(w), w["mag"], w["reserve"]]
 	var frac: float = p.health / p.max_health
 	_hurt.color.a = clamp((1.0 - frac) * 0.15, 0.0, 0.15)
 	_damage.set_health(frac, _last_health >= 0.0 and p.health < _last_health)
 	_last_health = p.health
-	var st := Weapons.stats_of(w)
-	_low_ammo = (st["mag"] > 0 and w["mag"] <= st["mag"] * LOW_CLIP) or (st["reserve"] > 0 and w["reserve"] <= st["reserve"] * LOW_AMMO)
 	if p.perks != _shown_perks:
 		_show_perks(p.perks)
 
@@ -128,7 +148,7 @@ func _show_perks(perks: Array) -> void:
 		if tex:
 			var r := TextureRect.new()
 			r.texture = tex
-			r.custom_minimum_size = Vector2(44, 45)
+			r.custom_minimum_size = Vector2(34, 34) * UI_SCALE
 			r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 			r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 			r.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -142,17 +162,12 @@ func _show_perks(perks: Array) -> void:
 
 
 func _process(_d: float) -> void:
+	_msg.position.y = get_viewport().get_visible_rect().size.y * MESSAGE_Y - _msg.size.y / 2.0
 	if game and game.player:
 		_prompt.text = game.player.prompt
-		# the aim states switch the reticle off (gun state machine output "reticle")
-		_cross.visible = not game.player.aiming
 		var hp: float = game.player.interact_progress()
 		_hold_bar.visible = hp >= 0.0
 		_hold_bar.value = maxf(hp, 0.0)
-	# low ammo: the ammo counter blinks red / white every AmmoBlinkTime
-	_blink_t += _d
-	var red := _low_ammo and fmod(_blink_t, AMMO_BLINK * 2.0) < AMMO_BLINK
-	_ammo.add_theme_color_override("font_color", Color(1.0, 0.15, 0.1) if red else Color.WHITE)
 	if _msg_t > 0.0:
 		_msg_t -= _d
 		if _msg_t <= 0.0:

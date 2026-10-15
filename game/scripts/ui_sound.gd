@@ -39,7 +39,9 @@ static func install() -> void:
 
 static func _on_node_added(n: Node) -> void:
 	if n is BaseButton:
-		(n as BaseButton).pressed.connect(_pressed.bind(n))
+		var cb := _pressed.bind(n)
+		if not (n as BaseButton).pressed.is_connected(cb):   # a reparented button is added again
+			(n as BaseButton).pressed.connect(cb)
 
 
 static func _pressed(b: BaseButton) -> void:

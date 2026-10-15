@@ -3,8 +3,9 @@
 # - ig_settings / fe_settings: se_performanceleveltoggle ("High (slowest)" / "Medium" /
 #   "Low (fastest)", the "Detail Level" of the help) and cl_autopausetoggle "Auto-Pause"
 #   (Settings "detail_level", "auto_pause"; settings.gd apply_detail, save_game.gd Watcher)
-# - fe_options / ig_options "Default Settings" (restoretofactory) with
-#   ig_restoretofactoryyesno "Are you sure you want to reset your settings?"
+# - ig_options (from ig_pause "Options"): Settings, Help (ig_help: the help pages of
+#   extras_screen.gd), Default Settings (restoretofactory) with ig_restoretofactoryyesno
+#   "Are you sure you want to reset your settings?" (Controls and Language left out)
 # - a reset of achievements and statistics (not in the original), with confirmation; it
 #   writes Achievements' current file (achievements_test.cfg in tests)
 # - ig_pause "resetlevel" with ig_resetlevelyesno "Are you sure you want to restart the
@@ -35,7 +36,7 @@ static func add_rows(pm: PauseMenu, grid: GridContainer, box: VBoxContainer) -> 
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_theme_constant_override("separation", 16)
 	box.add_child(row)
-	for spec in [["Impostazioni predefinite", "defaults"], ["Azzera obiettivi e statistiche", "reset_stats"]]:
+	for spec in [["Azzera obiettivi e statistiche", "reset_stats"]]:
 		var b := pm._button(spec[0], pm._show.bind(spec[1]), 28)
 		b.custom_minimum_size = Vector2(380, 44)
 		b.name = spec[1]
@@ -49,19 +50,26 @@ static func add_rows(pm: PauseMenu, grid: GridContainer, box: VBoxContainer) -> 
 
 
 static func add_pages(pm: PauseMenu) -> void:
+	pm._pages["options"] = pm._page("OPZIONI", [
+		["Impostazioni", pm._show.bind("settings")],
+		["Aiuto", func(): pm.add_child(ExtrasScreen.new("help"))],
+		["Impostazioni predefinite", pm._show.bind("defaults")],
+		["Indietro", pm._show.bind("main")],
+	])
+	pm._pages["options"].get_child(pm._pages["options"].get_child_count() - 2).name = "defaults"
 	pm._pages["restart"] = pm._page("Ricominciare il livello?\nI progressi andranno persi.", [
 		["No", pm._show.bind("main")],
 		["Sì", restart_level.bind(pm)],
 	], 44)
 	pm._pages["defaults"] = pm._page("Ripristinare le impostazioni predefinite?", [
-		["No", pm._show.bind("settings")],
+		["No", pm._show.bind("options")],
 		["Sì", restore_defaults.bind(pm)],
 	], 44)
 	pm._pages["reset_stats"] = pm._page("Azzerare tutti gli obiettivi e le statistiche?\nNon si può annullare.", [
 		["No", pm._show.bind("settings")],
 		["Sì, azzera", reset_stats.bind(pm)],
 	], 44)
-	for k in ["restart", "defaults", "reset_stats"]:
+	for k in ["options", "restart", "defaults", "reset_stats"]:
 		pm._pages[k].visible = false
 
 
@@ -71,7 +79,18 @@ static func restore_defaults(pm: PauseMenu) -> void:
 	var old: Control = pm._pages["settings"]
 	pm._pages["settings"] = pm._settings_page()
 	old.queue_free()
-	pm._show("settings")
+	pm._pages["settings"].visible = false
+	pm._show("options")   # back to the Options page (from the menu: closes the screen)
+
+
+# Esc / back from a pause page: settings and the default-settings question go back to Options
+static func back_page(pm: PauseMenu) -> String:
+	for k in ["settings", "defaults"]:
+		if pm._pages.has(k) and pm._pages[k].visible:
+			return "options"
+	if pm._pages.has("reset_stats") and pm._pages["reset_stats"].visible:
+		return "settings"
+	return "main"
 
 
 static func reset_stats(pm: PauseMenu) -> void:

@@ -26,6 +26,12 @@ var _model: Node3D
 var _song: AudioStreamPlayer3D
 var _lure_t := 0.0
 var lured := []   # zombies currently lured (tests)
+# ASM 93125439 of the thrown monkey (gun_states.gd "monkey_loop"): one looping state, the
+# monkeybomb_loop animation at speed 2 (649 ms a cycle), c1629296 on entering it, the
+# cymbals 9104e68f at 349 and 649 ms of every cycle
+var _loop_state: Dictionary = {}
+var _cycle_t := 0.0
+var claps := 0   # cymbal sounds played (tests)
 
 
 static func model() -> Node3D:
@@ -83,6 +89,7 @@ func _physics_process(delta: float) -> void:
 	if not landed and (life > 0.25 and linear_velocity.length() < 0.4 or life > 2.0):
 		_land()
 	if landed:
+		_cymbals(delta)
 		_lure_t -= delta
 		if _lure_t <= 0.0:
 			_lure_t = 0.25
@@ -94,8 +101,38 @@ func _physics_process(delta: float) -> void:
 		explode()
 
 
+func _loop() -> Dictionary:
+	if _loop_state.is_empty():
+		var st = GunStates.data().get("monkey_loop")
+		_loop_state = st if st is Dictionary else {"ms": 0, "events": []}
+	return _loop_state
+
+
+func _cymbals(delta: float) -> void:
+	var st := _loop()
+	var cycle := float(st["ms"]) / 1000.0
+	if cycle <= 0.0:
+		return
+	var t0 := _cycle_t
+	_cycle_t += delta
+	for e in st["events"]:
+		if e[1] != "playsound" or float(e[0]) <= 0.0:
+			continue
+		var at := float(e[0]) / 1000.0
+		# every cycle's event time passed during this frame
+		var k := ceilf((t0 - at) / cycle) if t0 > at else 0.0
+		while at + k * cycle <= _cycle_t:
+			if at + k * cycle > t0:
+				claps += 1
+				Sfx.instance.play_at(String(e[2]), global_position + Vector3.UP * 0.2)
+			k += 1.0
+
+
 func _land() -> void:
 	landed = true
+	for e in _loop()["events"]:
+		if e[1] == "playsound" and float(e[0]) <= 0.0:   # on entering the state
+			Sfx.instance.play_at(String(e[2]), global_position + Vector3.UP * 0.2)
 	linear_velocity = Vector3.ZERO
 	freeze = true
 	var ap := _model.find_children("*", "AnimationPlayer", true, false)
@@ -103,7 +140,7 @@ func _land() -> void:
 		var anim := ap[0] as AnimationPlayer
 		if anim.has_animation(ANIM_LOOP):
 			anim.get_animation(ANIM_LOOP).loop_mode = Animation.LOOP_LINEAR
-			anim.play(ANIM_LOOP)
+			anim.play(ANIM_LOOP, -1, float(_loop().get("speed", 1.0)))
 	var s := Sfx.instance._stream(SONGS.pick_random())
 	if s:
 		_song.stream = s

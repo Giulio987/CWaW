@@ -23,6 +23,12 @@ static var _mats := {}
 
 
 static func fire(player: Player, w: Dictionary, s: Dictionary, cam: Camera3D) -> bool:
+	if String(w["name"]) == "colt45" and w.get("upgraded", false):   # Mustang & Sally (mustang_bolt.gd)
+		var bolt := MustangBolt.new()
+		bolt.player = player
+		player.game.add_child(bolt)
+		bolt.launch(cam.global_position, player._viewmodel.muzzle_position(), -cam.global_basis.z)
+		return true
 	match String(w["name"]):
 		"raygun":
 			_fire_raygun(player, w, s, cam)

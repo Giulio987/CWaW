@@ -108,6 +108,7 @@ var state := State.TO_WINDOW:
 			return
 		state = v
 var revive_blocked := 0
+var traversing := false   # on a route shortcut (route_shortcuts.gd)
 var health := 100.0
 var window: Barricade
 var target: Player
@@ -119,6 +120,10 @@ var speed_index := 0     # original speed 1..14, 0 = picked from WALKS/RUNS
 var rise := false        # set before add_child: climb out of the ground first
 var water := false       # "_water" template (Shi No Numa swamp spawns): rises out of the water
 var entry := Vector3.INF # set before add_child: walk straight in from a spawn off the navmesh
+# set before add_child: a Shi No Numa swamp "window" without boards (fishingSwamp/storageSwamp/
+# commRoomSwamp ZombieWindow<n>, an AvailableWindows entry of ingame.lua RebuildAreaInfo): the
+# zombie walks to that point, then chases (no boards to tear). `window` is then only nominal.
+var waypoint := Vector3.INF
 var _after_rise: State = State.TO_WINDOW
 var _speed_up_t := 0.0
 var life := 0.0             # seconds since spawn
@@ -200,8 +205,25 @@ func set_speed_index(i: int) -> void:
 	move_anim = st[0]
 	move_rate = st[1]
 	speed = float(WALKS.get(move_anim, RUNS.get(move_anim, 1.0))) * move_rate
+	_jap_speed_anim()
 	if _anim and not crawler and state in [State.TO_WINDOW, State.CHASE]:
 		_play(move_anim)
+
+
+# Shi No Numa loads zombiesAnimsJap, whose state machines (2c8a758b / d06d3216) differ
+# from the German ones in state 14 (speed 8): body 42086c15 (3.03 s) with root-motion
+# partner 6b76349b (2.88 m in 3.03 s: 0.95 m/s) instead of 9a1f4265 / eb52d0eb (0.69 m/s).
+const SPEED8_GER := "9a1f4265"
+const SPEED8_JAP := "42086c15"
+const SPEED8_JAP_SPEED := 0.95
+
+
+func _jap_speed_anim() -> void:
+	if model_set == "jap" and move_anim == SPEED8_GER:
+		move_anim = SPEED8_JAP
+		speed = SPEED8_JAP_SPEED * move_rate
+		if _anim and _anim.has_animation(SPEED8_JAP):
+			_anim.get_animation(SPEED8_JAP).loop_mode = Animation.LOOP_LINEAR
 
 
 # World at War zombie health: 150 at round 1, +100 per round up to 950 at round 9,
@@ -237,7 +259,7 @@ func _ready() -> void:
 	_turn_render = deg_to_rad(randf_range(TURN_SPEED_RENDER.x, TURN_SPEED_RENDER.y) * 360.0 / 4096.0)
 	_heading = rotation.y
 	_anim = _model.find_children("*", "AnimationPlayer")[0]
-	for a in WALKS.keys() + RUNS.keys() + [IDLE] + ATTACKS:
+	for a in WALKS.keys() + RUNS.keys() + [IDLE, SPEED8_JAP] + ATTACKS:
 		if _anim.has_animation(a):
 			_anim.get_animation(a).loop_mode = Animation.LOOP_LINEAR
 	_agent = NavigationAgent3D.new()
@@ -245,8 +267,10 @@ func _ready() -> void:
 	_agent.target_desired_distance = 0.5
 	_agent.radius = 0.35
 	_agent.height = 1.8
+	_agent.navigation_layers = 1 | RouteShortcuts.NAV_LAYER   # route shortcut links (route_shortcuts.gd)
+	_agent.link_reached.connect(func(d: Dictionary): RouteShortcuts.traverse(self, d))
 	add_child(_agent)
-	_agent.target_position = window.outside
+	_agent.target_position = walk_goal()
 	if rise:
 		_start_rise()
 	else:
@@ -264,6 +288,7 @@ static var _cel_copies := {}   # material -> its copy on another cel
 func _setup_model(g: Game) -> void:
 	if model_set == "":
 		model_set = LEVEL_MODELS.get(g.level_name if g else "", "ger")
+	_jap_speed_anim()
 	var path: String = MODELS.get(model_set, MODELS["ger"])
 	if not _scenes.has(path):
 		_scenes[path] = load(path)
@@ -363,7 +388,7 @@ func _start_entry() -> void:
 		# the agent's path still starts behind the backdrop: path again from here
 		_best_dist = INF
 		_stall = 0.0
-		_agent.target_position = window.outside)
+		_agent.target_position = walk_goal())
 
 
 func _play(a: String, blend := 0.2) -> void:
@@ -462,6 +487,10 @@ func _physics_process(delta: float) -> void:
 		return
 	_update_speed_up(delta)
 	_update_bleed(delta)
+	if _update_bleed_out(delta):
+		return
+	if traversing:
+		return   # jumping down / climbing up a route shortcut (route_shortcuts.gd)
 	match state:
 		State.RISING:
 			_timer -= delta
@@ -470,7 +499,7 @@ func _physics_process(delta: float) -> void:
 				_shape.position.y = 0.35 if crawler else 0.9
 				_play(move_anim, 0.3)
 		State.TO_WINDOW:
-			var d := global_position.distance_to(window.outside)
+			var d := global_position.distance_to(walk_goal())
 			# progress watchdog: a zombie that stops getting closer is put at the window
 			# (out of the player's sight; after 20 s anyway)
 			if d < _best_dist - 0.2:
@@ -481,14 +510,14 @@ func _physics_process(delta: float) -> void:
 			if _dropping:
 				pass
 			elif d < 0.7 or (_agent.is_navigation_finished() and d < 2.5):
-				global_position = window.outside
+				global_position = walk_goal()
 				_start_tearing()
 			elif (_agent.is_navigation_finished() or _stall > 2.0) and _try_drop():
 				pass  # jumping down from a roof / ledge towards a lower window
 			elif _stall > 20.0 or ((_stall > 6.0 or (_agent.is_navigation_finished() and _stall > 0.5)) and not _seen()):
 				# the navmesh does not reach the window (or the zombie is stuck): put it
 				# there, at once when the player cannot see the jump
-				global_position = window.outside
+				global_position = walk_goal()
 				_start_tearing()
 			else:
 				_move_along_path(delta)
@@ -574,7 +603,7 @@ var _dropping := false
 
 
 func _try_drop() -> bool:
-	var to := window.outside - global_position
+	var to := walk_goal() - global_position
 	var flat := Vector3(to.x, 0.0, to.z)
 	if to.y > -1.0 or flat.length() < 0.3:
 		return false
@@ -619,7 +648,7 @@ func _try_drop() -> bool:
 			collision_mask = 1 | 4 | Level.NAV_FLOOR_LAYER
 			_best_dist = INF
 			_stall = 0.0
-			_agent.target_position = window.outside
+			_agent.target_position = walk_goal()
 			_play(move_anim))
 	return true
 
@@ -817,10 +846,19 @@ func _antiflock_point(dist: float) -> Vector3:
 	return NavigationServer3D.map_get_closest_point(get_world_3d().navigation_map, goal)
 
 
+# Where TO_WINDOW walks to: the window's outside point, or the boardless swamp waypoint.
+func walk_goal() -> Vector3:
+	return waypoint if waypoint != Vector3.INF else window.outside
+
+
 func _start_tearing() -> void:
 	_end_unstick()
 	if reached_window < 0.0:
 		reached_window = life
+	if waypoint != Vector3.INF:
+		state = State.CHASE   # a window without boards: straight into the chase
+		_play(move_anim)
+		return
 	if window.occupied_by != null and window.occupied_by != self and is_instance_valid(window.occupied_by):
 		_play(IDLE)
 		return  # wait for the zombie ahead
@@ -859,6 +897,7 @@ func _start_climb() -> void:
 func take_damage(amount: float, headshot: bool, by: Player, knife := false, hit_pos := Vector3.INF) -> void:
 	if state == State.DEAD:
 		return
+	HitFx.on_hit(self, amount, hit_pos, by, knife)   # blood and hit sound: the CHitTemplate (hit_fx.gd)
 	var g := get_parent() as Game
 	var insta := g != null and g.insta_kill
 	if insta:
@@ -942,6 +981,45 @@ func _damage_limb(loc: int, amount: float) -> bool:
 		Weapons.LOC_CHEST:
 			open_chest()
 	return false
+
+
+# Bleed-out of a zombie that gets nowhere (kiwi file 0x1392f0..0x139610, the zombie AI
+# update): its movement is summed into a vector; when that net displacement passes
+# ZombieBleedOutDistance (console 10000 units = 25 m) it is zeroed and the timer goes back
+# to ZombieBleedOutTime (console 30000 ms; code default 120000). The timer is also reset
+# when the AI goes for its target (kiwi file 0x138e54: target in reach, the attack/tear;
+# here TEARING, CLIMBING, ATTACK and RISING) and when it gets a target (0x1387d4). When it
+# runs out the zombie is removed (log "ZB", kiwi 0x20bfac) and, not being a kill, the wave
+# spawns another (game.gd _on_tracked_exit). Remake: never while the player sees it, and
+# not for the test zombies with huge health.
+const BLEED_OUT_DIST := 10000.0 / 400.0   # ZombieBleedOutDistance
+const BLEED_OUT_TIME := 30.0              # ZombieBleedOutTime
+var bled_out := false
+var _bo_left := BLEED_OUT_TIME
+var _bo_moved := Vector3.ZERO
+var _bo_prev := Vector3.INF
+
+
+func _update_bleed_out(delta: float) -> bool:
+	if _bo_prev == Vector3.INF:
+		_bo_prev = global_position
+	_bo_moved += global_position - _bo_prev
+	_bo_prev = global_position
+	if _bo_moved.length() > BLEED_OUT_DIST or state in [State.TEARING, State.CLIMBING, State.ATTACK, State.RISING]:
+		_bo_moved = Vector3.ZERO
+		_bo_left = BLEED_OUT_TIME
+		return false
+	_bo_left -= delta
+	if _bo_left > 0.0 or health >= 1e5 or _seen():
+		return false
+	bled_out = true
+	print("[zombie] bled out (no %.0f m in %.0f s) at %s" % [BLEED_OUT_DIST, BLEED_OUT_TIME, global_position.snapped(Vector3.ONE * 0.1)])
+	_end_unstick()
+	if window and window.occupied_by == self:
+		window.occupied_by = null
+	set_physics_process(false)
+	queue_free()
+	return true
 
 
 func _update_bleed(delta: float) -> void:
@@ -1031,6 +1109,7 @@ func lose_head() -> void:
 		_show_block(b, false)
 	_show_block("94c24809", true)
 	_spawn_gib(head, head)
+	HitFx.limb(self, "head")   # CDismembermentSpec effect 3e08391d
 
 
 func lose_arm(side: String) -> void:
@@ -1043,6 +1122,7 @@ func lose_arm(side: String) -> void:
 	_show_block("e1f1c9f3" if side == "left" else "75a47286", true)
 	if first:
 		_spawn_gib(first, first)
+	HitFx.limb(self, side)   # CDismembermentSpec effects 34a75f56 / 888d60e9
 
 
 # body_off: the tunic front goes, the open chest shows (no gib, no effect)

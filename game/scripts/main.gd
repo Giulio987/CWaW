@@ -80,10 +80,16 @@ func _start(level: String, args: PackedStringArray) -> void:
 		_dog_test(game)
 	if args.has("--trap-test"):
 		_trap_test(game)
+	if args.has("--trap-fx-look") or args.has("--dog-fx-look"):
+		preload("res://scripts/fx_tests.gd").start(self, game, args)   # fx_tests.gd (original effects)
 	if args.has("--tele-test"):
 		_tele_test(game)
+	if args.has("--telefx-test") or args.has("--stands-test") or args.has("--altwin-test") or args.has("--panel-test"):
+		MapFxTests.start(self, game, args)   # map_fx_tests.gd
 	if args.has("--bridge-test") or args.has("--flytrap-test") or args.has("--extras-test"):
 		DerrieseTests.start(self, game, args)   # derriese_tests.gd
+	if args.has("--hitfx-test"):
+		preload("res://scripts/hit_fx_tests.gd").start(self, game, args)   # hit_fx_tests.gd (blood, impacts, flashes, Mustang)
 	if args.has("--barrel-test") or args.has("--maps-test"):
 		preload("res://scripts/barrel_tests.gd").start(self, game, args)   # barrel_tests.gd
 	if args.has("--achievement-test") or args.has("--footstep-test"):
@@ -96,10 +102,16 @@ func _start(level: String, args: PackedStringArray) -> void:
 		preload("res://scripts/item_tests.gd").start(self, game, args)   # item_tests.gd (betty, bowie, magnum)
 	if args.has("--wave-test"):
 		preload("res://scripts/wave_tests.gd").start(self, game)   # wave_tests.gd
+	if args.has("--shortcut-test"):
+		preload("res://scripts/shortcut_tests.gd").start(self, game, args)   # shortcut_tests.gd (route shortcuts, invisible walls)
+	if args.has("--rules-test"):
+		preload("res://scripts/rules_tests.gd").start(self, game)   # rules_tests.gd (repair quota, heartbeat, local spawn, bleed-out...)
 	if args.has("--photo-test"):
 		_photo_test(game)
 	if args.has("--pap-test"):
 		_pap_test(game)
+	if args.has("--gun-state-test"):
+		preload("res://scripts/gun_state_tests.gd").start(self, game, args)   # gun_state_tests.gd (reload / rechamber / run / monkey)
 	if args.has("--sound-test"):
 		preload("res://scripts/sound_tests.gd").start(self, game, args)   # sound_tests.gd (emitters, lines)
 	var shots := args.find("--shots")
@@ -950,7 +962,7 @@ func _trap_test(game: Game) -> void:
 		if not tr.door_open():
 			# Shi No Numa's flogger: locked until Link_DwnSt_FshSw is bought ("doorOpen")
 			tr.interact(p)
-			check.call(tr.prompt(p) == "" and tr.state == Trap.State.IDLE and p.points == 10000, "%s locked before its door opens" % tr.entity)
+			check.call(tr.prompt(p) == "Prima bisogna aprire la porta" and tr.state == Trap.State.IDLE and p.points == 10000, "%s locked before its door opens" % tr.entity)
 			tr._door.open()
 			await get_tree().physics_frame
 			check.call(tr.door_open(), "%s unlocked by its door" % tr.entity)

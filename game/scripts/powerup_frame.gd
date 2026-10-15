@@ -4,7 +4,12 @@
 # timer / 1000). An icon fades in and out over PowerupFadeIn/OutDurationMs (code
 # default 500 ms, kiwi 0x10ebb0) and glows during the last PowerupGlowDurationMs
 # (console.bin 5000) with period PowerupGlowPeriodMs (750) (kiwi 0x10ed2c). The frame
-# also has "headShot" (headshot streak count) and "repair" icons, not used here.
+# also has "headShot" with "headShotCount" ("x%d", kiwi va 0x174ec8..0x174f60: shown while
+# the local player's headshot streak is above 0; Player.headshot_streak) and "repair"
+# (no label; shown while the global flag +0x20 is set, which the barricade sets while the
+# local player holds interact at it and it can be repaired, kiwi va 0xfc29c..0xfc3d8 /
+# 0xfc408). Those two fade like the others but do not glow. Slots at x 0, 34, 68, 102
+# of the frame, in this order.
 # Above them, the pickup message ("Max. Ammo!"...) for PickupMessageTimeMs (4000).
 class_name PowerupFrame
 extends Control
@@ -12,9 +17,10 @@ extends Control
 const ICONS := {   # atlas rects from the frame's CIwGuiImage entries
 	"doublepoints": Rect2(338, 2, 34, 34),
 	"instakill": Rect2(371, 2, 34, 34),
+	"headshot": Rect2(437, 2, 34, 34),
+	"repair": Rect2(404, 2, 34, 34),
 }
-const HEADSHOT_ICON := Rect2(437, 2, 34, 34)
-const REPAIR_ICON := Rect2(404, 2, 34, 34)
+const FRAME_X := 208.0 - 240.0   # frame x relative to the middle of the 480 HUD
 const SCALE := 2.0
 const FADE_IN := 0.5
 const FADE_OUT := 0.5
@@ -38,7 +44,7 @@ func _ready() -> void:
 		icon.texture = UiArt.region(ICONS[k])
 		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		icon.size = Vector2(size, size)
-		icon.position = Vector2((i - ICONS.size() / 2.0) * size, 10)
+		icon.position = Vector2((FRAME_X + 34.0 * i) * SCALE, 0)   # frame and icons at y 0
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		icon.modulate.a = 0.0
 		add_child(icon)
@@ -78,10 +84,21 @@ func _process(delta: float) -> void:
 	_msg_t -= delta
 	_msg.modulate.a = clampf(_msg_t / 0.5, 0.0, 1.0)   # fades in the last half second
 	var timers: Dictionary = game.get("_timers") if game else {}
+	var player: Node = game.get("player") if game else null
 	for k in _slots:
 		var s: Dictionary = _slots[k]
 		var left: float = timers.get(k, 0.0)
 		var on := left > 0.0
+		if k == "headshot":
+			var streak := int(player.get("headshot_streak")) if player and player.get("headshot_streak") != null else 0
+			on = streak > 0
+			left = INF
+			if on:
+				(s["time"] as Label).text = "x%d" % streak
+		elif k == "repair":
+			on = repairing(player)
+			left = INF
+			(s["time"] as Label).text = ""
 		s["a"] = clampf(s["a"] + (delta / FADE_IN if on else -delta / FADE_OUT), 0.0, 1.0)
 		var glow := 1.0
 		if on and left <= GLOW_TIME:
@@ -89,5 +106,12 @@ func _process(delta: float) -> void:
 		(s["icon"] as TextureRect).modulate.a = s["a"] * glow
 		var t: Label = s["time"]
 		t.modulate.a = s["a"]
-		if on:
+		if on and left < INF:
 			t.text = str(int(left))
+
+
+# "repair": the local player holds interact at a barricade that can take boards
+# (the remake's barricade prompt is only offered then, player.gd _update_prompt).
+static func repairing(player: Node) -> bool:
+	return player != null and String(player.get("prompt")).begins_with("Tieni premuto E per riparare") \
+		and Input.is_action_pressed("interact")

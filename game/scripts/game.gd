@@ -67,12 +67,13 @@ var suppress_kill_points := false
 # German (Player1Spawn) or American (Player3Spawn) half; TurnOnGenerator joins them.
 const SPLIT_START := {"verruckt": [["GermanStart", "Player1Spawn"], ["AmericanStart", "Player3Spawn"]]}
 const POWER_OPENS := {"verruckt": ["GermanStart", "AmericanStart"], "derriese": ["outerGCourtyard", "outerLabCourtyard"]}
-# Script.Level.Trigger: buying these links also opens areas behind "NA" links
+# Script.Level.Trigger: buying these links also opens areas behind "NA" links (Shi No Numa:
+# shinonuma.lua bytecode main/3 291-425; the "ledge" opens only with the zipline switch)
 const TRIGGER_OPENS := {
 	"derriese": {"link_l_ltop_trigger": ["powerCourtyard", "garageTop"], "link_g_gt_trigger": ["powerCourtyard", "labTop"]},
 	"shinonuma": {
-		"link_strm_swrm_no1_trigger": ["commRoomRoom", "storageRoom", "warningRoom", "doctorsRoom", "fishingRoom", "ledge"],
-		"link_strm_swrm_no2_trigger": ["commRoomRoom", "storageRoom", "warningRoom", "doctorsRoom", "fishingRoom", "ledge"]},
+		"link_strm_swrm_no1_trigger": ["commRoomRoom", "storageRoom", "warningRoom", "doctorsRoom", "fishingRoom"],
+		"link_strm_swrm_no2_trigger": ["commRoomRoom", "storageRoom", "warningRoom", "doctorsRoom", "fishingRoom"]},
 }
 const LOCAL_SPAWNING := ["shinonuma"]   # Script.Level.UseLocalSpawning
 const COURTYARD_SPAWNS := {"verruckt": 8}  # Script.NumberOfCourtyardSpawns
@@ -229,6 +230,7 @@ func start(level_name_: String) -> void:
 	RadioEggs.create(self)   # shootable radios/phone easter eggs (radio_egg.gd)
 	AmbientEmitters.create(self)   # positional ambient sound emitters (ambient_emitters.gd)
 	VoxLines.create(self)   # character lines: ammo, hits, close kills (vox_lines.gd)
+	RepairQuota.create(self)   # paid barricade repairs per round (repair_quota.gd)
 	Bridge.create(level)     # Der Riese drawbridge (bridge.gd)
 	FlyTrap.create(self)     # Der Riese fly trap easter egg (flytrap.gd)
 	DerrieseExtras.create(self)   # Der Riese start sequence, dropping doors, map boards (derriese_extras.gd)
@@ -269,6 +271,7 @@ func _exit_tree() -> void:
 
 func _begin() -> void:
 	hud.message("")
+	GameFader.fade_in(self)   # the HUD's "fader" (game_fader.gd)
 	if not _resume.is_empty():
 		SaveGame.begin_rounds(self, _resume)
 		hud.show_message("Round %d" % (round_number + 1), 4.0)   # the round about to start
@@ -338,6 +341,8 @@ func _next_round() -> void:
 	_drops_this_round = 0
 	round_number += 1
 	dog_round = false
+	if RepairQuota.current():
+		RepairQuota.current().start_wave(round_number)   # waves.lua StartWave: SetRepairQuota
 	# dog rounds take a round number but not a wave of the table (RecalculateWaveInfo)
 	var w := wave_info(round_number - dog_wave_counter)
 	var counts: Array = _wave_counts(w)
@@ -520,13 +525,7 @@ func _spawn_zombie() -> void:
 		return
 	var c := {}
 	if level_name in LOCAL_SPAWNING:
-		# PickLocalSpawnpoint: the player's area or an open neighbour, one of its 4 closest spawns
-		var near := _spawn_candidates(_local_areas())
-		if not near.is_empty():
-			var area: String = near.map(func(x): return x["area"]).pick_random()
-			near = near.filter(func(x): return x["area"] == area)
-			near.sort_custom(func(a, b): return _cand_pos(a).distance_to(player.global_position) < _cand_pos(b).distance_to(player.global_position))
-			c = near.slice(0, 4).pick_random()
+		c = _pick_local_spawn()
 	if c.is_empty():
 		c = _pick_random_spawn(cands)
 	var origin: Vector3
@@ -542,6 +541,39 @@ func _spawn_zombie() -> void:
 	_make_zombie(c, origin)
 
 
+# PickLocalSpawnpoint (ingame.lua 845-1026). SelectRandomArea: a uniform random start in
+# [player's area, open linked areas] (Links order), then the next one in turn until an
+# area with zombie spawns. PickRandomClosestSpawn: its spawns kept in a list of 4 by the
+# distance from the player to the window (to the spawn for a swamp spawn); once the list
+# is full a spawn replaces the last entry farther than it (the Lua quirk, not a strict
+# 4 closest), then one entry at random.
+func _pick_local_spawn() -> Dictionary:
+	var areas := _local_areas()
+	if areas.is_empty():
+		return {}
+	var start := lua_random(1, areas.size() + 1) - 1
+	var near := []
+	for k in areas.size():
+		near = _spawn_candidates([areas[(start + k) % areas.size()]])
+		if not near.is_empty():
+			break
+	if near.is_empty():
+		return {}
+	var kept := []   # [candidate, distance]
+	for cand in near:
+		var d := _cand_pos(cand).distance_to(player.global_position)
+		if kept.size() < 4:
+			kept.append([cand, d])
+		else:
+			var j := -1
+			for i in kept.size():
+				if d < kept[i][1]:
+					j = i
+			if j >= 0:
+				kept[j] = [cand, d]
+	return kept.pick_random()[0]
+
+
 # Tests: a zombie from one named spawn (any area), as the spawner would make it.
 func spawn_zombie_at(spawn: String) -> Zombie:
 	for c in _spawn_candidates(_areas.keys()):
@@ -553,8 +585,13 @@ func spawn_zombie_at(spawn: String) -> Zombie:
 func _make_zombie(c: Dictionary, origin: Vector3) -> Zombie:
 	var win: Barricade = _win_by_name.get(c["window"])
 	var direct := win == null
+	# Shi No Numa: fishingSwamp/storageSwamp/commRoomSwamp ZombieWindow<n> have no boards
+	# (no CBarricadeSpec): the zombie walks to that point and then chases (Zombie.waypoint)
+	var waypoint := Vector3.INF
+	if win == null and c["window"] != "" and level.has_entity(c["window"]):
+		waypoint = level.entity_transform(c["window"]).origin
 	if win == null:
-		# no window (swamp spawn, or a window the level lacks): nearest one as a formality
+		# no window (swamp spawn, boardless window): nearest one, only nominal
 		var wins := level.windows.duplicate()
 		wins.sort_custom(func(a, b): return a.outside.distance_to(origin) < b.outside.distance_to(origin))
 		win = wins[0]
@@ -565,14 +602,17 @@ func _make_zombie(c: Dictionary, origin: Vector3) -> Zombie:
 	z.setup(origin, win, player, randf_range(_hp.x, _hp.y), false, _wave_speed())
 	if direct and c["window"] == "":
 		z.state = Zombie.State.CHASE
+	z.waypoint = waypoint
 	# "_ground" / "_water" templates climb out of the ground first (waves.lua)
 	z.rise = c["spawn"] == "COURTYARD" or c["window"] == "" \
 		or String(c["spawn"]).to_lower() in GROUND_SPAWNS.get(level_name, []).map(func(x): return x.to_lower())
 	z.water = "zombieswampspawn" in String(c["spawn"]).to_lower()
-	if not z.rise and not direct and level_name in Level.NAV_FLOOR_LEVELS:
-		var e := _spawn_entry(origin, win.outside)
+	if not z.rise and (not direct or waypoint != Vector3.INF) and level_name in Level.NAV_FLOOR_LEVELS:
+		var e := _spawn_entry(origin, z.walk_goal())
 		if e != origin:
 			z.entry = e
+		if waypoint != Vector3.INF and _nav_detour(e, waypoint):
+			z.waypoint = e   # the remake's navmesh goes the long way round: chase from the entry
 	z.killed.connect(_on_zombie_killed)
 	add_child(z)
 	last_spawn = c["spawn"]
@@ -636,6 +676,16 @@ func _spawn_entry(origin: Vector3, target: Vector3) -> Vector3:
 	return origin
 
 
+# True when the navmesh path is much longer than the straight line (a boardless swamp window
+# the remake's navmesh only reaches round a hut: fishingSwampZombieWindow2, 104 m for 17 m).
+func _nav_detour(from: Vector3, to: Vector3) -> bool:
+	var path := NavigationServer3D.map_get_path(get_world_3d().navigation_map, from, to, true)
+	var l := 0.0
+	for i in range(1, path.size()):
+		l += path[i].distance_to(path[i - 1])
+	return path.size() < 2 or l > 3.0 * from.distance_to(to) + 10.0
+
+
 func _nav_reaches(map: RID, from: Vector3, to: Vector3) -> bool:
 	var path := NavigationServer3D.map_get_path(map, from, to, true)
 	return path.size() > 0 and path[-1].distance_to(to) < 1.5
@@ -645,6 +695,8 @@ func _cand_pos(c: Dictionary) -> Vector3:
 	var w: Barricade = _win_by_name.get(c["window"])
 	if w:
 		return w.inside
+	if c["window"] != "" and level.has_entity(c["window"]):
+		return level.entity_transform(c["window"]).origin   # swamp "window" without boards
 	return level.entity_transform(c["spawn"]).origin if c["spawn"] != "COURTYARD" else player.global_position
 
 
@@ -792,9 +844,10 @@ func spawn_dog(untracked: bool) -> void:
 		_dogs_spawned += 1
 		_dogs_pending += 1
 		_alive = _live.size() + _dogs_pending
-	_lightning(at)
+	var strike := _lightning(at)
 	Sfx.instance.play_at("dog_spawn", at + Vector3.UP)
-	await get_tree().create_timer(0.6, false).timeout
+	# the dog comes when the strike ends (CDeathActionSpawnSpec of normal/flame_dogSpawn)
+	await get_tree().create_timer(strike, false).timeout
 	var d := Dog.new()
 	if not untracked:
 		_dogs_pending -= 1
@@ -873,36 +926,9 @@ func _apply_fog(cfg: Array) -> void:
 	_env.fog_depth_end = cfg[2]
 
 
-# a white bolt from the sky and a flash where a dog appears
-func _lightning(at: Vector3) -> void:
-	var l := OmniLight3D.new()
-	l.light_color = Color(0.85, 0.9, 1.0)
-	l.light_energy = 8.0
-	l.omni_range = 9.0
-	add_child(l)
-	l.global_position = at + Vector3.UP * 1.5
-	var bolt := MeshInstance3D.new()
-	var im := ImmediateMesh.new()
-	im.surface_begin(Mesh.PRIMITIVE_LINES)
-	var prev := at + Vector3.UP * 14.0
-	for k in range(1, 12):
-		var p := at.lerp(at + Vector3.UP * 14.0, 1.0 - k / 11.0)
-		if k < 11:
-			p += Vector3(randf_range(-0.5, 0.5), 0, randf_range(-0.5, 0.5))
-		im.surface_add_vertex(prev)
-		im.surface_add_vertex(p)
-		prev = p
-	im.surface_end()
-	bolt.mesh = im
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(0.9, 0.95, 1.0)
-	bolt.material_override = mat
-	add_child(bolt)
-	var tw := create_tween()
-	tw.tween_property(l, "light_energy", 0.0, 0.7)
-	tw.tween_callback(l.queue_free)
-	get_tree().create_timer(0.25, false).timeout.connect(bolt.queue_free)
+# the original lightning strike where a dog appears (dog_spawn_fx.gd); returns its lifetime
+func _lightning(at: Vector3) -> float:
+	return preload("res://scripts/dog_spawn_fx.gd").spawn(self, at)
 
 
 func _on_zombie_killed(z: Zombie, headshot: bool, knife: bool) -> void:
@@ -968,7 +994,10 @@ func spawn_powerup(kind: String, at: Vector3) -> void:
 var _nuking := false
 
 
-func apply_powerup(kind: String) -> void:
+# `at`: where the pickup was (the radial waves start there); the player by default
+func apply_powerup(kind: String, at := Vector3.INF) -> void:
+	if at == Vector3.INF:
+		at = player.global_position + Vector3.UP * 0.6
 	Sfx.instance.play("14c4f851")  # pickup sting, then the announcer (as in the original sequences)
 	get_tree().create_timer(0.3, false).timeout.connect(Sfx.instance.play.bind(kind))
 	_show_powerup(Powerup.KINDS[kind]["label"])
@@ -984,21 +1013,8 @@ func apply_powerup(kind: String) -> void:
 		"doublepoints":
 			points_multiplier = 2
 			_timers["doublepoints"] = TIMED
-		"nuke":
-			_nuking = true
-			player.add_points(400 * points_multiplier)
-			var zs := get_children().filter(func(n): return n is Zombie and n.state != Zombie.State.DEAD)
-			for i in zs.size():
-				var z: Zombie = zs[i]
-				get_tree().create_timer(0.1 + 0.08 * i, false).timeout.connect(func():
-					if is_instance_valid(z) and z.state != Zombie.State.DEAD:
-						z.nuke_kill())
-			get_tree().create_timer(0.2 + 0.08 * zs.size(), false).timeout.connect(func(): _nuking = false)
-		"carpenter":
-			for w in level.windows:
-				while w.repair_board():
-					pass
-			player.add_points(200 * points_multiplier)
+		"nuke", "carpenter":   # growing waves, points at their end (radial_effect.gd)
+			RadialEffect.spawn(self, kind, at)
 
 
 # PickupMessageTimeMs: the pickup's message, then its CGuiFramePowerup icon (hud_powerups.gd)
@@ -1033,7 +1049,7 @@ func _on_debris_opened(d: Debris) -> void:
 
 func _on_player_died() -> void:
 	Sfx.instance.ambience = []
-	Sfx.instance.play("gameover_intro")
+	RadialEffect.spawn(self, "nuke_gameover", player.global_position)   # GameOverNukeEffect
 	SaveGame.clear()   # the saved game is over
 	hud.game_over(round_number)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -1062,17 +1078,7 @@ func spawn_impact(pos: Vector3, normal: Vector3) -> void:
 		return
 	if player and player.global_position.distance_to(pos) > IMPACT_MAX_RANGE:
 		return
-	var m := MeshInstance3D.new()
-	var q := QuadMesh.new()
-	q.size = Vector2(0.06, 0.06)
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = Color(0.05, 0.05, 0.05)
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	q.material = mat
-	m.mesh = q
-	add_child(m)
-	m.global_position = pos + normal * 0.01
-	if abs(normal.dot(Vector3.UP)) < 0.99:
-		m.look_at(pos + normal, Vector3.UP)
-	get_tree().create_timer(10.0).timeout.connect(m.queue_free)
+	# the gun's impact effect (CItemGun 0xe8: ring and dust plumes, hit_fx.gd)
+	var cam := get_viewport().get_camera_3d()
+	var shot := pos - cam.global_position if cam else -normal
+	HitFx.impact(self, pos, normal, shot, player.weapon() if player else {})

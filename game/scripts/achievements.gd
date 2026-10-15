@@ -902,3 +902,21 @@ func _show_popup(e: Dictionary) -> void:
 	var vw := get_viewport().get_visible_rect().size.x
 	frame.position = Vector2((vw - frame.size.x) * 0.5, -frame.size.y)
 	_popup = frame
+	# hud_acheivementFrame's achievementButton ("viewachievement"): touching the popup opens
+	# ig_viewachievement for it (achievements_screen.gd view, the game paused)
+	frame.mouse_filter = Control.MOUSE_FILTER_STOP
+	frame.gui_input.connect(func(ev: InputEvent):
+		if (ev is InputEventMouseButton or ev is InputEventScreenTouch) and ev.pressed:
+			open_view(String(e["id"])))
+
+
+func open_view(id: String) -> AchievementsScreen:
+	for n in get_tree().root.get_children():
+		if n is AchievementsScreen:
+			return null
+	if _popup:
+		_popup.queue_free()
+		_popup = null
+	var v := AchievementsScreen.view(id)
+	get_tree().root.add_child(v)
+	return v

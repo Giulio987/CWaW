@@ -8,9 +8,21 @@ extends Node3D
 const MAX_BOARDS := 5
 # boards left -> pose animation of the barricade rig (5 = all boards up)
 const STATES := ["36f9cc2c", "36f84bfa", "82c86d87", "65105051", "db3afd0f", "025059eb"]
+# Barricades with their own rig (model of the CBarricadeSpec entity instead of fee7f210):
+# Nacht mysteryboxroomZombieWindow3 4b84e4d2 and Verrückt AmericanDown2/AmericanUp1/
+# GermanUp1ZombieWindow1 4a7f842b / 9a6665e4 / 9a707fea (same 7-bone skeleton aae9b3f6,
+# Verrückt's own copies of the animations). Their ASM 4b84e4d2 (nacht/verruckt dynamics)
+# has board states "0".."6" (6 boards), break transitions with sound 43dd4a39 and repairs
+# with e3f3e537 (fee7f210: 1a3da352 window_break1 / 3eaaf6ff window_repair).
+const ALT_RIGS := ["4b84e4d2", "4a7f842b", "9a6665e4", "9a707fea"]
+const ALT_STATES := ["1c98e674", "1624e62f", "165b2fb2", "1636feb0", "167f60b4", "166d4833", "16491731"]
 
 var area := ""             # e.g. "startroom" from "startroomZombieWindow3"
+var max_boards := MAX_BOARDS   # 6 on the ALT_RIGS barricades
 var boards := MAX_BOARDS
+var rig := "fee7f210"
+var break_sound := "window_break1"
+var repair_sound := "window_repair"   # player.gd plays it on a repair
 var inside := Vector3.ZERO  # standing point inside the room
 var outside := Vector3.ZERO # standing point outside
 var normal := Vector3.FORWARD
@@ -27,7 +39,14 @@ func setup(level: Level, entity: String) -> void:
 	var root := level.entity_transform(entity)
 	global_transform = Transform3D(Basis(Vector3.UP, yaw), root.origin)
 	normal = global_basis.z
-	var path := "res://assets/characters/levels/%s/dynamics/fee7f210.glb" % level.level_name
+	var own: String = e["models"][0] if not e["models"].is_empty() else rig
+	if own in ALT_RIGS and ResourceLoader.exists("res://assets/characters/levels/%s/dynamics/%s.glb" % [level.level_name, own]):
+		rig = own
+		max_boards = ALT_STATES.size() - 1
+		boards = max_boards
+		break_sound = "43dd4a39"
+		repair_sound = "e3f3e537"
+	var path := "res://assets/characters/levels/%s/dynamics/%s.glb" % [level.level_name, rig]
 	if ResourceLoader.exists(path):
 		var model: Node3D = (load(path) as PackedScene).instantiate()
 		add_child(model)
@@ -78,12 +97,12 @@ func tear_board() -> bool:
 		return false
 	boards -= 1
 	_update_boards()
-	Sfx.instance.play_at("window_break1", global_position)
+	Sfx.instance.play_at(break_sound, global_position)
 	return true
 
 
 func repair_board() -> bool:
-	if boards >= MAX_BOARDS:
+	if boards >= max_boards:
 		return false
 	boards += 1
 	_update_boards()
@@ -93,8 +112,51 @@ func repair_board() -> bool:
 func _update_boards() -> void:
 	if _anim == null:
 		return
-	var a: String = STATES[clamp(boards, 0, MAX_BOARDS)]
+	var st: Array = ALT_STATES if rig != "fee7f210" else STATES
+	var a: String = st[clamp(boards, 0, max_boards)]
 	if _anim.has_animation(a):
 		_anim.play(a)
 		_anim.seek(0.0, true)
 		_anim.pause()
+
+
+# ------------------------------------------------------------------ Carpenter (radial_effect.gd)
+# CRadialEffectCarpenter (kiwi va 0x1cd72c) fires the barricade state machine event
+# "repairAll" (CBarricade va 0xfc594, state set up at 0xfc238). Only Der Riese's barricade
+# ASM fee7f210 has that state (the original offers the Carpenter only there): animation
+# 68af85c2 (the "last board back" clip, 1.75 s: the other four boards already up, board 3
+# flies in) at speed 0x999/4096 = 0.6 -> 2917 ms, sound 27be06a0 (1.16 s); then the
+# full-boards pose. The other barricade rigs' "last board back" clips are listed after it
+# (Shi No Numa b35a1649 / 6e451bb7; ALT_RIGS 4b84e4d2: e1f91cfe, state 7c7c1b93 5 -> 6 boards):
+# the remake uses the same state on
+# every map (the Carpenter stays on all of them), with the same speed (estimated there).
+const REPAIR_ALL_ANIMS := ["68af85c2", "a7a967f8", "a7a96a29", "e1f91cfe"]
+const REPAIR_ALL_SPEED := 2457.0 / 4096.0
+const REPAIR_ALL_SOUND := "27be06a0"
+var _repair_all_token := 0
+
+
+# true when the barricade needed it (some board missing)
+func carpenter_repair() -> bool:
+	if boards >= max_boards:
+		return false
+	boards = max_boards
+	Sfx.instance.play_at(REPAIR_ALL_SOUND, global_position + Vector3.UP)
+	var clip := ""
+	if _anim:
+		for a in REPAIR_ALL_ANIMS:
+			if _anim.has_animation(a):
+				clip = a
+				break
+	if clip == "":
+		_update_boards()
+		return true
+	_repair_all_token += 1
+	var token := _repair_all_token
+	_anim.play(clip, 0.0, REPAIR_ALL_SPEED)
+	_anim.seek(0.0, true)
+	var length := _anim.get_animation(clip).length / REPAIR_ALL_SPEED
+	get_tree().create_timer(length, false).timeout.connect(func():
+		if is_instance_valid(self) and token == _repair_all_token:
+			_update_boards())   # the pose of the boards there are by then
+	return true

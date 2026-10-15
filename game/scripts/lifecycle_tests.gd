@@ -291,7 +291,7 @@ static func run(at: Node) -> void:
 		await _prep(at, game, z, st)
 	var n_before := game.alive_count()
 	game.apply_powerup("nuke")
-	await _observe(at, game, 1.0)
+	await _observe(at, game, 5.5)   # the wave lasts 5 s (radial_effect.gd)
 	_check(group.all(func(z): return z.state == Zombie.State.DEAD) and game.alive_count() == n_before - group.size(),
 		"nuke kills %d in CHASE/CLIMBING/TEARING/RISING (alive %d -> %d)" % [group.size(), n_before, game.alive_count()])
 	# freed without dying: no longer counted, the wave spawns a replacement

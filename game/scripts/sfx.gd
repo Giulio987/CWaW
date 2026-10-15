@@ -41,6 +41,8 @@ static func iw_hash(s: String) -> String:
 
 
 func _stream(key: String) -> AudioStream:
+	if has_meta("log"):   # tests (gun_state_tests.gd): the keys asked for
+		(get_meta("log") as Array).append(key)
 	var h: String = key
 	var n = _index["names"].get(key)
 	if n is String:
@@ -148,7 +150,46 @@ func _amb_channel(h: String) -> Dictionary:
 
 func _amb_gap(h: String) -> float:
 	var c := _amb_channel(h)
-	return randf_range(float(c.get("min_ms", 5000)), float(c.get("max_ms", 14000))) / 1000.0
+	var gap := randf_range(float(c.get("min_ms", 5000)), float(c.get("max_ms", 14000))) / 1000.0
+	if int(c.get("flag", 0)) == 1:
+		gap *= zombie_gap_mul(_live_zombies().size())
+	return gap
+
+
+# "zombies" channel (CAmbienceChannel with the zombie flag, kiwi file 0x171d68 / 0x172154):
+# the gap after a groan is scaled by clamp(NumZombiesToInterval / zombies, MinIntervalMul,
+# MaxIntervalMul) (console 1.0 / 0.1 / 1.0; MaxIntervalMul with no zombie), and a groan comes
+# from the zombie nearest to the player within AmbientZombiesMaxRange (console 8000 units =
+# 20 m): none in range, no groan (tried again every frame). The count the original divides
+# by is a game counter (kiwi +0x108), taken here as the living zombies.
+const AMB_ZOMBIES_RANGE := 8000.0 / 400.0
+const AMB_ZOMBIES_TO_INTERVAL := 1.0
+const AMB_MIN_INTERVAL_MUL := 0.1
+const AMB_MAX_INTERVAL_MUL := 1.0
+
+
+static func zombie_gap_mul(n: int) -> float:
+	if n <= 0:
+		return AMB_MAX_INTERVAL_MUL
+	return clampf(AMB_ZOMBIES_TO_INTERVAL / n, AMB_MIN_INTERVAL_MUL, AMB_MAX_INTERVAL_MUL)
+
+
+func _live_zombies() -> Array:
+	if not is_inside_tree():
+		return []
+	return get_tree().get_nodes_in_group("zombies").filter(func(z):
+		return is_instance_valid(z) and not z is Dog and (z as Zombie).state != Zombie.State.DEAD)
+
+
+func _nearest_zombie(from: Vector3) -> Node3D:
+	var best: Node3D = null
+	var bd := AMB_ZOMBIES_RANGE
+	for z in _live_zombies():
+		var d := (z as Node3D).global_position.distance_to(from)
+		if d <= bd:
+			bd = d
+			best = z
+	return best
 
 
 func _amb_stop(h: String) -> void:
@@ -173,20 +214,24 @@ func _amb_play(h: String) -> void:
 		if r <= 0.0:
 			pick = s[0]
 			break
+	var groaner: Node3D = null
+	if int(c.get("flag", 0)) == 1:
+		groaner = _nearest_zombie(listener.global_position)
+		if groaner == null:
+			return   # no zombie within AmbientZombiesMaxRange: try again next frame
 	var st := _stream(pick)
 	if st == null:
 		return
 	var p: Node
-	if int(c.get("flag", 0)) == 1:
-		# "zombies" (flag 1): groans somewhere around the player, so they pan
+	if groaner != null:
+		# "zombies" (flag 1): the groan comes from the nearest zombie in range
 		var p3 := AudioStreamPlayer3D.new()
 		p3.stream = st
 		p3.volume_db = -6.0
 		p3.unit_size = 6.0
 		p3.max_distance = 40.0
 		add_child(p3)
-		p3.global_position = listener.global_position + \
-			Vector3(randf_range(-1, 1), 0.3, randf_range(-1, 1)).normalized() * randf_range(6.0, 14.0)
+		p3.global_position = groaner.global_position + Vector3.UP * 1.5
 		p3.play()
 		p = p3
 	else:

@@ -124,8 +124,8 @@ static func display(name: String) -> String:
 # the Thompson, PPSh, carbine... only get more ammo / a faster fire state). Names are the
 # World at War ones.
 const UPGRADES := {
-	# Mustang & Sally: in the original an explosive projectile (1000 damage, 4.25 m splash);
-	# here a 1000-damage hit.
+	# Mustang & Sally: the original explosive projectile (1000 damage, 4.25 m splash,
+	# mustang_bolt.gd, fired by WeaponFx.fire); the stats below are unused by it.
 	"colt45":       {"mag": 6,   "reserve": 40,  "name": "Mustang & Sally",
 		"stats": {"damage": 1000, "min": 1000, "head": 1.0, "loc": [], "hits": 1, "pierce": 0.0, "falloff": 0.0}},
 	"kar98":        {"mag": 8,   "reserve": 60,  "name": "Armageddon", "stats": {"damage": 300}},

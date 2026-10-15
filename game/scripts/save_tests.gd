@@ -4,7 +4,8 @@
 #   -- <map> --save-test check --resume   resumes that save and compares (save_resume.png)
 #   -- <map> --hud-test                   power-up icons, pickup message, damage strips,
 #                                         low-ammo blink, proximity arrow (hud_powerups.png)
-#   -- <map> --gameover-test              dies: game over screen + leaderboard (game_over.png)
+#   -- <map> --gameover-test              fade-in, dies: Game Over page, 3 s later stats + leaderboard
+#                                         + fly-through, nuke_gameover (game_over*.png)
 # Saves go to user://savegame_test.json and user://leaderboard_test.cfg (test mode).
 class_name SaveTests
 extends Node
@@ -294,16 +295,55 @@ func _hud_test() -> void:
 
 
 func _gameover_test() -> void:
+	# start of the game: the HUD fader fades in from black (game_fader.gd)
+	var fader: GameFader = null
+	for i in 3600:
+		fader = game.get_children().filter(func(n): return n is GameFader).front() if game.get_children().any(func(n): return n is GameFader) else null
+		if fader:
+			break
+		await get_tree().process_frame
+	_check(fader != null, "fade-in from black at the start")
 	await _wait_round()
+	_check(not game.get_children().any(func(n): return n is GameFader), "fader gone after 1 s")
 	game.kills = 23
 	game.headshots = 7
 	game.score = 2150
+	var wt := preload("res://scripts/weapon_tests.gd")
+	var pp := game.player.global_position
+	for d in [3.0, 20.0, 60.0]:   # 5 m/s: dead at ~0.6 s, ~4 s, and at the 8 s end
+		wt._zombie(game, wt._floor(game, pp - game.player.global_basis.z * d), 1e6)
+	var zs := game.get_children().filter(func(n): return n is Zombie and n.state != Zombie.State.DEAD)
+	var far: Zombie = zs.back()
+	var player_cam := get_viewport().get_camera_3d()
 	game.player.take_hit(100000.0)
-	await _wait(2.5)
-	var screen := game.hud.get_children().filter(func(n): return n is GameOverScreen)
-	_check(not screen.is_empty(), "game over screen")
+	await _wait(1.0)
+	var screen: Array = game.hud.get_children().filter(func(n): return n is GameOverScreen)
+	_check(not screen.is_empty() and not screen[0].stats_shown, "ig_gameover_dead first (Game Over + survived)")
+	_check(get_viewport().get_camera_3d() == player_cam, "player camera during the first 3 s")
+	await _shot("game_over_dead")
+	await _wait(2.6)
+	_check(not screen.is_empty() and screen[0].stats_shown, "stats page after 3 s")
+	_check(get_viewport().get_camera_3d() is EndCamera, "fly-through camera after 3 s")
 	var list := Leaderboard.entries(game.level_name)
-	_check(list.any(func(e): return int(e["kills"]) == 23 and int(e["rounds"]) == game.round_number), "leaderboard entry")
+	var r: int = screen[0]._rounds
+	# in, or left out by five better games of earlier tests (user://leaderboard_test.cfg)
+	_check(list.any(func(e): return int(e["kills"]) == 23 and int(e["rounds"]) == r)
+		or (list.size() == Leaderboard.ROWS and list.all(func(e): return int(e["rounds"]) > r)),
+		"leaderboard entry (numbers taken at the death)")
 	_check(SaveGame.load_save().is_empty(), "save deleted at game over")
 	await _shot("game_over")
+	_check(far.state != Zombie.State.DEAD, "zombie 60 m away still alive at 3.6 s")
+	await _wait(5.0)   # nuke_gameover: 8 s from the death, then every zombie left is dead
+	_check(zs.all(func(z): return not is_instance_valid(z) or z.state == Zombie.State.DEAD),
+		"nuke_gameover killed the %d zombies alive at the death" % zs.size())
+	await _shot("game_over_fly")
+	# every EndCamera path, half way, with the page hidden
+	var cam: EndCamera = get_viewport().get_camera_3d()
+	screen[0].visible = false
+	for i in cam.paths.size():
+		cam.index = i - 1
+		cam._next()
+		cam.dist = cam._len * 0.5
+		cam._place()
+		await _shot("game_over_%s" % cam.paths[i]["name"])
 	_finish()

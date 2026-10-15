@@ -68,7 +68,6 @@ var cost := 1000
 var kind := "electric"        # or "flogger"
 var state := State.IDLE
 var volumes := []             # world AABBs that kill (electric)
-var arcs := []                # [from, to] pairs of arc end points (electric)
 var use_point := Vector3.ZERO
 var pivot := Vector3.ZERO     # flogger centre
 var _timer := 0.0
@@ -79,10 +78,6 @@ var _hurt_cd := 0.0
 var _lever: AnimationPlayer
 var _flogger: Node3D
 var _fx: Node3D
-var _bolts: MeshInstance3D
-var _bolt_timer := 0.0
-var _loop: AudioStreamPlayer3D
-var _lights := []
 var gen_on := false           # the switch got "genTurnOn" (power, maybe delayed: GEN_DELAY)
 const GEN_DELAY := {"Trap_power": 4.3}
 # Shi No Numa: buying Link_DwnSt_FshSw_Trigger sends the flogger "doorOpen"
@@ -230,7 +225,6 @@ func _volume_from_effects(pts: Array) -> void:
 	var pad_side := 0.55
 	var grow := Vector3(pad_long if along_x else pad_side, 0, pad_side if along_x else pad_long)
 	volumes.append(AABB(Vector3(lo.x, lo.y - 0.3, lo.z) - grow, Vector3(hi.x - lo.x, 2.6, hi.z - lo.z) + grow * 2))
-	_make_arcs()
 
 
 # Verrückt: candidate fence boxes are the volume colliders placed at +/- each
@@ -266,7 +260,6 @@ func _finalize_from_geometry(e: Dictionary) -> void:
 		if best < 2.5:
 			picked.append(best_box)
 	volumes = picked
-	_make_arcs()
 	if OS.get_cmdline_user_args().has("--trap-debug"):
 		print("[trap] %s volumes %s" % [entity, volumes])
 
@@ -298,17 +291,6 @@ func _doorway_score(space: PhysicsDirectSpaceState3D, box: AABB) -> float:
 	return score
 
 
-func _make_arcs() -> void:
-	arcs.clear()
-	for v: AABB in volumes:
-		var along_x := v.size.x >= v.size.z
-		var n := maxi(2, int((v.size.x if along_x else v.size.z) / 1.1))
-		for i in n:
-			var t := (i + 0.5) / n
-			var p := v.position + Vector3(v.size.x * (t if along_x else 0.5), 0.0, v.size.z * (0.5 if along_x else t))
-			arcs.append([p + Vector3.UP * 0.25, p + Vector3.UP * 2.3])
-
-
 # ------------------------------------------------------------------ interaction
 
 func usable_from(p: Vector3) -> bool:
@@ -320,8 +302,8 @@ func door_open() -> bool:
 
 
 func prompt(_player: Player) -> String:
-	if not door_open():
-		return ""
+	if not door_open():   # flogger ASM b373d4cb: "The door must be opened first" (bcf369e3)
+		return "Prima bisogna aprire la porta"
 	if not gen_on:
 		return "Serve la corrente"
 	match state:
@@ -399,37 +381,72 @@ func _arm() -> void:
 		_start_fx()
 
 
+# SetTrapActive (verruckt.lua 278-303, shinonuma.lua 676-686, derriese.lua 784-837):
+# EnableRender(<trap>Effect<n>) and EnableSoundEmitter(<trap>Sound / Sound1 / Sound2).
+# The effects are instances of a CIwSpecList of the effects group (tools/ent_fx.py):
+# e29069ed -> model c5ea57f2 (Der Riese power/garage, 2.46 m), c5e4a13d -> fda76742
+# (Der Riese lab, Shi No Numa huts, Verrueckt: 1.94 m), an upright card whose bolt
+# texture fda76742 scrolls 32 texels a tick (material 43266a5b); on Der Riese and Shi No
+# Numa they are level entities, on Verrueckt child entities of Trap1/Trap2. The sound
+# emitters play traploop (bb630b36, range 800) like the ambient ones (AmbientEmitters).
 func _start_fx() -> void:
 	_fx = Node3D.new()
 	add_child(_fx)
 	_fx.top_level = true
 	_fx.global_transform = Transform3D.IDENTITY
-	_bolts = MeshInstance3D.new()
-	_bolts.mesh = ImmediateMesh.new()
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(0.65, 0.8, 1.0)
-	mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	_bolts.material_override = mat
-	_bolts.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_fx.add_child(_bolts)
-	for v: AABB in volumes:
-		var l := OmniLight3D.new()
-		l.light_color = Color(0.5, 0.7, 1.0)
-		l.omni_range = maxf(v.size.x, v.size.z) * 0.8 + 2.0
-		l.position = v.get_center()
-		_fx.add_child(l)
-		_lights.append(l)
-	if not volumes.is_empty():
-		_loop = AudioStreamPlayer3D.new()
-		_loop.stream = Sfx.instance._stream(Sfx.iw_hash("traploop"))
-		_loop.unit_size = 6.0
-		_loop.max_distance = 35.0
-		_fx.add_child(_loop)
-		_loop.global_position = (volumes[0] as AABB).get_center()
-		_loop.finished.connect(func(): if state == State.ACTIVE: _loop.play())
-		if _loop.stream:
-			_loop.play()
+	for ef in effect_parts():
+		var m := IwFx.make(ef[1], 0)
+		_fx.add_child(m)
+		m.global_transform = ef[0]
+		if OS.get_cmdline_user_args().has("--trap-debug"):
+			print("[trap] %s effect %s at %s in volume %s" % [entity, ef[1], (ef[0] as Transform3D).origin.snapped(Vector3(0.01, 0.01, 0.01)), contains(ef[0].origin + Vector3.UP * 0.5)])
+	for se in sound_parts():
+		var em := AmbientEmitters.Emitter.make(se[1])
+		_fx.add_child(em)
+		em.global_position = se[0]
+		em.enable()
+
+
+# [world transform, model] of the trap's "<trap>Effect<n>" entities
+func effect_parts() -> Array:
+	var out := []
+	var data := IwFx.level_data(level.level_name)
+	for i in range(1, 13):
+		var n := "%sEffect%d" % [entity, i]
+		var h := Sfx.iw_hash(n)
+		if level.has_entity(n):
+			var t: Dictionary = data.get("templates", {}).get(String(level.entity(n).get("hash", h)), {})
+			if t.get("model", "") != "":
+				out.append([Level.flag_transform(level.entity(n)["transform"]), t["model"]])
+		elif data.get("nested", {}).has(h):
+			var c: Dictionary = data["nested"][h]
+			if c.get("model", "") != "":
+				out.append([_child_transform(c), c["model"]])
+	return out
+
+
+# [world position, sound emitter fields] of "<trap>Sound", "<trap>Sound1", "<trap>Sound2"
+func sound_parts() -> Array:
+	var out := []
+	var data := IwFx.level_data(level.level_name)
+	var own: Array = level.entity(entity).get("sound_emitters", [])
+	for suffix in ["Sound", "Sound1", "Sound2"]:
+		var h := Sfx.iw_hash(entity + suffix)
+		var e := level.entity(h) if level.has_entity(h) else level.entity(entity + suffix)
+		if not e.is_empty():
+			for se in e.get("sound_emitters", []):
+				if not se.has("child"):
+					out.append([Level._to_transform(e["transform"]).origin, se])
+		elif data.get("nested", {}).has(h):
+			for se in own:
+				if String(se.get("child", "")) == h:
+					out.append([_child_transform(data["nested"][h]).origin, se])
+	return out
+
+
+# a child entity of the trap (Verrueckt): its transform within the trap entity's
+func _child_transform(c: Dictionary) -> Transform3D:
+	return Level.flag_transform(level.entity(entity)["transform"]) * Level.flag_transform(c["transform"])
 
 
 # "zapperEnd": arcs off, the switch goes back and holds for the 30 s cooldown
@@ -452,7 +469,6 @@ func _stop() -> void:
 	if _fx:
 		_fx.queue_free()
 		_fx = null
-		_lights.clear()
 
 
 # ASM TurnOff, at the end of the cooldown: switch animation and its sound
@@ -521,35 +537,6 @@ func contains(p: Vector3) -> bool:
 		if v.has_point(p):
 			return true
 	return false
-
-
-func _process(delta: float) -> void:
-	if state != State.ACTIVE or _bolts == null:
-		return
-	_bolt_timer -= delta
-	if _bolt_timer > 0.0:
-		return
-	_bolt_timer = 0.05
-	for l in _lights:
-		l.light_energy = randf_range(1.5, 4.0)
-	# jagged arcs between floor and top of the fence, redrawn every few frames
-	var im := _bolts.mesh as ImmediateMesh
-	im.clear_surfaces()
-	if arcs.is_empty():
-		return
-	im.surface_begin(Mesh.PRIMITIVE_LINES)
-	for pair in arcs:
-		var a: Vector3 = pair[0]
-		var b: Vector3 = pair[1]
-		var prev := a
-		for k in range(1, 9):
-			var p := a.lerp(b, k / 8.0)
-			if k < 8:
-				p += Vector3(randf_range(-0.18, 0.18), 0, randf_range(-0.18, 0.18))
-			im.surface_add_vertex(prev)
-			im.surface_add_vertex(p)
-			prev = p
-	im.surface_end()
 
 
 # ------------------------------------------------------------------ save provider (save_game.gd)

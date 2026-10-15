@@ -53,6 +53,8 @@ var _camera: Camera3D
 var _viewmodel: Viewmodel
 var _cooldown := 0.0
 var _reloading := 0.0
+var _reload_id := 0          # bumped when a reload starts or is cut short (its queued rounds / sounds drop)
+var _reload_plan := {}       # GunStates.reload_plan of the reload in progress
 var _since_hit := 99.0
 var _repair_cooldown := 0.0
 
@@ -148,17 +150,30 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 # Look input (mouse / touch drag), radians. Vertical speed is scaled like the original's
-# default sensitivities (SensitivityYDefault 0.375 / SensitivityXDefault 0.5, settings.gd);
-# aiming slows the turn rate: MaxAimTurnSpeed 0.5 / MaxRunTurnSpeed 1.0 and
-# MaxAimVerticalAimSpeed 0.5 / MaxRunVerticalAimSpeed 0.7.
+# default sensitivities (SensitivityYDefault 0.375 / SensitivityXDefault 0.5, settings.gd).
+# Turn rates per movement state, as the original player update (kiwi file 0x1e79a0: yaw +=
+# drag x Max<State>TurnSpeed, pitch x Max<State>VerticalAimSpeed, the state given by the arms
+# ASM output "walk"/"run"): the default is walk (MaxWalkTurnSpeed 1.5 / VerticalAim 0.7);
+# run (the ASM "running" state, input toggleRun: the remake's sprint) 1.0 / 0.7; knife,
+# grenade, Betty, Molotov, Monkey Bomb and the perk bottle 1.5 / 0.7; aiming 0.5 / 0.5.
+# The mouse sensitivity stays the walk one: the others are relative to it.
+const WALK_TURN := 1.5
+const RUN_TURN := 1.0
+const ACTION_TURN := 1.5
 const AIM_TURN := 0.5
-const AIM_VTURN := 0.5 / 0.7
+const WALK_VAIM := 0.7
+const AIM_VAIM := 0.5
 
 
 func look(delta: Vector2) -> void:
 	_look_amount += delta.length()
-	delta.x *= lerpf(1.0, AIM_TURN, _aim_blend)
-	delta.y *= lerpf(1.0, AIM_VTURN, _aim_blend) * Settings.look_y_ratio()
+	var turn := WALK_TURN
+	if _viewmodel.slashing() or _viewmodel.throwing() or _viewmodel.drinking:
+		turn = ACTION_TURN
+	elif _running():
+		turn = RUN_TURN
+	delta.x *= lerpf(turn, AIM_TURN, _aim_blend) / WALK_TURN
+	delta.y *= lerpf(WALK_VAIM, AIM_VAIM, _aim_blend) / WALK_VAIM * Settings.look_y_ratio()
 	rotate_y(-delta.x)
 	_camera.rotation.x = clamp(_camera.rotation.x - delta.y * (-1.0 if Settings.invert_y() else 1.0), -1.45, 1.45)
 
@@ -266,6 +281,7 @@ func switch_weapon() -> void:
 	if weapons.size() > 1:
 		current = (current + 1) % weapons.size()
 		_reloading = 0.0
+		_reload_id += 1
 		changed.emit()
 
 
@@ -274,12 +290,36 @@ func reload() -> void:
 	var s := Weapons.stats_of(w)
 	if _reloading > 0.0 or w["mag"] >= s["mag"] or w["reserve"] <= 0 or _viewmodel.slashing():
 		return
-	_reloading = s["reload"] * (Perks.SPEED_RELOAD if has_perk("speed") else 1.0)
+	# the gun's reload states (gun_states.gd): rounds left / empty, Speed Cola, shell by shell
+	var plan := GunStates.reload_plan(w, s, has_perk("speed"))
+	_reloading = plan["time"]
 	if aiming:   # the reload leaves the sights straight away (no lowering animation)
 		aiming = false
 		_viewmodel.aiming = false
-	_viewmodel.reload(_reloading)
-	Sfx.instance.sequence(w["name"] + "_reload")
+	_viewmodel.reload(_reloading, plan["key"], plan["cycles"])
+	_reload_id += 1
+	_reload_plan = plan
+	var id := _reload_id
+	GunStates.reload_sounds(w, plan, func(): return not dead and weapon() == w and id == _reload_id)
+	# shell by shell (trench gun): the rounds go in one loop at a time ("reload n" output)
+	for sh in plan.get("shells", []):
+		get_tree().create_timer(sh[0], false).timeout.connect(func():
+			if id == _reload_id and _reloading > 0.0 and weapon() == w:
+				var n: int = mini(mini(int(sh[1]), int(s["mag"]) - int(w["mag"])), int(w["reserve"]))
+				if n > 0:
+					w["mag"] += n
+					w["reserve"] -= n
+					changed.emit())
+
+
+# The shell loop (trench gun state 21/24) has a shoot transition: with a round in, firing
+# cuts the reload short (not in its start and end states).
+func _reload_interruptible(w: Dictionary) -> bool:
+	var win: Array = _reload_plan.get("window", [])
+	if _reloading <= 0.0 or win.size() != 2 or w["mag"] <= 0:
+		return false
+	var t: float = float(_reload_plan["time"]) - _reloading
+	return t >= win[0] and t < win[1]
 
 
 # The remake's jump must not take the player over railings and wall tops out of the
@@ -330,12 +370,14 @@ func _physics_process(delta: float) -> void:
 	_update_aim(delta, input)
 	if input.y > 0.0:
 		input.y *= BACKPEDAL   # BackpedalSpeedRatio: only the backwards part of the stick
-	var dir := (transform.basis * Vector3(input.x, 0, input.y))
 	var speed := move_speed(input)
+	var side := strafe_speed(input)
 	if game and game.level and game.level.in_water(global_position):
 		speed *= Level.WATER_MOVE_SPEED   # wading in the swamp (level.gd)
-	velocity.x = dir.x * speed
-	velocity.z = dir.z * speed
+		side *= Level.WATER_MOVE_SPEED
+	var dir := (transform.basis * Vector3(input.x * side, 0, input.y * speed))
+	velocity.x = dir.x
+	velocity.z = dir.z
 	if is_on_floor():
 		if Input.is_action_just_pressed("jump"):
 			velocity.y = JUMP
@@ -355,6 +397,9 @@ func _physics_process(delta: float) -> void:
 		wants_fire = wants_fire or Input.is_action_pressed("fire")
 	else:
 		wants_fire = wants_fire or Input.is_action_just_pressed("fire")
+	if wants_fire and _cooldown <= 0.0 and _reloading > 0.0 and _reload_interruptible(w):
+		_reloading = 0.0   # the shot cuts the shell-by-shell reload short
+		_reload_id += 1
 	if wants_fire and _cooldown <= 0.0 and _reloading <= 0.0 and not _viewmodel.slashing():
 		_fire(w, s)
 		if not s["auto"]:
@@ -429,10 +474,13 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 		return
 	w["mag"] -= 1
 	Achievements.fired(w["name"])
-	_cooldown = s["rate"] * (Perks.DBTAP_RATE if has_perk("dbtap") else 1.0)
-	_viewmodel.kick()
+	var rate_k := Perks.DBTAP_RATE if has_perk("dbtap") else 1.0
+	_cooldown = s["rate"] * rate_k
+	var last: bool = w["mag"] == 0   # fire state 17: the round that empties the magazine
+	_viewmodel.kick(last, 1.0 / rate_k)
 	if w["name"] != "flamethrower":   # FlameJet plays its own fire loop
-		Sfx.instance.weapon_fire(w["name"])
+		GunStates.fire_sounds(w, last)   # (Garand ping on the last round, Pack-a-Punch layer)
+	GunStates.rechamber_sound(w, aiming, 1.0 / rate_k, func(): return not dead and weapon() == w and _reloading <= 0.0)
 	_recoil += RECOIL * (RECOIL_AIMED if aiming else 1.0)
 	var space := get_world_3d().direct_space_state
 	# Ray Gun bolt / flamethrower cone (weapon_fx.gd) replace the hitscan
@@ -442,8 +490,10 @@ func _fire(w: Dictionary, s: Dictionary) -> void:
 		_viewmodel.muzzle_flash()
 		game.muzzle_flash(_camera, _viewmodel.muzzle_position())
 	_heat = minf(_heat + HEAT_PER_SHOT, 1.0)   # continuous fire widens the spread
-	if w["mag"] == 0:
-		reload()
+	if w["mag"] == 0:   # the reload comes once the fire (and rechamber) states are over
+		get_tree().create_timer(maxf(_cooldown, 0.0), false).timeout.connect(func():
+			if not dead and weapon() == w and w["mag"] == 0:
+				reload())
 	changed.emit()
 
 
@@ -459,7 +509,7 @@ func _fire_bullet(s: Dictionary, space: PhysicsDirectSpaceState3D) -> void:
 	var first := Vector3.INF
 	var cone := float(s.get("cone", 0.0))
 	while targets.size() < int(s.get("hits", 1)):
-		var q := PhysicsRayQueryParameters3D.create(from, from + dir * reach, 1 | 2)  # bullets ignore window blockers
+		var q := PhysicsRayQueryParameters3D.create(from, from + dir * reach, 1 | 2 | ShotBlockers.LAYER)  # bullets ignore window blockers; invisible walls stop them
 		q.exclude = exclude
 		var hit := space.intersect_ray(q)
 		if hit.is_empty():
@@ -469,7 +519,8 @@ func _fire_bullet(s: Dictionary, space: PhysicsDirectSpaceState3D) -> void:
 			first = pos
 		var target: Object = hit["collider"]
 		if not target is Zombie:
-			game.spawn_impact(pos, hit["normal"])
+			if not (target as Node).is_in_group(ShotBlockers.GROUP):   # nothing to mark on an invisible wall
+				game.spawn_impact(pos, hit["normal"])
 			reach = from.distance_to(pos)
 			break
 		var z := target as Zombie
@@ -510,7 +561,7 @@ func _cone_targets(s: Dictionary, space: PhysicsDirectSpaceState3D, from: Vector
 		if off > along * tan_half + 0.3:   # cone vs the zombie's ~0.3 m body
 			continue
 		var aim := from + dir * along + (c - from - dir * along).limit_length(maxf(off - 0.3, 0.0))
-		var q := PhysicsRayQueryParameters3D.create(from, aim, 1)   # walls only
+		var q := PhysicsRayQueryParameters3D.create(from, aim, 1 | ShotBlockers.LAYER)   # walls only
 		if not space.intersect_ray(q).is_empty():
 			continue
 		out.append([along, z, aim, false])
@@ -540,6 +591,9 @@ func _update_aim(delta: float, input: Vector2) -> void:
 	var sprinting := Input.is_action_pressed("sprint") and input.length() > 0.1
 	var on := aim_wanted and not dead and _reloading <= 0.0 and not sprinting \
 		and not _viewmodel.drinking and not _viewmodel.throwing() and not _viewmodel.slashing()
+	if on and not aiming and _viewmodel.rechambering():
+		on = false   # state 53 (bolt / pump) has no toggleAim transition: the sights wait for its end
+	_viewmodel.set_run(sprinting and not on and input.y <= 0.0)   # arms states 13-15
 	if on != aiming:
 		aiming = on
 		_viewmodel.set_aim(on)
@@ -551,6 +605,31 @@ func _update_aim(delta: float, input: Vector2) -> void:
 	var base := float(Settings.get_value("fov"))
 	var aimed := Weapons.aim_fov(weapon()) * base / 50.0
 	_camera.fov = Settings.vertical_fov(lerpf(base, aimed, smoothstep(0.0, 1.0, _aim_blend)))
+
+
+# The run state: the remake's sprint key held while moving (not aiming).
+func _running() -> bool:
+	if aiming or not Input.is_action_pressed("sprint"):
+		return false
+	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back") + stick_response(move_input)
+	return input.length() > 0.1
+
+
+# Sideways speed (Max<State>StrafeSpeed, applied to the stick's x apart from the forward
+# speed, kiwi file 0x1e7b68): walk 0.5 (5 m/s), knife/grenade/bottle... 0.5, aim 0.25;
+# running uses the remake's sprint (run 0.649 in the original).
+const WALK_STRAFE := 0.5 * MOVE_UNIT      # MaxWalkStrafeSpeed
+const ACTION_STRAFE := 0.5 * MOVE_UNIT    # MaxKnife/Grenade/Betty/Molotov/Monkey/DrinkPerkColaStrafeSpeed
+const AIM_STRAFE := 0.25 * MOVE_UNIT      # MaxAimStrafeSpeed
+func strafe_speed(input: Vector2) -> float:
+	var speed := WALK_STRAFE
+	if Input.is_action_pressed("sprint") and not aiming and input.y <= 0.0:
+		speed = SPRINT   # remake extra, forwards / sideways only
+	if _viewmodel.slashing() or _viewmodel.throwing() or _viewmodel.drinking:
+		speed = minf(speed, ACTION_STRAFE)
+	if aiming:
+		speed = minf(speed, AIM_STRAFE)
+	return speed
 
 
 # Ground speed for the current state (original per-state caps, see the constants).
@@ -767,8 +846,8 @@ func _finish_reload() -> void:
 # headshot kill points (PlayerHeadShotPoints {100,100,110,110,120,120,130,130,140}, the
 # streak before this head; the 9th and later 140) and at 3, 5, 7 (HeadshotAnnounceCount)
 # the announcer line (kiwi 0x131874): with player vox (Game.SetUsingPlayerVox(true): Shi No
-# Numa, Der Riese) the character's "killstreak1..3" (player%d_killstreak%d, player 1 in
-# solo). Elsewhere it would play HeadshotAnnounceSounds, but console.bin only has it as
+# Numa, Der Riese) the character's vox line "killstreak1..3" (vox table: chance, priority;
+# sounds player0_killstreak<n>, character 0 in solo, kiwi 0x192184). Elsewhere it would play HeadshotAnnounceSounds, but console.bin only has it as
 # "XHeadshotAnnounceSounds" (disabled): the code default "10" names no sound.
 const HEADSHOT_POINTS := [100, 100, 110, 110, 120, 120, 130, 130, 140]
 const HEADSHOT_ANNOUNCE := [3, 5, 7]
@@ -783,8 +862,8 @@ func headshot_points() -> int:
 func head_popped() -> void:
 	headshot_streak += 1
 	var i := HEADSHOT_ANNOUNCE.find(headshot_streak)
-	if i >= 0 and game != null and String(game.get("level_name")) in PLAYER_VOX_LEVELS and Sfx.instance:
-		Sfx.instance.play(Sfx.iw_hash("player1_killstreak%d" % (i + 1)))
+	if i >= 0 and game != null and String(game.get("level_name")) in PLAYER_VOX_LEVELS:
+		VoxLines.killstreak(i + 1)   # vox line "killstreak%d" (player0_killstreak<n>)
 
 
 func add_points(n: int) -> void:
@@ -813,6 +892,7 @@ func take_hit(damage: float, from := Vector3.INF) -> void:
 	_start_hit_kick(from if from != Vector3.INF else global_position - global_basis.z)
 	Sfx.instance.play("zombie_hit", -2.0)
 	Sfx.instance.play("player_pain", -4.0)
+	Heartbeat.hit(self)   # every hit: heartbeat fading over HeartbeatDurationMS (heartbeat.gd)
 	changed.emit()
 	if health <= 0.0:
 		if has_perk("revive"):
@@ -852,7 +932,7 @@ func _self_revive() -> void:
 	health = max_health
 	_revive_grace = Perks.REVIVE_GRACE
 	get_tree().create_timer(Perks.REVIVE_GRACE, false).timeout.connect(func(): _revive_grace = 0.0)
-	Sfx.instance.play("player_heartbeat")
+	Heartbeat.hit(self)
 	changed.emit()
 
 
@@ -868,7 +948,7 @@ func _update_prompt() -> void:
 	elif t is Barricade:
 		prompt = "Tieni premuto E per riparare la barricata"
 	elif t is Debris:
-		prompt = "Tieni premuto E per sgombrare [%d]" % t.cost
+		prompt = "Tieni premuto E per %s [%d]" % [t.action_text(), t.cost]   # Open Door / Clear Debris
 	elif t is Dictionary:
 		var has := weapons.any(func(w): return w["name"] == t["weapon"])
 		if has:
@@ -880,7 +960,7 @@ func _update_prompt() -> void:
 func _interaction_target():
 	var p := global_position
 	for w in game.level.windows:
-		if w.inside.distance_to(p) < INTERACT_RANGE and w.boards < Barricade.MAX_BOARDS and w.occupied_by == null:
+		if w.inside.distance_to(p) < INTERACT_RANGE and w.boards < w.max_boards and w.occupied_by == null:
 			return w
 	for b in game.level.boxes:
 		if b.global_position.distance_to(p) < INTERACT_RANGE + 0.6 and b.prompt(self) != "":
@@ -931,9 +1011,12 @@ func interact() -> void:
 	if t is Barricade:
 		if _repair_cooldown <= 0.0 and t.repair_board():
 			_repair_cooldown = 1.0
-			add_points(10)
-			Achievements.repaired(10)
-			Sfx.instance.play_at("window_repair", t.global_position)
+			# SetRepairQuota: only so many paid repairs per round (repair_quota.gd)
+			var pts := RepairQuota.current().take() if RepairQuota.current() else 10
+			if pts > 0:
+				add_points(pts)
+			Achievements.repaired(pts)
+			Sfx.instance.play_at(t.repair_sound, t.global_position)
 	elif _interact_done or _interact_hold < INTERACT_TIME:
 		return   # InteractTime: held long enough, once per press
 	elif _mark_interacted() and (t is MysteryBox or t is PerkMachine or (t is Object and t in game.level.interactables)):

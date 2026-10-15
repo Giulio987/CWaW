@@ -50,51 +50,32 @@ func _init(p := "help", m := "") -> void:
 
 
 func _ready() -> void:
-	var bg := ColorRect.new()
-	bg.color = Color(0.02, 0.02, 0.025, 1.0)
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(bg)
-	var fog := TextureRect.new()
-	var fog_path := "res://assets/textures/frontend/a04fbb00.png"
-	fog.texture = Menu.cropped(fog_path) if ResourceLoader.exists(fog_path) else null
-	fog.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	fog.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	fog.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	fog.modulate = Color(0.35, 0.35, 0.4, 0.5)
-	fog.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(fog)
+	# original page chrome (frontend_art.gd): background, blood splats, title bar, Back
+	var frame := Control.new()
+	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(frame)
+	var s := FrontendArt.unit(frame)
+	FrontendArt.background(frame, Color(0.35, 0.35, 0.4))
+	FrontendArt.blood_splats(frame, s, page.length() + 20)
+	var t: String = TITLES.get(page, page.to_upper())
+	FrontendArt.title_bar(frame, s, t.substr(0, 1) + t.substr(1).to_lower())
 
 	var root := VBoxContainer.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.offset_left = 40
 	root.offset_right = -40
-	root.offset_top = 14
-	root.offset_bottom = -14
+	root.offset_top = 52 * s
+	root.offset_bottom = -50 * s
 	root.add_theme_constant_override("separation", 8)
 	add_child(root)
-	var title := Label.new()
-	title.text = TITLES.get(page, page.to_upper())
-	title.add_theme_font_override("font", UiArt.font())
-	title.add_theme_font_size_override("font_size", 52)
-	title.add_theme_color_override("font_color", RED)
-	root.add_child(title)
 	var tabs := HFlowContainer.new()
 	tabs.add_theme_constant_override("h_separation", 6)
 	root.add_child(tabs)
 	_body = VBoxContainer.new()
 	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(_body)
-	var back := Button.new()
-	back.text = "INDIETRO"
-	back.flat = true
-	back.add_theme_font_override("font", UiArt.font())
-	back.add_theme_font_size_override("font_size", 36)
-	back.add_theme_color_override("font_color", RED)
-	back.add_theme_color_override("font_hover_color", Color(1, 0.2, 0.1))
-	back.add_theme_color_override("font_focus_color", Color(1, 0.2, 0.1))
-	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	back.pressed.connect(close)
-	root.add_child(back)
+	var back := FrontendArt.back_button(self, s, close)
 	match page:
 		"help":
 			_tab(tabs, "Gioco", _help.bind("game"))

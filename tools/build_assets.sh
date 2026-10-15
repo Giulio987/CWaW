@@ -22,18 +22,27 @@ for l in nacht verruckt shinonuma derriese; do
   $PY -I tools/wall_yaw.py "$A/levels/$l/entities.json" $E/environment/environment.group.bin
   $PY -I tools/wall_yaw.py "$A/levels/$l/entities.json" $E/environment/environment.group.bin $D
   $PY -I tools/navmesh.py "$A/levels/$l/navmesh.json" $E/environment/environment.group.bin
+  $PY -I tools/route_shortcuts.py "$A/levels/$l/shortcuts.json" $E/environment/environment.group.bin
   $PY -I tools/animators.py "$A/levels/$l/animators.json" $E/environment/environment.group.bin
+  $PY -I tools/camera_paths.py "$A/levels/$l/camera_paths.json" $E/environment/environment.group.bin
   lua tools/lua/dump_waves.lua "$A/lua/levels/$l/${l}_full.lua" 0 40 > "$A/levels/$l/waves.json"
   lua tools/lua/dump_level.lua "$A/lua/ingame/scripts" "$A/lua/levels/$l/$l.lua" > "$A/levels/$l/level.json"
 done
 $PY -I tools/resolve_names.py
 $PY -I tools/export_gltf.py "$A/models" $G
 $PY -I tools/material_cels.py "$A/material_cels.json" $G
+FX=extracted/main/ingame/effects/effects.group.bin
+for l in nacht verruckt shinonuma derriese; do
+  $PY -I tools/ent_fx.py "$A/levels/$l/ent_fx.json" extracted/$l/levels/$l/environment/environment.group.bin $FX
+done
+$PY -I tools/ent_fx.py --specs "$A/effect_specs.json" $FX
 $PY -I tools/export_characters.py "$A/characters" $G > /dev/null
 $PY -I tools/pair_arms.py > /dev/null
+$PY -I tools/weapon_states.py > /dev/null
 $PY -I tools/sound_index.py "$A/sounds/index.json"
 $PY -I tools/achievements.py "$A/achievements.json"
 $PY -I tools/fonts.py extracted/main/fixed/fixed.group.bin "$A/fonts"
 $PY -I tools/frontend_text.py "$A/frontend_text.json"
+$PY -I tools/hit_fx.py "$A/effects/hit_fx.json"
 sh tools/intro_video.sh   # needs Godot (OGV writer); assets/videos/intro.ogv
 echo "assets rebuilt"

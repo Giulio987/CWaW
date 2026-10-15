@@ -23,6 +23,12 @@ const OPEN_SOUND := {
 	"derriese": {"": "", "Link_G_gT_Trigger": "c82c1277", "Link_L_lTop_Trigger": "c82c1277"},
 }
 
+# The prompt text is in the same ASMs: "Clear Debris" (5952252b) in the rubble ones
+# (7c9e04ce, 105ac577, eb0e6081, e05f4ec5: the entities with the c82c1277 sound above),
+# "Open Door" (fa34aba6) in all the others.
+const CLEAR_DEBRIS := ["BackSofaTrigger", "FrontSofaTrigger", "AmerDwn_AmerUp1_Trigger",
+	"GerSrt_GerUp1_Trigger", "Link_StRm_SwRm_no1_Trigger", "Link_G_gT_Trigger", "Link_L_lTop_Trigger"]
+
 var cost := 1000
 var entity := ""
 var open_sound := ""   # played when bought (OPEN_SOUND)
@@ -147,6 +153,14 @@ func nearest_point(p: Vector3) -> Vector3:
 				best_d = p.distance_to(q)
 				best = q
 	return best
+
+
+# What buying it does, for the prompt: "Clear Debris" or "Open Door" (see CLEAR_DEBRIS).
+func action_text() -> String:
+	for n in CLEAR_DEBRIS:
+		if String(n).to_lower() == entity.to_lower():
+			return "sgombrare le macerie"
+	return "aprire la porta"
 
 
 func open() -> void:

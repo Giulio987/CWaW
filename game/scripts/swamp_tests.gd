@@ -4,7 +4,8 @@
 #   from the original navmesh (magenta), zombie spawns (red), swamp spawns (blue), windows
 # rise: swamp spawns picked by the spawner, a "_water" zombie rising (front/side shots)
 # spawns [--open-all]: every spawn reaches its window (walk-in + path length) -> OK/FAIL
-# walk --spawn <name> [--side-off x,y,z]: follow one zombie to its window
+# walk --spawn <name> [--side-off x,y,z]: follow one zombie to its window (or to its
+#   boardless swamp window, then CHASE)
 # zipline [--zip-log]: switch, gate, ride up, ride down killing a zombie -> OK/FAIL
 # profile --line x1,z1,x2,z2 [--hy y,..]: world / nav floor / navmesh heights along a line
 # wade: player and a zombie in the doctors' swamp: bed height, speed x0.5, grenade on the bed
@@ -375,22 +376,37 @@ static func _spawns(at: Node, game: Game) -> void:
 	var map := game.player.get_world_3d().navigation_map
 	var worst := 0.0
 	var bad := 0
+	var waypoints := 0
 	for c in game._spawn_candidates(game._areas.keys()):
 		var win: Barricade = game._win_by_name.get(c["window"])
-		if win == null:
-			continue
+		# boardless swamp "windows" (Zombie.waypoint): the zombie walks to that point
+		var goal := Vector3.INF
+		var goal_name := ""
+		if win:
+			goal = win.outside
+			goal_name = win.name
+		elif c["window"] != "" and game.level.has_entity(c["window"]):
+			goal = game.level.entity_transform(c["window"]).origin
+			goal_name = "%s (waypoint)" % c["window"]
+			waypoints += 1
+		else:
+			continue   # swamp spawn: rises and chases
 		var o := game.level.entity_transform(c["spawn"]).origin
-		var e := game._spawn_entry(o, win.outside)
-		var path := NavigationServer3D.map_get_path(map, e, win.outside, true)
+		var e := game._spawn_entry(o, goal)
+		var path := NavigationServer3D.map_get_path(map, e, goal, true)
 		var l := o.distance_to(e)
 		for i in range(1, path.size()):
 			l += path[i].distance_to(path[i - 1])
-		var end_off := path[-1].distance_to(win.outside) if path.size() > 0 else 99.0
+		var end_off := path[-1].distance_to(goal) if path.size() > 0 else 99.0
 		var ok := end_off < 1.5 and l < 60.0
+		if not ok and win == null and game._nav_detour(e, goal):
+			ok = true   # game.gd: a waypoint only reached the long way round -> chase from the entry
+			goal_name += " detour->chase"
 		if not ok:
 			bad += 1
 		worst = maxf(worst, l)
-		print("[swamp] spawn %-32s -> %-28s walk_in=%5.1fm path=%6.1fm end_off=%5.1f %s" % [c["spawn"], win.name, o.distance_to(e), l, end_off, "ok" if ok else "BAD"])
+		print("[swamp] spawn %-32s -> %-28s walk_in=%5.1fm path=%6.1fm end_off=%5.1f %s" % [c["spawn"], goal_name, o.distance_to(e), l, end_off, "ok" if ok else "BAD"])
+	print("[swamp] spawns: %d boardless swamp windows as waypoints" % waypoints)
 	print("[swamp] spawns: %d bad, longest %.1fm %s" % [bad, worst, "OK" if bad == 0 else "FAIL"])
 
 
@@ -414,7 +430,7 @@ static func _walk(at: Node, game: Game) -> void:
 		we.environment.fog_enabled = false
 	print("[swamp] walk %s from %s entry=%s window=%s" % [sp, z.global_position.snapped(Vector3(0.01, 0.01, 0.01)), z.entry, z.window.name])
 	var map := game.get_world_3d().navigation_map
-	var path := NavigationServer3D.map_get_path(map, z.entry if z.entry != Vector3.INF else z.global_position, z.window.outside, true)
+	var path := NavigationServer3D.map_get_path(map, z.entry if z.entry != Vector3.INF else z.global_position, z.walk_goal(), true)
 	print("[swamp] walk path %s" % [Array(path).map(func(v): return v.snapped(Vector3(0.1, 0.1, 0.1)))])
 	var k := 0
 	while z.life < 40.0 and z.state == Zombie.State.TO_WINDOW:
@@ -425,7 +441,9 @@ static func _walk(at: Node, game: Game) -> void:
 		print("[swamp] walk t=%.1f pos=%s floor=%s state=%s" % [z.life, z.global_position.snapped(Vector3(0.01, 0.01, 0.01)), (fl["collider"] as Node).name if fl else "-", Zombie.State.keys()[z.state]])
 		k += 1
 		await _wait(at, 2.5)
-	print("[swamp] walk end t=%.1f state=%s reached=%.1f dist=%.1f %s" % [z.life, Zombie.State.keys()[z.state], z.reached_window, z.global_position.distance_to(z.window.outside), "OK" if z.reached_window > 0.0 else "FAIL"])
+	# a boardless swamp window (waypoint): reached, then straight into the chase
+	var ok := z.reached_window > 0.0 and (z.waypoint == Vector3.INF or z.state in [Zombie.State.CHASE, Zombie.State.ATTACK])
+	print("[swamp] walk end t=%.1f state=%s reached=%.1f dist=%.1f waypoint=%s %s" % [z.life, Zombie.State.keys()[z.state], z.reached_window, z.global_position.distance_to(z.walk_goal()), z.waypoint != Vector3.INF, "OK" if ok else "FAIL"])
 
 
 # The player wades on the swamp bed (original navmesh) at WaterMoveSpeedModifier;

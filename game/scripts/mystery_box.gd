@@ -204,6 +204,9 @@ func prompt(player: Player) -> String:
 			return "Premi E per la Mystery Box [%d]" % COST
 		State.OFFERED, State.LOWERING:
 			if player == _buyer:
+				# the box ASM's "Trade Weapons" (0b5844dc): the offered gun replaces the one in hand
+				if player.weapons.size() >= 2 and not player.weapons.any(func(w): return w["name"] == offered):
+					return "Premi E per scambiare le armi: %s" % Weapons.display(offered)
 				return "Premi E per prendere %s" % Weapons.display(offered)
 	return ""
 

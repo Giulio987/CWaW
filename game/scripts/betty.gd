@@ -165,7 +165,7 @@ func explode() -> void:
 	var pos := global_position
 	var res := Explosion.blast(game, pos, by, BLAST)
 	last_result = res
-	Explosion.frag_effect(game, pos + Vector3.DOWN * 0.4)
+	HitFx.play(game, Transform3D(Basis.IDENTITY, pos), HitFx.EXPLOSION)   # splash entity 8e5dac4d: spec list ee72b935 (hit_fx.gd)
 	Sfx.instance.play_at(EXPLOSION_SOUND, pos, 4.0)
 	if int(res.get("killed", 0)) >= 2:
 		Achievements.unlock(ACH_TWO_AT_ONCE)

@@ -144,7 +144,14 @@ def main(out_dir, paths):
             # the box rig 65698795) hold the same animations, and Godot renamed the copies
             # b83ef4012, b83ef4013; the copy from the skin's own group wins
             added = set()
-            for name, a, names, adir in sorted(anims.get(skin.skel, []), key=lambda x: x[3] != gdir):
+            cands = anims.get(skin.skel, [])
+            if not cands:
+                # a rig whose skeleton has no animations of its own uses those of a skeleton of
+                # its group with the same bones (Verrückt's barricades 4a7f842b / 9a6665e4 /
+                # 9a707fea: skeletons identical to aae9b3f6, whose Verrückt animations they play)
+                cands = [x for h, lst in anims.items() if h != skin.skel and (gdir, h) in group_skels
+                         and group_skels[(gdir, h)].names == skel.names for x in lst if x[3] == gdir]
+            for name, a, names, adir in sorted(cands, key=lambda x: x[3] != gdir):
                 if (names is None or names == skel.names) and name not in added:
                     added.add(name)
                     add_animation(w, f"{name:08x}", a, joints)

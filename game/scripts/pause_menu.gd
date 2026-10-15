@@ -1,5 +1,5 @@
-# In-game pause menu (Esc on Mac, pause button on touch): Riprendi,
-# Impostazioni (sensitivity, invert Y, FOV, volumes - saved by Settings),
+# In-game pause menu (Esc on Mac, pause button on touch): Riprendi, Opzioni (ig_options:
+# Impostazioni with sensitivity, invert Y, FOV, volumes, brightness - saved by Settings - and Aiuto),
 # Torna al menu principale (with confirmation), Modalità foto (debug: the game stays
 # paused with no menu over it, the mouse still looks around, a corner line shows map,
 # position and view direction so a screenshot says where it was taken).
@@ -29,7 +29,8 @@ func _ready() -> void:
 	add_child(_shade)
 	_pages["main"] = _page("PAUSA", [
 		["Riprendi", close],
-		["Impostazioni", func(): _show("settings")],
+		# ig_pause "options" -> ig_options (Settings, Help, Default Settings: frontend_options.gd)
+		["Opzioni", func(): _show("options")],
 		# original ig_pause: localleaderboard, resetlevel (with ig_resetlevelyesno)
 		["Classifica locale", func(): add_child(ExtrasScreen.new("leaderboard", String(game.get("level_name")) if game else ""))],
 		["Ricomincia livello", func(): _show("restart")],
@@ -151,7 +152,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			close()
 		else:
 			Settings.save()
-			_show("main")
+			_show(FrontendOptions.back_page(self))
 
 
 func _to_main_menu() -> void:
@@ -223,7 +224,7 @@ func _settings_page() -> VBoxContainer:
 	box.add_theme_constant_override("separation", 10)
 	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(box)
-	box.add_child(_title("IMPOSTAZIONI", 66))
+	box.add_child(_title("IMPOSTAZIONI", 56))
 	var grid := GridContainer.new()
 	grid.columns = 3
 	grid.add_theme_constant_override("h_separation", 24)
@@ -244,14 +245,32 @@ func _settings_page() -> VBoxContainer:
 	_slider(grid, "Volume generale", "master_volume", 0.0, 1.0, 0.05, "pct")
 	_slider(grid, "Volume effetti", "effects_volume", 0.0, 1.0, 0.05, "pct")
 	_slider(grid, "Volume musica", "music_volume", 0.0, 1.0, 0.05, "pct")
+	# fe_settings / ig_settings se_brightnessslider (Settings.apply_brightness)
+	_slider(grid, "Luminosità", "brightness", 0.0, 1.0, 0.01, "pct")
 	# toggleDifficulty: Recruit / Regular, used from the next game (Game.difficulty)
 	_check(grid, "Difficoltà Recluta (prossima partita)", "recruit")
 	FrontendOptions.add_rows(self, grid, box)   # Detail Level, Auto-Pause, Default Settings, reset
 	var back := _button("Indietro", func():
 		Settings.save()
-		_show("main"))
+		_show("options"))
 	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	box.add_child(back)
+	# fe_settings / ig_settings note (44ee966e): a bottom frame from x 160 (480x320 units)
+	var note := Label.new()
+	note.name = "headphones"
+	note.text = ExtrasScreen.text("headphones")
+	note.top_level = true
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	note.add_theme_font_size_override("font_size", 13)
+	note.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+	note.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(note)
+	box.move_child(note, 0)   # top_level: out of the layout; Indietro stays the last child (frontend_options.gd)
+	var vp := get_viewport().get_visible_rect().size if get_viewport() else Vector2(1280, 720)
+	var u := vp.y / 320.0
+	note.position = Vector2(190 * u, vp.y - 20)
+	note.size = Vector2(vp.x - 220 * u, 18)
+	box.offset_bottom = -24   # the page content above the note
 	return box
 
 

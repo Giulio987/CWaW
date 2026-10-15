@@ -27,7 +27,7 @@ const HAND_MODEL := "res://assets/characters/ingame/player/c262600f.glb"   # ski
 const HAND_ANIM := "0f6787cc"
 # splash 6aba17b5 (Explosion.blast config: flat 250 inside 3 m, fire: no legs off)
 const SPLASH := {
-	"radius": 3.0, "max_damage": 250.0, "min_damage": 250.0, "kill_radius": 0.0, "los_free": 2.4,
+	"radius": 3.0, "max_damage": 250.0, "min_damage": 250.0, "kill_radius": 0.0, "los_free": 2.4, "damage_type": 5,
 	"crawl_chance": 0.0, "gib_chance": 0.0, "head_chance": 0.0,
 	"player_radius": 0.0, "player_damage": 0.0, "shake": 0.4, "shake_radius": 8.0,
 }

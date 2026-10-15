@@ -93,9 +93,12 @@ func load_level(name: String) -> void:
 	_build_debris()
 	_build_wall_buys()
 	_build_boxes()
+	MapProps.build(self)   # map_props.gd: box stands, Der Riese wall panel
 	_build_perks()
 	_build_traps()
 	_build_power_doors()
+	ShotBlockers.build(self)     # invisible walls and ceilings against bullets/grenades
+	RouteShortcuts.build(self)   # zombie jumps down / climbs up (CRouteShortcut)
 	if has_entity("TeleporterMainFrame"):
 		teleporters = TeleporterNetwork.new()
 		teleporters.name = "Teleporters"
@@ -1071,6 +1074,7 @@ func _maybe_light_cone(mi: MeshInstance3D, surface: int) -> void:
 			sm.set_shader_parameter("albedo_tex", mat.albedo_texture)
 			mi.set_surface_override_material(surface, sm)
 			_add_cel_anim(sm, mat)
+			IwFx.apply_fader(level_name, mi, sm)   # the original CIwAmbientFaderSpec, if any
 			var thin := size.min_axis_index()
 			# upright cards only: flat ground glows (Shi No Numa's 13 m 41a63f86) stay flat
 			if thin != Vector3.AXIS_Y and size[thin] < 0.2 * size[size.max_axis_index()]:
@@ -1086,6 +1090,7 @@ func _maybe_light_cone(mi: MeshInstance3D, surface: int) -> void:
 	bm.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y if size.y > 1.2 * maxf(size.x, size.z) * 0.5 and size.y > 1.0 else BaseMaterial3D.BILLBOARD_ENABLED
 	mi.set_surface_override_material(surface, bm)
 	_add_cel_anim(bm, mat)
+	IwFx.apply_fader(level_name, mi, bm)
 
 
 # A flat soft shaft (one card, or a few parallel ones) still reads as a sheet from
