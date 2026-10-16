@@ -37,6 +37,7 @@ in other sites.
   - **Python 3**, **ffmpeg**, **Java** (for unluac) and **Lua**: `brew install python ffmpeg openjdk lua`
 - Your copy of the game: a Call of Duty: Zombies 1.5.0 `.ipa` file (see above)
 - For iPhone: **Xcode** (from the App Store), an Apple ID, a cable and Godot's iOS export templates
+- For Android: **JDK 17**, the **Android SDK** (e.g. from Android Studio) and Godot's Android export templates
 
 ## Installation
 ```sh
@@ -66,6 +67,16 @@ export preset for the build only (`game/export_presets.cfg` is always restored).
 With a free Apple ID the app expires after **7 days**: it has to be signed and installed again (step 4). With the
 Apple Developer Program (€99/year) it lasts a year.
 
+## Building for Android
+1. **Godot Android templates**: the same *Editor → Manage Export Templates → Download and Install* as for iPhone.
+2. **Godot editor settings** (*Editor → Editor Settings → Export → Android*): set the *Java SDK Path* (JDK 17) and the
+   *Android SDK Path*; Godot creates its own debug keystore there (outside the repository).
+3. **Build**: `tools/build_android.sh [--lang en|it]` → `build/CWaW.apk` (arm64, signed with the debug keystore).
+4. **Install**: `adb install -r build/CWaW.apk` with the phone connected (*Developer options → USB debugging*), or copy
+   the APK to the phone and open it (allow installing unknown apps).
+
+The Android version is new: so far it has only been tried on the emulator (Pixel 8 Pro, arm64).
+
 ## Troubleshooting
 - **Java missing** (unluac fails): `brew install openjdk` and make `java` available on your `PATH` (Homebrew prints
   the command to do so after installing).
@@ -83,9 +94,9 @@ extracted/            contents of the .dz archives (*.group.bin groups; not in t
 game/                 Godot project: scripts/ (game engine), shaders/, scenes/, tools/ (previews)
 game/assets/          data converted from the original game (not in the repository): textures, sounds,
                       lua (decompiled scripts), lua_bytecode, models, characters, levels
-tools/                extractors and converters (Python), build_assets.sh, build_ios.sh, run_godot.sh
+tools/                extractors and converters (Python), build_assets.sh, build_ios.sh, build_android.sh, run_godot.sh
 analysis/             analysis notes and dumps
-build/                iOS export (not in the repository)
+build/                iOS and Android exports (not in the repository)
 ```
 
 ## License
@@ -168,7 +179,7 @@ Gameplay in `game/scripts/`: `level.gd` (map, collisions, navmesh, entities), `b
 | Player footsteps | ✅ | as in the original code (player update, kiwi `0x1a1f88`): a step when the timer expires and you are moving, the `WalkingFootstepSounds` (`player_footstep_walk3/4`) sounds or, on water, `WalkingFootstepWaterSounds` (`water_walk1/2`) in turn; interval = `FootstepSpeedMultiplier` / (\|vx\|+\|vz\|) in the player's frame (in water, at half speed, twice as long); volume/pitch from the `CIwSoundSpec`s (0x599, 0x0c00); no zombie footsteps (the original has none); test `--footstep-test` (nacht, shinonuma) |
 | Achievements | ✅ | the 106 `CAchievementResource`s of `fixed/achievements/*.group.bin` (`tools/achievements.py` → `assets/achievements.json`: id, points, names/descriptions from the localization, condition class and original statistics); unlocked as in the scripts (Lua `Game.SetAchievement`: radio, dentist's chair, generator, fly trap; telephone) and from the statistics (kills, dismemberments, rounds, perks, Pack-a-Punch, teleports, traps, grenades...); 5 s popup (`AchievementMsgTimeMS`) with the `achievement` sound, saved in `user://achievements.cfg` (tests use `achievements_test.cfg`), list from the main menu and the pause menu with names/descriptions in Italian; some not obtainable here (co-op, tutorial...: `Achievements.UNAVAILABLE`); Wunderkind (108, `CAchievementWunder`): global `raygun`/`wunderwaffe`/`monkeybomb.purchased` + achievements 89, 48, 69, 1; `scripts/achievements.gd`, test `--achievement-test` |
 | Power-ups, HUD, game over, saves | ✅ | drops like `CPickupManager` (kiwi 0xf36b8): 1.9 % per kill (`PickupDropOnDeathProbability`), max 4 per round, forced drop beyond 3000 points since the last one (`PickupPointsThreshold`), on Der Riese also more than 10 kills between two drops (`PickupKillThreshold` with `SetUsingDifficultyTweaks`), no drop within 1 m of another (`PickupNoSpawnCheckRadius` 400), no Double Points/Insta-Kill if already active (the Carpenter stays on all maps); `CGuiFramePowerup` icons from the HUD atlas with seconds left, blinking in the last 5 s (`PowerupGlowDurationMs`/`PeriodMs` 750), 4 s message (`PickupMessageTimeMs`); headshot streak icon "xN" (`headShot`) and `repair` icon while repairing a barricade; top right, like `hud_guns`/`ammos_container`, the icon of the weapon in hand (HUD atlas; tapping/clicking it switches weapon), the magazine drawn as in the original (`ClipVertBar` bars up to 20 rounds, `ClipHoriBar` rows beyond that, bitmap shells/bullets for shotguns and bolt-action rifles), the reserve as a number, "No Ammo", the flamethrower tank; original frame layout (points with the red splat, stacked perks and round tallies at the top left, power-ups at the top, prompts at the top center, message at 42 % of the height, scale 2); `CGuiFrameAimingReticle` crosshair as large as the current spread, red when the aim ray hits a zombie (flag +0x21 of the aiming component) (`scripts/weapon_hud.gd`, `aiming_reticle.gd`, test `--hud-weapon-test`); texts "Trade Weapons" at the box, "Open Door"/"Clear Debris" per ASM, "The door must be opened first" at the flogger; damage streaks `DamageBitmapTop/Bottom`, proximity arrows (`CGuiFrameProximityIndicator`), blinking ammo (`LowClipPercentage` 35, `LowAmmoPercentage` 20, `AmmoBlinkTime` 500), "Round 1" at the start (`ShowStartGameMessage(4000)`), with the 1 s fade from black of the `CGuiFrameGameFader` "fader" (`scripts/game_fader.gd`); Nuke and Carpenter as `CRadialEffectNuke`/`CRadialEffectCarpenter` waves (kiwi 0x18f0d8/0x1cd72c, `scripts/radial_effect.gd`): sphere growing at 15 m/s from the power-up's position for 5 s, killing (no per-kill points, with "flamethrower" flames on the body) or repairing every target it reaches and everything else at the end; 400 points only with more than 4 kills, 200 if it repaired something; fireball from emitter `c11b0e78`; every window reached runs Der Riese's `repairAll` state (clip 68af85c2 at speed 0.6 = 2.9 s, sound 27be06a0, `barricade.gd` `carpenter_repair`); game over like the original (kiwi 0x1b2f04/0x1b318c): immediately "Game Over" + "You Have Survived N Rounds" (`ig_gameover_dead`) and the `nuke_gameover` wave from the player (5 m/s for 8 s), after 3 s a camera fly-through along the map's `CCameraPath` EndCamera1..5 (`cam_flythrough`, `tools/camera_paths.py` → `camera_paths.json`, `scripts/end_camera.gd`), `gameover_intro` music and `ig_gameover` with statistics + per-map local leaderboard (`user://leaderboard.cfg`); test `--autotest 100 --endgame-test nuke|carpenter`; game saved in `user://savegame.json` (round, points, weapons, perks, areas/debris, power, box with teddy bear counters, teleporters, zipline, window boards, active and dropped power-ups, traps, easter eggs, fly trap, per-game achievement statistics; new systems: nodes in the "savable" group with `save_state()`/`load_state()`, see `save_game.gd`) when quitting to the menu, going to the background, losing focus (auto pause) and every round, "Riprendi la carneficina" (resume the carnage) in the menu; tests `--save-test write|check --resume`, `--hud-test`, `--gameover-test` (`scripts/save_tests.gd`) |
-| Missing | ⏳ | iOS build |
+| Android build | 🧪 | `tools/build_android.sh`: works on the emulator, not yet tested on real phones |
 
 ## Formats – notes
 - Resource in a group: `u32 size, u32 nameHash, body`. Polymorphic classes (e.g. `CIwSoundData`) instead have `u32 subclassHash` in place of the name, and the name is the first u32 of the body.
